@@ -58,11 +58,47 @@ export function validateStates(states, owner, partner) {
   assert(states.completed.balances.every(b => b.balance === 0));
 }
 
+export function contrastOnWhite(color) {
+  const match = /^rgba?\(\s*([\d.]+)[, ]+([\d.]+)[, ]+([\d.]+)(?:\s*[,/]\s*([\d.]+))?\s*\)$/.exec(color);
+  assert(match, `Unsupported computed text color: ${color}`);
+  const alpha = match[4] === undefined ? 1 : Number(match[4]);
+  const rgb = match.slice(1, 4).map(Number);
+  assert(alpha >= 0 && alpha <= 1 && rgb.every(v => v >= 0 && v <= 255));
+  const linear = rgb.map(v => (v * alpha + 255 * (1 - alpha)) / 255).map(v => v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4);
+  return 1.05 / (linear[0] * 0.2126 + linear[1] * 0.7152 + linear[2] * 0.0722 + 0.05);
+}
+
+export function assertReachableGeometry(m) {
+  assert(m.enabled && m.focused, 'Control must be enabled and keyboard-focused');
+  assert(m.width > 0 && m.height > 0, 'Control needs a nonempty box');
+  assert(m.left >= m.safeLeft && m.right <= m.safeRight && m.top >= m.safeTop && m.bottom <= m.safeBottom, 'Entire control must fit inside visual viewport above fixed navigation/header');
+  assert(m.hits.length === 5 && m.hits.every(Boolean), 'Control center and inset corners must not be covered by another element');
+}
+
+// Run only as a locator evaluation; this function deliberately has no module closures.
+export function measureControl(element) {
+  const r = element.getBoundingClientRect(), vv = window.visualViewport;
+  const safeLeft = vv?.offsetLeft ?? 0, safeRight = safeLeft + (vv?.width ?? innerWidth);
+  let safeTop = vv?.offsetTop ?? 0, safeBottom = safeTop + (vv?.height ?? innerHeight);
+  if (!element.closest('[role="dialog"]')) {
+    for (const overlay of document.querySelectorAll('.bottom-nav, .page-header')) {
+      const style = getComputedStyle(overlay), box = overlay.getBoundingClientRect();
+      if (!['fixed', 'sticky'].includes(style.position) || style.display === 'none' || style.visibility === 'hidden') continue;
+      if (overlay.matches('.bottom-nav')) safeBottom = Math.min(safeBottom, box.top);
+      else if (box.top <= safeTop) safeTop = Math.max(safeTop, box.bottom);
+    }
+  }
+  const dx = Math.min(3, r.width / 4), dy = Math.min(3, r.height / 4);
+  const points = [[r.left + r.width / 2, r.top + r.height / 2], [r.left + dx, r.top + dy], [r.right - dx, r.top + dy], [r.left + dx, r.bottom - dy], [r.right - dx, r.bottom - dy]];
+  return { left: r.left, right: r.right, top: r.top, bottom: r.bottom, width: r.width, height: r.height, safeLeft, safeRight, safeTop, safeBottom, enabled: !element.matches(':disabled, [aria-disabled="true"]'), focused: document.activeElement === element, hits: points.map(([x, y]) => { const hit = document.elementFromPoint(x, y); return hit === element || element.contains(hit); }) };
+}
+
 async function main() {
   process.env.LW_EVIDENCE_DIR ||= path.join(os.tmpdir(), 'lw_pw', 'shots', `v12-outing-states-${Date.now()}`);
   const h = await import('./harness.mjs');
   const inventory = [], checks = [], errors = []; let browser;
-  const limitations = ['Synthetic GET detail rendering only; no server ACL, mutation, capacity or login-flow proof', 'No synthetic social detail requests; no settlement confirmation submitted', 'Screenshots require manual review; no visual acceptance implied', 'Loading/error, 390px, short viewport, zoom, reduced motion, keyboard and real device remain separate gates'];
+  const limitations = ['Synthetic GET detail rendering only; no server ACL, mutation, capacity or login-flow proof', 'No synthetic social detail requests; no settlement confirmation submitted', 'Screenshots are explicit viewport-only captures requiring manual review; no full-page or visual acceptance implied', 'Control focus and Tab return are checked; comprehensive keyboard/assistive technology acceptance is not proved', 'Loading/error, 390px, short viewport, zoom, reduced motion and real device remain separate gates'];
+  const counts = () => ({ mainStates: inventory.filter(s => /-main-/.test(s.screenshot)).length, screenshots: inventory.length, checks: checks.length });
   try {
     assert(process.env.LW_BASELINE_FIXTURE, 'LW_BASELINE_FIXTURE required');
     const fixture = JSON.parse(await readFile(process.env.LW_BASELINE_FIXTURE, 'utf8'));
@@ -112,14 +148,65 @@ async function main() {
           await page.evaluate(() => document.fonts.ready); await h.noOverflow(page);
           const shot = async suffix => { const file = `N02-${name}-${suffix}-${viewport.width}`; await h.screenshot(page, file, { fullPage: false }); inventory.push({ state: name, viewport, screenshot: `${file}.png`, review: 'pending manual review', fixture: 'synthetic GET detail only', na: name === 'invited' || name === 'declined' ? 'ledger and settlement controls not applicable to invitation-only DTO' : name === 'completed' ? 'payment confirmation not applicable after completion' : 'other phases and loading/error not represented by this state' }); };
           await shot('main');
-          if (name === 'settling-pending-recipient') {
-            await page.getByRole('navigation', { name: 'Nội dung sổ chia tiền', exact: true }).getByRole('button', { name: /^Thanh toán/ }).click();
+          const reach = async (control, label) => {
+            assert.equal(await control.count(), 1, `${name}: unique ${label}`);
+            assert(await control.isEnabled(), `${name}: enabled ${label}`);
+            await control.evaluate(el => el.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' }));
+            let geometry = await control.evaluate(measureControl);
+            if (!(await control.evaluate(el => Boolean(el.closest('[role="dialog"]'))))) {
+              await page.evaluate(({ delta }) => window.scrollBy({ top: delta, behavior: 'instant' }), { delta: (geometry.top + geometry.bottom - geometry.safeTop - geometry.safeBottom) / 2 });
+            }
+            await control.focus();
+            // Traverse away and back without activation; no synthetic write can be sent.
+            await page.keyboard.press('Tab'); await page.keyboard.press('Shift+Tab');
+            geometry = await control.evaluate(measureControl);
+            assertReachableGeometry(geometry);
+            await control.click({ trial: true });
+            assertReachableGeometry(await control.evaluate(measureControl));
+            checks.push(`${name} ${viewport.width}: ${label} scrolled fully visible, five-point hit-tested, Tab-return focused and trial-clickable`);
+          };
+          if (name === 'invited' || name === 'declined') {
+            const style = await page.locator('.outing-invitation .outing-eyebrow').evaluate(el => {
+              const s = getComputedStyle(el), card = getComputedStyle(el.closest('.outing-invitation'));
+              return { color: s.color, fontSize: s.fontSize, fontWeight: s.fontWeight, opacity: s.opacity, background: card.backgroundColor };
+            });
+            assert.equal(style.background, 'rgb(255, 255, 255)', 'Invitation contrast assumes a white card'); assert.equal(Number(style.opacity), 1);
+            const ratio = contrastOnWhite(style.color);
+            assert(ratio >= 4.5, `${name}: eyebrow ${style.color}, ${style.fontSize}/${style.fontWeight} contrast ${ratio.toFixed(2)} on white must be >=4.5`);
+            checks.push(`${name} ${viewport.width}: eyebrow ${style.fontSize}/${style.fontWeight}, contrast ${ratio.toFixed(2)} on white >=4.5`);
+            if (name === 'invited') for (const label of ['Nhận lời tham gia', 'Từ chối']) await reach(button(label), label);
+          }
+          if (name === 'collecting-empty') for (const label of ['Thêm chi phí', 'Đề nghị chốt sổ']) await reach(button(label), label);
+          if (name === 'review-one-left' || name === 'ordinary-closed') {
+            if (name === 'review-one-left') await reach(button('Chưa đồng ý'), 'Chưa đồng ý');
+            await reach(button('Kiểm tra xong, đồng ý chốt'), 'Kiểm tra xong, đồng ý chốt');
+            await shot('review-approve-reachable');
+          }
+          if (name !== 'invited' && name !== 'declined') {
+            const sections = page.getByRole('navigation', { name: 'Nội dung sổ chia tiền', exact: true });
+            const history = button('Lịch sử', sections);
+            await reach(history, 'Lịch sử tab (horizontal scroll)');
+            await history.click();
+            assert.equal(await history.getAttribute('aria-pressed'), 'true');
+            await page.getByRole('heading', { name: 'Dấu mốc và khoản đã ghi', exact: true }).waitFor();
+            await h.noOverflow(page); await shot('history-reachable');
+            const payment = sections.getByRole('button', { name: /^Thanh toán/ });
+            await reach(payment, 'Thanh toán tab'); await payment.click();
+          }
+          if (name === 'settling-pending-recipient' || name === 'restricted') {
             await page.getByText('Đã báo chuyển · Chờ xác nhận', { exact: true }).waitFor();
-            assert(await button('Xác nhận đã nhận').isEnabled()); await absent('Hủy lời báo chuyển');
+            assert.match(await page.locator('.outing-hero__balance').innerText(), /100/);
+            await absent('Hủy lời báo chuyển');
             await h.noOverflow(page); await shot('pending');
+            await reach(button('Chưa nhận · Từ chối'), 'Chưa nhận · Từ chối');
+            await reach(button('Xác nhận đã nhận'), 'Xác nhận đã nhận');
+            await shot('pending-buttons-reachable');
             await button('Xác nhận đã nhận').click();
             const dialog = page.getByRole('dialog', { name: 'Bạn đã thực sự nhận được tiền?', exact: true });
-            await dialog.getByText(/chưa thể đảo ngược/).waitFor(); assert(await button('Tôi đã nhận đủ khoản này', dialog).isEnabled());
+            await dialog.getByText(/chưa thể đảo ngược/).waitFor();
+            await reach(button('Đóng', dialog), 'dialog Đóng');
+            await reach(button('Quay lại kiểm tra', dialog), 'dialog Quay lại kiểm tra');
+            await reach(button('Tôi đã nhận đủ khoản này', dialog), 'dialog Tôi đã nhận đủ khoản này (unsubmitted)');
             await h.noOverflow(page); await shot('confirm-warning-unsubmitted');
           }
           checks.push(`${name} ${viewport.width}: expected display and permission assertions`);
@@ -127,11 +214,11 @@ async function main() {
       }
     }
     assert.deepEqual(errors, []);
-    await h.writeResult({ ok: true, auth: 'ordinary API login in memory for visual context only; not login-flow proof; requires existing friends member', checks, inventory, errors, limitations });
+    await h.writeResult({ ok: true, auth: 'ordinary API login in memory for visual context only; not login-flow proof; requires existing friends member', counts: counts(), checks, inventory, errors, limitations });
     console.log(`Display assertions completed; manual visual review pending: ${h.evidenceDir}`);
   } catch (error) {
     const failure = h.sanitize(String(error?.message || 'Failure').split('\nCall log:')[0]);
-    await h.writeResult({ ok: false, checks, inventory, errors, failure, limitations }); console.error(failure); process.exitCode = 1;
+    await h.writeResult({ ok: false, counts: counts(), checks, inventory, errors, failure, limitations }); console.error(failure); process.exitCode = 1;
   } finally { await browser?.close(); }
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) await main();
