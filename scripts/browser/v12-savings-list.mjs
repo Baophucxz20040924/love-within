@@ -217,7 +217,7 @@ if (process.argv.includes('--validate')) {
       await page.getByRole('button', { name: /sửa ghi chú hoặc góp quỹ$/ }).click();
       const dialog = page.getByRole('dialog', { name: 'Ghi chú giao dịch', exact: true });
       await dialog.waitFor();
-      assert.equal(await dialog.getByLabel('Ghi chú', { exact: true }).inputValue(), transaction.note);
+      assert.equal(await dialog.getByLabel('Ghi chú', { exact: false }).inputValue(), transaction.note);
       await dialog.getByRole('button', { name: 'Ghi là tiền góp quỹ…', exact: true }).click();
       await dialog.getByRole('combobox', { name: 'Chọn quỹ', exact: true }).waitFor();
       assert.equal(syntheticSyncs, 1, 'FinancePage mount must use exactly one locally fulfilled sync');

@@ -93,7 +93,7 @@ async function main() {
           });
           await page.goto(`${h.baseURL}/friends/outings/${view.id}`);
           const button = (label, root = page) => root.getByRole('button', { name: label, exact: true });
-          await page.getByRole('heading', { name: view.title, exact: true }).waitFor();
+          await page.getByRole('heading', { name: view.title, level: 2, exact: true }).waitFor();
           assert(detailGets > 0, 'Synthetic detail must be requested');
           const absent = async label => assert.equal(await button(label).count(), 0, `${name}: ${label} absent`);
           if (name === 'invited' || name === 'declined') {
@@ -113,7 +113,7 @@ async function main() {
           const shot = async suffix => { const file = `N02-${name}-${suffix}-${viewport.width}`; await h.screenshot(page, file, { fullPage: false }); inventory.push({ state: name, viewport, screenshot: `${file}.png`, review: 'pending manual review', fixture: 'synthetic GET detail only', na: name === 'invited' || name === 'declined' ? 'ledger and settlement controls not applicable to invitation-only DTO' : name === 'completed' ? 'payment confirmation not applicable after completion' : 'other phases and loading/error not represented by this state' }); };
           await shot('main');
           if (name === 'settling-pending-recipient') {
-            await button('Thanh toán').click();
+            await page.getByRole('navigation', { name: 'Nội dung sổ chia tiền', exact: true }).getByRole('button', { name: /^Thanh toán/ }).click();
             await page.getByText('Đã báo chuyển · Chờ xác nhận', { exact: true }).waitFor();
             assert(await button('Xác nhận đã nhận').isEnabled()); await absent('Hủy lời báo chuyển');
             await h.noOverflow(page); await shot('pending');

@@ -98,6 +98,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         clearView();
         setSpaceState(spaceStore.get());
         void refreshMe();
+      } else if (e.key && tokenStore.isTokenKey(e.key) && e.newValue !== null) {
+        // A login advances generation before writing both tokens. Another tab may
+        // observe that first event while credentials are still absent; follow the
+        // completed token writes too, without clearing a newer authenticated view.
+        void refreshMe();
       } else if (e.key && spaceStore.isSpaceKey(e.key)) setSpaceState(spaceStore.get());
     };
     window.addEventListener(SESSION_EXPIRED_EVENT, onExpired);

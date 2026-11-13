@@ -5,8 +5,14 @@ import path from 'node:path';
 import os from 'node:os';
 process.env.LW_EVIDENCE_DIR ||= path.join(os.tmpdir(), 'lw_pw', 'shots', `v12-session-${Date.now()}`);
 const h = await import('./harness.mjs');
-const errors = []; const passed = []; let browser;
-const releases = [];
+const errors = []; const passed = []; const progress = []; let browser;let stage = 'startup';
+async function observed(promise, label) {
+  stage = label; progress.push(label); return bounded(promise);
+}
+const releases = []; const sessions = []; const diagnostics = []; const bootstrapResponses = [];
+async function recordPage(page, label) {
+  diagnostics.push({ label, path: new URL(page.url()).pathname, headings: await page.locator('h1,h2').allTextContents(), alerts: await page.locator('[role="alert"]').allTextContents(), links: await page.locator('nav a').evaluateAll(nodes => nodes.map(n => new URL(n.href).pathname)), auth: await page.evaluate(() => ({ hasAccess: !!localStorage.getItem('lw.accessToken'), hasRefresh: !!localStorage.getItem('lw.refreshToken') })) });
+}
 const gate = () => { let resolve; const promise = new Promise(r => { resolve = r; }); return { promise, resolve }; };
 async function bounded(promise) {
   let timer;
@@ -22,6 +28,8 @@ try {
   browser = await h.openBrowser();
   for (const fault of ['late-original-401', 'late-refresh-success', 'late-refresh-401']) {
     const { context, page } = await h.fresh(browser, fault, errors);
+    sessions.push({ page, label: 'controlled-session' });
+    page.on('response', response => { if (new URL(response.url()).pathname === '/api/me') bootstrapResponses.push({ status: response.status(), path: '/api/me' }); });
     await h.login(page, a);
     const other = await context.newPage(); await other.goto(`${h.baseURL}/profile`);
     await other.getByRole('button', { name: 'Đăng xuất', exact: true }).waitFor();
@@ -51,7 +59,7 @@ try {
       }
       await route.continue();
     });
-    await page.goto(`${h.baseURL}/quests/bucket`); await bounded(arrived.promise);
+    await page.goto(`${h.baseURL}/quests/bucket`); await observed(arrived.promise, `${fault}: controlled request arrival`);
     h.assert.equal(original401s, 1, `${fault} must produce exactly one original /api/bucket 401`);
     if (fault === 'late-original-401') h.assert.equal(refreshes, 0, 'Held original 401 must not refresh before logout/login');
     else h.assert.equal(refreshes, 1, `${fault} must hold exactly one refresh request`);
@@ -59,7 +67,7 @@ try {
     await other.waitForURL(url => url.pathname === '/login');
     await h.login(other, b);
     const nextSession = await other.evaluate(() => ({ generation: localStorage.getItem('lw.sessionGeneration'), access: localStorage.getItem('lw.accessToken') }));
-    held.resolve(); await bounded(completed.promise);
+    held.resolve(); await observed(completed.promise, 'controlled response completion');
     // A real navigation/API roundtrip settles the new account after releasing the fault.
     await other.goto(`${h.baseURL}/profile`);
     await other.getByRole('button', { name: 'Đăng xuất', exact: true }).waitFor();
@@ -90,6 +98,8 @@ try {
   }
   for (const fault of ['late-read-success', 'late-mutation-success']) {
     const { context, page } = await h.fresh(browser, fault, errors);
+    sessions.push({ page, label: 'controlled-session' });
+    page.on('response', response => { if (new URL(response.url()).pathname === '/api/me') bootstrapResponses.push({ status: response.status(), path: '/api/me' }); });
     await h.login(page, a);
     const other = await context.newPage(); await other.goto(`${h.baseURL}/profile`);
     await other.getByRole('button', { name: 'Đăng xuất', exact: true }).waitFor();
@@ -127,9 +137,11 @@ try {
     await h.login(other, b);
     await page.waitForFunction(() => !document.querySelector('[role="dialog"]'));
     const nextSession = await other.evaluate(() => ({ generation: localStorage.getItem('lw.sessionGeneration'), access: localStorage.getItem('lw.accessToken') }));
-    held.resolve(); await bounded(completed.promise);
+    held.resolve(); await observed(completed.promise, 'controlled response completion');
     // Keep the original document/query client alive: a full reload would hide cache leakage.
-    await page.evaluate(() => { history.pushState(null, '', '/quests/bucket'); dispatchEvent(new PopStateEvent('popstate')); });
+    // Navigate through real router links, preserving the existing document/query client.
+    await page.locator('nav a[href="/quests"]').click();
+    await page.getByRole('link', { name: 'Mở bucket list', exact: true }).click();
     await page.getByRole('heading', { name: 'Bucket list', exact: true }).waitFor();
     await page.getByRole('button', { name: 'Thêm mục', exact: true }).waitFor();
     h.assert.equal(await page.getByText(sentinel, { exact: false }).count(), 0, 'Old success leaked content into the new session');
@@ -140,6 +152,8 @@ try {
   }
   for (const operation of ['pin', 'remove', 'note']) {
     const { context, page } = await h.fresh(browser, `late-${operation}-success`, errors);
+    sessions.push({ page, label: 'controlled-session' });
+    page.on('response', response => { if (new URL(response.url()).pathname === '/api/me') bootstrapResponses.push({ status: response.status(), path: '/api/me' }); });
     await h.login(page, a);
     const other = await context.newPage(); await other.goto(`${h.baseURL}/profile`);
     await other.getByRole('button', { name: 'Đăng xuất', exact: true }).waitFor();
@@ -190,8 +204,10 @@ try {
     await other.waitForURL(url => url.pathname === '/login'); await h.login(other, b);
     const nextSession = await other.evaluate(() => ({ generation: localStorage.getItem('lw.sessionGeneration'), access: localStorage.getItem('lw.accessToken') }));
     await page.waitForFunction(expected => localStorage.getItem('lw.sessionGeneration') === expected.generation, nextSession);
-    held.resolve(); await bounded(completed.promise);
-    await page.evaluate(() => { history.pushState(null, '', '/quests/bucket'); dispatchEvent(new PopStateEvent('popstate')); });
+    held.resolve(); await observed(completed.promise, 'controlled response completion');
+    // Navigate through real router links, preserving the existing document/query client.
+    await page.locator('nav a[href="/quests"]').click();
+    await page.getByRole('link', { name: 'Mở bucket list', exact: true }).click();
     await page.getByRole('heading', { name: 'Bucket list', exact: true }).waitFor();
     h.assert.equal(mutations, 1, 'Old mutation must never replay under account B');
     h.assert.equal(await page.locator('.toast').count(), 0, 'Old pin/remove/note completion emitted a toast into account B');
@@ -221,7 +237,7 @@ try {
     await page.getByRole('button', { name: 'Trái tim', exact: true }).focus();
     await page.locator('form').evaluate(form => form.requestSubmit());
     h.assert.equal(submissions, 1, 'Same-tab form submission started an overlapping login request');
-    held.resolve(); await bounded(completed.promise);
+    held.resolve(); await observed(completed.promise, 'controlled response completion');
     await page.getByRole('alert').filter({ hasText: 'V12 controlled pending login' }).waitFor();
     h.assert.equal(submissions, 1, 'Same-tab repeated activation submitted overlapping logins');
     h.assert.equal(await page.evaluate(() => localStorage.getItem('lw.accessToken')), null, 'Controlled rejection unexpectedly authenticated');
@@ -268,6 +284,7 @@ try {
   await h.writeResult({ suite: 'v12-session', passed, expectedFaults: ['GET /api/bucket 401', 'POST /api/auth/refresh 401 or delayed 200', 'hung DELETE /api/push/subscriptions'], limitations: ['Same-tab overlap checks pending UI exclusion, not direct concurrent AuthContext calls', 'Delayed read/mutation successes are controlled browser responses, not real server commits', 'No real push subscription or provider', 'No tokens, screenshots, traces or storageState saved'] });
   console.log(`PASS ${passed.length} cases; result ${h.evidenceDir}`);
 } catch (error) {
-  await h.writeResult({ suite: 'v12-session', passed, failure: h.sanitize(error.message), errors });
+  for (const session of sessions) { if (!session.page.isClosed()) await recordPage(session.page, session.label).catch(() => {}); }
+  await h.writeResult({ suite: 'v12-session', passed, stage, progress, diagnostics, bootstrapResponses, failure: h.sanitize(error.message), errors });
   console.error(h.sanitize(error.message)); process.exitCode = 1;
 } finally { releases.forEach(release => release()); await browser?.close(); }
