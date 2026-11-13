@@ -54,7 +54,11 @@ try {
   for (const space of ['couple','friends','public','unpaired']) {
     sessions[space] = await h.fresh(browser, space, errors);
     if (space !== 'public') await sessions[space].context.addInitScript(({ tokens, space }) => {
-      localStorage.setItem('lw.accessToken', tokens.accessToken); localStorage.setItem('lw.refreshToken', tokens.refreshToken); localStorage.setItem('lw.space', space);
+      // Seed once per context, not every navigation: refresh rotation must survive reloads.
+      if (!sessionStorage.getItem('v12.matrix.seeded')) {
+        localStorage.setItem('lw.accessToken', tokens.accessToken); localStorage.setItem('lw.refreshToken', tokens.refreshToken); localStorage.setItem('lw.space', space);
+        sessionStorage.setItem('v12.matrix.seeded', '1');
+      }
     }, { tokens: space === 'unpaired' ? unpaired : tokens, space: space === 'unpaired' ? 'couple' : space });
   }
   const routes = [
@@ -81,6 +85,21 @@ try {
       captured++;
     }
     await new Promise(resolve => setTimeout(resolve, 62000));
+    for (const space of ['couple', 'friends', 'unpaired']) {
+      const page = sessions[space].page;
+      // Normal refresh before the next long viewport pass; no TTL overrides or 401 allowance.
+      const refreshed = await page.evaluate(async () => {
+        const refreshToken = localStorage.getItem('lw.refreshToken');
+        if (!refreshToken) return false;
+        const response = await fetch('/api/auth/refresh', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ refreshToken }), cache: 'no-store' });
+        if (!response.ok) return false;
+        const { data } = await response.json();
+        localStorage.setItem('lw.accessToken', data.accessToken);
+        localStorage.setItem('lw.refreshToken', data.refreshToken);
+        return true;
+      });
+      h.assert(refreshed, 'Normal matrix session refresh failed');
+    }
   }
   for (const viewport of windows) {
     const page = sessions.public.page;

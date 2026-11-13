@@ -88,7 +88,8 @@ export function measureControl(element) {
       else if (box.top <= safeTop) safeTop = Math.max(safeTop, box.bottom);
     }
   }
-  const dx = Math.min(3, r.width / 4), dy = Math.min(3, r.height / 4);
+  // Rounded button corners are intentionally outside the painted hit shape.
+  const dx = Math.min(12, r.width / 4), dy = Math.min(12, r.height / 4);
   const points = [[r.left + r.width / 2, r.top + r.height / 2], [r.left + dx, r.top + dy], [r.right - dx, r.top + dy], [r.left + dx, r.bottom - dy], [r.right - dx, r.bottom - dy]];
   return { left: r.left, right: r.right, top: r.top, bottom: r.bottom, width: r.width, height: r.height, safeLeft, safeRight, safeTop, safeBottom, enabled: !element.matches(':disabled, [aria-disabled="true"]'), focused: document.activeElement === element, hits: points.map(([x, y]) => { const hit = document.elementFromPoint(x, y); return hit === element || element.contains(hit); }) };
 }
