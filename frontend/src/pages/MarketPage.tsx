@@ -156,7 +156,7 @@ export function MarketPage() {
         <>
           {history.isLoading && <Skeleton height={96} count={3} />}
           {history.isError && <ErrorState onRetry={() => void history.refetch()} />}
-          {history.isSuccess && all.length === 0 && (
+          {history.isSuccess && myWaiting.length === 0 && myRequested.length === 0 && done.length === 0 && (
             <div className="card">
               <EmptyState art="🎁" title="Chưa đổi món nào" hint={`Sang mục “Đổi quà” để chọn một món của ${partnerName}.`} />
             </div>
