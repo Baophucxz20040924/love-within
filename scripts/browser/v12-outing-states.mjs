@@ -19,7 +19,7 @@ export function makeStates(owner, partner) {
   const rows = [balance(owner.id, 200, 100), balance(partner.id, 0, 100)].sort((a, b) => a.userId.localeCompare(b.userId));
   const ledger = { ...common, access: 'full', participants, expenses: [expense], settlements: [], balances: rows, suggestions: [{ fromUserId: partner.id, toUserId: owner.id, amount: 100 }], totalExpenses: 200, eventId: null, capacity };
   const clone = () => structuredClone(ledger);
-  const invitation = access => ({ ...common, access, myMembership: access === 'invited' ? 'pending' : 'declined' });
+  const invitation = access => ({ ...common, creatorId: partner.id, access, myMembership: access === 'invited' ? 'pending' : 'declined' });
   const empty = clone(); empty.expenses = []; empty.totalExpenses = 0; empty.capacity.expenses.used = 0; empty.balances = rows.map(r => balance(r.userId, 0, 0)); empty.suggestions = [];
   const review = clone(); review.phase = 'review'; review.participants[1].consent = { status: 'approved', financeRevision: 2 };
   const settlement = (n, status, amount = 100) => ({ id: id(901000 + n), fromUserId: partner.id, toUserId: owner.id, amount, status, createdAt: at, resolvedAt: status === 'pending' ? null : at });
@@ -37,7 +37,7 @@ export function validateStates(states, owner, partner) {
   assert.deepEqual(Object.keys(states), stateNames);
   assert.equal(new Set(Object.values(states).map(s => s.id)).size, stateNames.length);
   for (const [name, s] of Object.entries(states)) {
-    if (s.access === 'invited' || s.access === 'declined') { assert(!('expenses' in s)); assert.equal(s.myMembership, s.access === 'invited' ? 'pending' : 'declined'); continue; }
+    if (s.access === 'invited' || s.access === 'declined') { assert(!('expenses' in s)); assert.notEqual(s.creatorId, owner.id, 'Creator cannot be a pending/declined invitee'); assert.equal(s.myMembership, s.access === 'invited' ? 'pending' : 'declined'); continue; }
     assert.equal(s.capacity.participants.used, s.participants.length); assert.equal(s.capacity.expenses.used, s.expenses.length); assert.equal(s.capacity.settlements.used, s.settlements.length);
     for (const v of Object.values(s.capacity).filter(v => typeof v === 'object')) assert(v.used >= 0 && v.used <= v.max);
     assert.equal(s.capacity.editsFrozen, s.capacity.ordinaryOperations.used >= 3000);

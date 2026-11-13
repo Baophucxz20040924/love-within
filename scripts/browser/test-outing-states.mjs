@@ -25,6 +25,7 @@ test('validation rejects inconsistent amounts, reservation, quota and restricted
     s => { s['settling-pending-recipient'].balances.find(b => b.userId === owner.id).balance -= 40; },
     s => { s['tail-slots'].capacity.settlements.used--; },
     s => { s.restricted.expenses[0].title = 'private'; },
+    s => { s.invited.creatorId = owner.id; },
   ]) {
     const states = makeStates(owner, partner); corrupt(states);
     assert.throws(() => validateStates(states, owner, partner));
