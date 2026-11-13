@@ -1,0 +1,55 @@
+/* Interaction-only rules, scoped to Toast and SegmentedControl. */
+.toast.toast--interactive {
+  align-items: center;
+  flex-wrap: wrap;
+  cursor: default;
+}
+
+.toast--interactive .toast__text {
+  flex: 1 1 120px;
+  overflow-wrap: anywhere;
+}
+
+.toast--interactive .toast__btn {
+  max-width: 100%;
+  margin: 0;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.toast--interactive .toast__dismiss {
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 44px;
+  min-height: 44px;
+  padding: 8px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.toast--interactive .toast__dismiss:hover {
+  border-color: currentColor;
+}
+
+.toast--interactive button:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
+}
+
+.segmented .segmented__item:focus-visible {
+  outline: 2px solid var(--text);
+  outline-offset: -3px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .toast.toast--interactive {
+    animation: none;
+  }
+
+  .segmented .segmented__item {
+    transition: none;
+  }
+}

@@ -1,0 +1,33 @@
+{
+	# Only CloudFront can reach this origin (it must send X-Origin-Verify, checked below), so it is safe to
+	# trust the X-Forwarded-For it sends. With TRUST_PROXY_HOPS=2 the API then sees the real viewer IP.
+	servers {
+		trusted_proxies static 0.0.0.0/0 ::/0
+	}
+}
+
+{$API_ORIGIN_DOMAIN} {
+	# Preserve guard order: Caddy otherwise sorts handle before respond directives.
+	route {
+		@not_cloudfront not header X-Origin-Verify {$ORIGIN_SECRET}
+		respond @not_cloudfront 403
+
+		# Public ingress never exposes operational or development endpoints, even with the origin secret.
+		@internal_api path /api/metrics /api/metrics/* /api/dev-*
+		respond @internal_api 404
+
+		handle /api/* {
+			request_body {
+				max_size 6MB
+			}
+			reverse_proxy api:4000 {
+				transport http {
+					dial_timeout 5s
+					response_header_timeout 70s
+				}
+			}
+		}
+
+		respond 404
+	}
+}

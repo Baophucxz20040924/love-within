@@ -1,0 +1,268 @@
+import { useEffect, useState } from 'react';
+import type { FormEvent } from 'react';
+import { Link } from 'react-router-dom';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Avatar } from '../components/Avatar';
+import { BottomSheet } from '../components/BottomSheet';
+import { Icon } from '../components/Icon';
+import { EmptyState, Page, Skeleton } from '../components/StatusViews';
+import { useToast } from '../components/Toast';
+import { WalletCard } from '../components/WalletCard';
+import { useAuth } from '../features/auth/AuthContext';
+import { FinanceSettings } from '../features/finance/FinanceSettings';
+import { AvatarSheet } from '../features/profile/AvatarSheet';
+import { PROPOSAL_KEY, proposalsApi } from '../features/proposals/api';
+import { LEDGER_KEY, walletApi } from '../features/quests/api';
+import { WATER_KEY, waterApi } from '../features/water/api';
+import { ApiRequestError } from '../lib/apiClient';
+import { formatDate, formatMl, formatNumber, shortName, timeAgo } from '../lib/format';
+import { isStandalone } from '../lib/installPrompt';
+
+const REASON: Record<string, string> = {
+  checkin: 'Điểm danh',
+  quest: 'Nhiệm vụ',
+  market_purchase: 'Đổi hàng',
+  market_refund: 'Hoàn Xu',
+  bucket_list: 'Bucket list',
+  admin: 'Hệ thống',
+};
+
+function AnniversarySheet({ open, onClose, current }: { open: boolean; onClose: () => void; current: string | null }) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const [date, setDate] = useState('');
+
+  useEffect(() => {
+    if (open) setDate(current ? current.slice(0, 10) : '');
+  }, [open, current]);
+
+  const propose = useMutation({
+    mutationFn: () => proposalsApi.proposeAnniversary(date),
+    onSuccess: async () => {
+      toast.success('Đã gửi đề xuất. Chờ người yêu đồng ý.');
+      onClose();
+      await qc.invalidateQueries({ queryKey: PROPOSAL_KEY });
+    },
+    onError: (err) => toast.error(err instanceof ApiRequestError ? err.message : 'Có lỗi xảy ra'),
+  });
+
+  function onSubmit(e: FormEvent) {
+    e.preventDefault();
+    propose.mutate();
+  }
+
+  return (
+    <BottomSheet open={open} onClose={onClose} title="Ngày bắt đầu yêu">
+      <form className="form" onSubmit={onSubmit}>
+        <p className="text-muted">Thay đổi chỉ được áp dụng khi cả hai cùng đồng ý.</p>
+        <label className="field">
+          <span className="field__label">Ngày</span>
+          <input className="input" type="date" value={date} onChange={(e) => setDate(e.target.value)} max={new Date().toISOString().slice(0, 10)} required />
+        </label>
+        <button type="submit" className="btn btn-primary btn-lg btn-block" disabled={!date || propose.isPending}>
+          Gửi đề xuất
+        </button>
+      </form>
+    </BottomSheet>
+  );
+}
+
+function Ledger() {
+  const ledger = useQuery({ queryKey: LEDGER_KEY, queryFn: () => walletApi.ledger() });
+  if (ledger.isLoading) return <Skeleton height={56} count={3} />;
+  if (!ledger.data?.length) {
+    return (
+      <div className="card">
+        <EmptyState art="🪙" title="Chưa có giao dịch" hint="Điểm danh và làm nhiệm vụ để nhận Xu." />
+      </div>
+    );
+  }
+  return (
+    <div className="list">
+      {ledger.data.slice(0, 15).map((e) => (
+        <div key={e.id} className="list__item">
+          <div className="list__body">
+            <p className="list__label">{REASON[e.reason] ?? e.reason}</p>
+            <p className="list__meta">{timeAgo(e.createdAt)}</p>
+          </div>
+          <span className={`strong num${e.delta < 0 ? ' text-danger' : ''}`}>
+            {e.delta > 0 ? '+' : '−'}
+            {formatNumber(Math.abs(e.delta))} {e.type === 'coin' ? 'Xu' : 'EXP'}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+export function ProfilePage() {
+  const { me, logout } = useAuth();
+  const couple = me?.couple;
+  const partner = couple?.members.find((m) => m.id !== me?.user.id);
+  const water = useQuery({ queryKey: WATER_KEY, queryFn: waterApi.today });
+  const [annOpen, setAnnOpen] = useState(false);
+  const [avatarOpen, setAvatarOpen] = useState(false);
+  const [showLedger, setShowLedger] = useState(false);
+
+  return (
+    <Page title="Hồ sơ">
+      {me && couple && (
+        <div className="card couple-card">
+          <span className="avatar-pair">
+            <button type="button" className="avatar-button" aria-label="Đổi ảnh đại diện" onClick={() => setAvatarOpen(true)}>
+              <Avatar name={me.user.displayName} src={me.user.avatarUrl} size={52} ring />
+            </button>
+            {partner && <Avatar name={partner.displayName} src={partner.avatarUrl} size={52} ring />}
+          </span>
+          <div style={{ minWidth: 0 }}>
+            <p className="card__title">
+              {shortName(me.user.displayName)} & {partner ? shortName(partner.displayName) : '…'}
+            </p>
+            <p className="text-sm text-muted">
+              {formatNumber(couple.daysInLove ?? 0)} ngày bên nhau · Cấp {couple.level}
+            </p>
+          </div>
+        </div>
+      )}
+
+      <WalletCard />
+
+      <div className="section">
+        <h2 className="section__title">Couple</h2>
+        <div className="list">
+          <button type="button" className="list__item" onClick={() => setAnnOpen(true)}>
+            <span className="icon-tile" aria-hidden="true">
+              <Icon name="calendar" size={20} />
+            </span>
+            <span className="list__body">
+              <span className="list__label">Ngày bắt đầu yêu</span>
+            </span>
+            <span className="list__value">
+              {couple?.anniversaryDate ? formatDate(couple.anniversaryDate, couple.timezone) : 'Chưa đặt'}
+            </span>
+            <Icon name="chevronRight" className="text-muted" />
+          </button>
+          <Link to="/events" className="list__item">
+            <span className="icon-tile" aria-hidden="true">
+              <Icon name="gift" size={20} />
+            </span>
+            <span className="list__body">
+              <span className="list__label">Sự kiện sắp tới</span>
+              <span className="list__meta" style={{ display: 'block' }}>
+                Sinh nhật, chuyến đi, ngày gặp nhau
+              </span>
+            </span>
+            <Icon name="chevronRight" className="text-muted" />
+          </Link>
+          <Link to="/profile/moods" className="list__item">
+            <span className="icon-tile" aria-hidden="true">
+              <Icon name="smile" size={20} />
+            </span>
+            <span className="list__body">
+              <span className="list__label">Cảm xúc 30 ngày</span>
+              <span className="list__meta" style={{ display: 'block' }}>
+                Cảm xúc mỗi ngày của hai bạn
+              </span>
+            </span>
+            <Icon name="chevronRight" className="text-muted" />
+          </Link>
+          <Link to="/quests/water" className="list__item">
+            <span className="icon-tile icon-tile--water" aria-hidden="true">
+              <Icon name="droplet" size={20} />
+            </span>
+            <span className="list__body">
+              <span className="list__label">Mục tiêu nước</span>
+            </span>
+            <span className="list__value">{water.data?.goalMl ? formatMl(water.data.goalMl) : 'Chưa đặt'}</span>
+            <Icon name="chevronRight" className="text-muted" />
+          </Link>
+          <div className="list__item">
+            <span className="icon-tile icon-tile--neutral" aria-hidden="true">
+              <Icon name="globe" size={20} />
+            </span>
+            <span className="list__body">
+              <span className="list__label">Múi giờ</span>
+            </span>
+            <span className="list__value">{couple?.timezone}</span>
+          </div>
+        </div>
+      </div>
+
+      <FinanceSettings partnerName={partner ? shortName(partner.displayName) : 'người ấy'} />
+
+      <div className="section">
+        <h2 className="section__title">
+          Lịch sử Xu / EXP
+          <button type="button" className="btn btn-ghost" onClick={() => setShowLedger((v) => !v)}>
+            {showLedger ? 'Ẩn' : 'Xem'}
+          </button>
+        </h2>
+        {showLedger && <Ledger />}
+      </div>
+
+      <div className="section">
+        <h2 className="section__title">Tài khoản</h2>
+        <div className="list">
+          <button type="button" className="list__item" onClick={() => setAvatarOpen(true)}>
+            <Avatar name={me?.user.displayName ?? ''} src={me?.user.avatarUrl} size={44} />
+            <span className="list__body">
+              <span className="list__label">Ảnh đại diện</span>
+              <span className="list__meta" style={{ display: 'block' }}>
+                {me?.user.avatarUrl ? 'Chạm để đổi hoặc gỡ ảnh' : 'Thêm ảnh để người ấy thấy bạn'}
+              </span>
+            </span>
+            <Icon name="chevronRight" className="text-muted" />
+          </button>
+          <Link to="/profile/notifications" className="list__item">
+            <span className="icon-tile icon-tile--neutral" aria-hidden="true">
+              <Icon name="bell" size={20} />
+            </span>
+            <span className="list__body">
+              <span className="list__label">Thông báo</span>
+              <span className="list__meta" style={{ display: 'block' }}>
+                Báo ra màn hình khóa, giờ yên lặng
+              </span>
+            </span>
+            <Icon name="chevronRight" className="text-muted" />
+          </Link>
+          <div className="list__item">
+            <span className="icon-tile icon-tile--neutral" aria-hidden="true">
+              <Icon name="mail" size={20} />
+            </span>
+            <span className="list__body">
+              <span className="list__label">{me?.user.displayName}</span>
+              <span className="list__meta" style={{ display: 'block' }}>
+                {me?.user.email}
+              </span>
+            </span>
+          </div>
+          {!isStandalone() && (
+            <Link to="/install" className="list__item">
+              <span className="icon-tile icon-tile--neutral" aria-hidden="true">
+                <Icon name="smartphone" size={20} />
+              </span>
+              <span className="list__body">
+                <span className="list__label">Cài app lên điện thoại</span>
+                <span className="list__meta" style={{ display: 'block' }}>
+                  Mở nhanh từ màn hình chính
+                </span>
+              </span>
+              <Icon name="chevronRight" className="text-muted" />
+            </Link>
+          )}
+          <button type="button" className="list__item" onClick={logout}>
+            <span className="icon-tile icon-tile--neutral" aria-hidden="true">
+              <Icon name="logOut" size={20} />
+            </span>
+            <span className="list__body">
+              <span className="list__label">Đăng xuất</span>
+            </span>
+          </button>
+        </div>
+      </div>
+
+      <AnniversarySheet open={annOpen} onClose={() => setAnnOpen(false)} current={couple?.anniversaryDate ?? null} />
+      <AvatarSheet open={avatarOpen} onClose={() => setAvatarOpen(false)} hint="Người ấy sẽ thấy ảnh này. Ảnh dùng chung cho tài khoản của bạn." />
+    </Page>
+  );
+}

@@ -1,0 +1,111 @@
+import { useEffect, useRef } from 'react';
+import { Link, useNavigate, useParams } from 'react-router-dom';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Avatar } from '../components/Avatar';
+import { Icon } from '../components/Icon';
+import { Loading } from '../components/StatusViews';
+import { useToast } from '../components/Toast';
+import { useAuth } from '../features/auth/AuthContext';
+import { friendsApi } from '../features/friends/api';
+import { announceInvite } from '../features/friends/inviteResult';
+import { useFriendsTheme } from '../features/friends/useFriendsTheme';
+import { ApiRequestError } from '../lib/apiClient';
+import { shortName } from '../lib/format';
+
+/**
+ * /j/:code — invite link into the friends space. Valid link: blue page with the inviter, then the hidden
+ * login (no heart trick needed). Invalid link: a neutral pink page that does not mention the friends space.
+ */
+export function InviteLandingPage() {
+  const { code = '' } = useParams();
+  const navigate = useNavigate();
+  const qc = useQueryClient();
+  const toast = useToast();
+  const { isAuthenticated, loading, space, logout } = useAuth();
+
+  const preview = useQuery({
+    queryKey: ['invite-preview', code],
+    queryFn: () => friendsApi.invitePreview(code),
+    retry: false,
+    staleTime: 60_000,
+  });
+  const valid = preview.data?.valid === true;
+  useFriendsTheme(valid);
+
+  // Already inside the friends space: use the link straight away.
+  const join = useMutation({
+    mutationFn: () => friendsApi.join(code),
+    onSuccess: async (result) => {
+      announceInvite(result, toast);
+      await qc.invalidateQueries({ queryKey: ['friends'] });
+      navigate('/friends', { replace: true });
+    },
+    onError: (err) => {
+      toast.error(err instanceof ApiRequestError ? err.message : 'Không dùng được link, thử lại nhé.');
+      navigate('/friends', { replace: true });
+    },
+  });
+  const started = useRef(false);
+  const autoJoin = valid && isAuthenticated && space === 'friends';
+  useEffect(() => {
+    if (!autoJoin || started.current) return;
+    started.current = true;
+    join.mutate();
+  }, [autoJoin, join]);
+
+  if (loading || preview.isLoading || autoJoin) return <Loading />;
+
+  if (!valid) {
+    return (
+      <main className="auth">
+        <div className="card stack center invite-card">
+          <span className="icon-tile icon-tile--warning invite-card__icon" aria-hidden="true">
+            <Icon name="alert" />
+          </span>
+          <h1 className="card__title">Link không còn hiệu lực</h1>
+          <p className="text-muted">Link mời này đã hết hạn, đã đủ người dùng hoặc đã bị thu hồi.</p>
+          <Link to={isAuthenticated ? '/' : '/login'} replace className="btn btn-primary btn-block">
+            {isAuthenticated ? 'Về trang chủ' : 'Về trang đăng nhập'}
+          </Link>
+        </div>
+      </main>
+    );
+  }
+
+  const inviter = preview.data?.inviter;
+  const name = inviter ? shortName(inviter.displayName) : 'Bạn của bạn';
+  const toLogin = (mode: 'login' | 'register') =>
+    navigate('/friends/login', { state: { unlocked: true, mode, invite: { code, inviterName: inviter?.displayName ?? '' } } });
+
+  return (
+    <main className="auth auth--friends">
+      <div className="auth__brand">
+        <Avatar name={inviter?.displayName ?? '?'} src={inviter?.avatarUrl} size={88} ring />
+        <h1 className="auth__title invite-title">{name} mời bạn vào Hội bạn bè</h1>
+        <p className="auth__tagline">Đăng story, kết bạn và xem bài viết của bạn bè.</p>
+      </div>
+
+      {isAuthenticated ? (
+        <div className="card stack">
+          <p className="text-muted">Bạn đang đăng nhập Look Within. Đăng xuất để vào Hội bạn bè bằng link này.</p>
+          <button type="button" className="btn btn-primary btn-lg btn-block" onClick={logout}>
+            Đăng xuất và tiếp tục
+          </button>
+          <Link to="/" replace className="btn btn-ghost">
+            Ở lại
+          </Link>
+        </div>
+      ) : (
+        <div className="card stack">
+          <button type="button" className="btn btn-primary btn-lg btn-block" onClick={() => toLogin('login')}>
+            Đăng nhập
+          </button>
+          <button type="button" className="btn btn-outline btn-lg btn-block" onClick={() => toLogin('register')}>
+            Tạo tài khoản mới
+          </button>
+          <p className="text-sm text-muted center">Vào xong, bạn và {name} sẽ là bạn bè.</p>
+        </div>
+      )}
+    </main>
+  );
+}

@@ -1,0 +1,40 @@
+# ── Only backend/, frontend/ and .github/ (CI/CD workflows) are pushed ─
+# Everything else at the repo root is ignored (plan/, spec/, infra/, README.md, secret.md, notes...)
+/*
+!/.gitignore
+!/.github/
+!/backend/
+!/frontend/
+
+# ── Inside backend/ and frontend/ ──────────────────────────────────────
+node_modules/
+dist/
+build/
+coverage/
+*.tsbuildinfo
+.vite/
+
+# Secrets / env (the .example files stay)
+.env
+.env.*
+!/backend/.env.example
+!/frontend/.env.example
+*.env
+*.pem
+*.key
+
+# Dev-only helper scripts and notes: not needed to build or run
+backend/scripts/
+backend/README.md
+frontend/README.md
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

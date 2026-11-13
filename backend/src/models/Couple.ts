@@ -1,0 +1,45 @@
+import { Schema, model, type Document, type Types } from 'mongoose';
+
+export type CoupleStatus = 'active' | 'archived';
+
+export interface CoupleDoc extends Document {
+  _id: Types.ObjectId;
+  memberIds: Types.ObjectId[]; // exactly 2
+  anniversaryDate: Date | null;
+  level: number;
+  exp: number;
+  timezone: string;
+  status: CoupleStatus;
+  pinnedSavingsGoalId: Types.ObjectId | null;
+  savingsWriteToken: string | null;
+  savingsWriteStartedAt: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+const coupleSchema = new Schema<CoupleDoc>(
+  {
+    memberIds: {
+      type: [{ type: Schema.Types.ObjectId, ref: 'User' }],
+      required: true,
+      validate: {
+        validator: (v: Types.ObjectId[]) => v.length === 2,
+        message: 'A couple must have exactly 2 members',
+      },
+    },
+    pinnedSavingsGoalId: { type: Schema.Types.ObjectId, ref: 'SavingsGoal', default: null },
+    // Non-expiring: an unknown write outcome requires offline reconciliation, never lease stealing.
+    savingsWriteToken: { type: String, default: null },
+    savingsWriteStartedAt: { type: Date, default: null },
+    anniversaryDate: { type: Date, default: null },
+    level: { type: Number, default: 1 },
+    exp: { type: Number, default: 0 },
+    timezone: { type: String, default: 'Asia/Ho_Chi_Minh' },
+    status: { type: String, enum: ['active', 'archived'], default: 'active' },
+  },
+  { timestamps: true },
+);
+
+coupleSchema.index({ memberIds: 1 });
+
+export const Couple = model<CoupleDoc>('Couple', coupleSchema);
