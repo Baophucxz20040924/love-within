@@ -62,6 +62,9 @@ async function main() {
           let getCount = 0, createFaults = 0;
           await context.route('**/api/**', async route => {
             const request = route.request(), pathname = new URL(request.url()).pathname;
+            if (request.method() === 'POST' && pathname === '/api/market/seen' && scenario.startsWith('market-')) {
+              return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { ok: true } }) });
+            }
             if (request.method() !== 'GET') {
               if (scenario === 'invites' && pathname === '/api/friends/invites' && request.method() === 'POST') {
                 createFaults++; return route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: { code: 'SYNTHETIC_UNAVAILABLE', message: 'Tạm thời không thể tạo link' } }) });
@@ -121,7 +124,14 @@ async function main() {
       }
     }
     // The harness records expected synthetic 503 and browser console noise from deliberately aborted seen calls.
-    const unexpected = errors.filter(e => !(e.type === 'http' && e.status === 503 && e.path === '/api/friends/invites') && !(e.type === 'console' && /Failed to load resource/.test(e.message) && ['/api/friends/invites', '/api/market/seen'].includes(e.path)));
+    const expected = new Map([360,390,1280].flatMap(width => [[`invites-${width}|http`, 1], [`invites-${width}|console`, 1]]));
+    const unexpected = errors.filter(e => {
+      const controlled = e.path === '/api/friends/invites' && (e.type === 'http' ? e.status === 503 : e.type === 'console' && /^Failed to load resource: the server responded with a status of 503 \(Service Unavailable\)$/.test(e.message));
+      const key = `${e.label}|${e.type}`, remaining = expected.get(key) ?? 0;
+      if (!controlled || !remaining) return true;
+      expected.set(key, remaining - 1); return false;
+    });
+    assert.deepEqual([...expected].filter(([, count]) => count), [], 'Each declared invite-create fault must occur exactly once');
     assert.deepEqual(unexpected, [], 'Unexpected browser faults');
     assert(blocked.every(b => b.method === 'POST' && b.path === '/api/market/seen'), `Unexpected blocked mutations: ${JSON.stringify(blocked)}`);
     await h.writeResult({ ok: true, checks, inventory, errors, blocked, limitations });
