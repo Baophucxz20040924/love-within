@@ -164,7 +164,7 @@ try {
     await page.getByRole('alert').filter({ hasText: 'V12 controlled pending login' }).waitFor();
     h.assert.equal(submissions, 1, 'Same-tab repeated activation submitted overlapping logins');
     h.assert.equal(await page.evaluate(() => localStorage.getItem('lw.accessToken')), null, 'Controlled rejection unexpectedly authenticated');
-    passed.push('same-tab pending login excludes duplicate keyboard submission');
+    passed.push('same-tab pending login excludes duplicate form.requestSubmit submission');
     await context.close();
   }
   // Consume only the controlled response errors, scoped to the case label and exact path/count.
@@ -176,10 +176,11 @@ try {
     ['same-tab-duplicate-submit|400|/api/auth/login', 1],
   ]);
   const expectedConsole = new Map([
-    ['late-original-401|401', 1],
-    ['late-refresh-success|401', 1],
-    ['late-refresh-401|401', 2],
-    ['same-tab-duplicate-submit|400', 1],
+    ['late-original-401|401|/api/bucket', 1],
+    ['late-refresh-success|401|/api/bucket', 1],
+    ['late-refresh-401|401|/api/bucket', 1],
+    ['late-refresh-401|401|/api/auth/refresh', 1],
+    ['same-tab-duplicate-submit|400|/api/auth/login', 1],
   ]);
   const unexpected = [];
   for (const error of errors) {
@@ -191,8 +192,8 @@ try {
       continue;
     }
     if (error.type === 'console') {
-      const status = /status of (400|401)/.exec(error.message)?.[1];
-      const key = status && `${error.label}|${status}`;
+      const status = /^Failed to load resource: the server responded with a status of (400|401)(?: \([^\r\n]*\))?$/.exec(error.message)?.[1];
+      const key = status && `${error.label}|${status}|${error.path}`;
       const remaining = key ? (expectedConsole.get(key) ?? 0) : 0;
       if (key && remaining > 0) expectedConsole.set(key, remaining - 1);
       else unexpected.push(error);
