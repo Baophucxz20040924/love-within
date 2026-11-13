@@ -6,12 +6,12 @@ import { savingsRepository } from '../src/repositories/savings.repository.js';
 import type { SavingsListInput } from '../src/services/savings.validation.js';
 import { randomBytes } from 'node:crypto';
 import { createRequire } from 'node:module';
+import type { CoupleDoc } from '../src/models/Couple.js';
 
 // Disable configuration loading before importing service dependencies for pure mocks.
 const require = createRequire(__filename);
 require('dotenv').config = () => ({ parsed: {} });
 process.env = { NODE_ENV: 'test', MONGODB_URI: 'mongodb://127.0.0.1:27017/never_connect_pure_mock', JWT_SECRET: randomBytes(48).toString('hex'), JWT_REFRESH_SECRET: randomBytes(48).toString('hex'), STORAGE_PROVIDER: 'memory', AI_PROVIDER: 'mock', AI_CHAT_PROVIDER: 'mock', BANK_PROVIDER: 'mock', PUSH_PROVIDER: 'mock', SCHEDULER_ENABLED: 'false' };
-import type { CoupleDoc } from '../src/models/Couple.js';
 
 // Pure mocks only: this script never connects to a database.
 async function main() {
