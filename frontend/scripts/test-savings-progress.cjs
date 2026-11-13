@@ -1,0 +1,18 @@
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const vm = require('node:vm');
+const ts = require('typescript');
+const filename = path.resolve(__dirname, '../src/features/savings/progress.ts');
+const code = ts.transpileModule(fs.readFileSync(filename, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText;
+const mod = { exports: {} };
+vm.runInNewContext(code, { module: mod, exports: mod.exports });
+const { savingsPercent } = mod.exports;
+assert.equal(savingsPercent(9_999_999_999, 10_000_000_000), 99.9);
+assert.equal(savingsPercent(999, 1000), 99.9);
+assert.equal(savingsPercent(1000, 1000), 100);
+assert.equal(savingsPercent(1200, 1000), 120);
+assert.equal(savingsPercent(-100, 1000), -10);
+assert.equal(savingsPercent(0, 1000), 0);
+assert.equal(savingsPercent(333, 1000), 33.3);
+console.log('PASS 7 savings percentage boundaries; unmet target never displays 100%');

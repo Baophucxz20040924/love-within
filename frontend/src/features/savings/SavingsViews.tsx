@@ -4,13 +4,14 @@ import { ProgressBar } from '../../components/ProgressBar';
 import { Celebration } from '../bucket/Celebration';
 import { useCouplePeople } from '../questions/useCouplePeople';
 import { formatNetVnd, formatVnd } from '../../lib/format';
+import { savingsPercent } from './progress';
 import type { PulseSavings, SavingsGoal } from '../../lib/types';
 
 export const savingsStatus = (status: PulseSavings['status']) => status === 'closed' ? 'Đã đóng' : status === 'reached' ? 'Đã đạt mục tiêu' : 'Đang góp';
 
 /** A single ratio, with actual amounts beside it (negative and >100% are not hidden). */
 export function SavingsProgress({ goal }: { goal: PulseSavings }) {
-  const percent = goal.totalVnd / goal.targetVnd * 100;
+  const percent = savingsPercent(goal.totalVnd, goal.targetVnd);
   return <div className="savings-progress">
     <p className="savings-progress__amount">{formatVnd(goal.totalVnd)} <span className="text-sm text-muted">/ {formatVnd(goal.targetVnd)}</span></p>
     <ProgressBar value={percent} label={`Tiến độ ${goal.title}`} />
