@@ -66,7 +66,7 @@ export function FriendsInvitesPage() {
       toast.success('Đã sao chép link');
     } catch {
       setCopyFallback(url);
-      toast.info('Hãy giữ vào link bên dưới để sao chép');
+      toast.info('Chọn ô “Link để sao chép” rồi sao chép thủ công.');
     }
   }
 

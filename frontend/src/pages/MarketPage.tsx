@@ -23,8 +23,8 @@ function ItemTile({ item, onOpen, badge }: { item: MarketItem; onOpen: () => voi
         {item.emoji}
       </span>
       <span className="tile__title">{item.title}</span>
-      <span className="row row--between" style={{ width: '100%' }}>
-        <span className="coin-chip">🪙 {formatNumber(item.priceCoin)}</span>
+      <span className="row row--between" style={{ width: '100%', flexWrap: 'wrap', gap: 8 }}>
+        <span className="coin-chip" style={{ whiteSpace: 'nowrap' }}>🪙 {formatNumber(item.priceCoin)}</span>
         {badge && <span className="chip chip--brand">{badge}</span>}
       </span>
     </button>

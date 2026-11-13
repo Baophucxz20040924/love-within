@@ -18,7 +18,7 @@ export function fixtures(owner, partner) {
     nudges: { receivedToday: 5, lastAt: at, lastKind: 'hug' },
     moods: { mine: mood(owner.id, 'happy'), partner: mood(partner.id, 'loved') },
     moment: { state: 'open', windowEndsAt: new Date(now.getTime() + 600000).toISOString(), partnerPosted: true },
-    savings: { id: id(904), title: 'Một mục tiêu tiết kiệm thật dài cho chuyến đi và những dự định của chúng mình', emoji: '🌱', totalVnd: 9999999999, targetVnd: 20000000000, status: 'active', reachedAt: null },
+    savings: { id: id(904), title: 'Một mục tiêu tiết kiệm thật dài cho chuyến đi và những dự định của chúng mình', emoji: '🌱', totalVnd: 9999999999, targetVnd: 10000000000, status: 'active', reachedAt: null },
   };
   const empty = Object.fromEntries(Object.keys(dense).map(key => [key, null]));
   return { dense, empty, question };
@@ -38,7 +38,7 @@ async function main() {
   process.env.LW_EVIDENCE_DIR ||= path.join(os.tmpdir(), 'lw_pw', 'shots', `v12-home-states-${Date.now()}`);
   const h = await import('./harness.mjs');
   let browser;
-  const checks = [], inventory = [], errors = [];
+  const checks = [], inventory = [], errors = []; let stage = 'startup';
   try {
     assert(process.env.LW_BASELINE_FIXTURE, 'LW_BASELINE_FIXTURE required');
     const baseline = JSON.parse(await readFile(process.env.LW_BASELINE_FIXTURE, 'utf8'));
@@ -74,14 +74,17 @@ async function main() {
         return route.continue();
       });
       await page.goto(`${h.baseURL}/`);
+      stage = `${state}-${viewport.width}: sections`;
       await page.getByRole('heading', { name: 'Dành cho hai bạn' }).waitFor();
       await page.getByRole('heading', { name: 'Nhịp sống chung' }).waitFor();
+      stage = `${state}-${viewport.width}: question`;
       await page.getByRole('heading', { name: 'Câu hỏi hôm nay' }).waitFor();
+      stage = `${state}-${viewport.width}: pulse cards`;
       if (state === 'dense') {
         await page.getByRole('heading', { name: 'Khoảnh khắc đang mở' }).waitFor();
         await page.getByText('Chạm để mở phong bì').waitFor();
         await page.getByText('Sắp tới', { exact: true }).waitFor();
-        await page.getByText(data.dense.savings.title, { exact: true }).waitFor();
+        await page.getByRole('link', { name: `Quỹ chung: ${data.dense.savings.title}`, exact: true }).waitFor();
         await page.locator('.hero-row--mine').waitFor();
       } else if (state === 'empty') {
         assert.equal(await page.locator('.mo-card, .letter-card, .ev-card').count(), 0);
@@ -108,9 +111,10 @@ async function main() {
     }
     await h.writeResult({ ok: true, checks, inventory, limitations: ['Synthetic browser GET fixtures; no backend population, login-flow or mutation proof', 'Pulse failure is injected; dependent live requests remain real', 'Screenshots require manual visual review; selected cases only'] });
     console.log(`PASS ${checks.length} cases; ${inventory.length} captures; ${h.evidenceDir}`);
-  } catch {
-    // Failure details may contain private fixture values; never write or print them.
-    await h.writeResult({ ok: false, checks, inventory, failure: 'Home state verification failed; inspect locally without publishing sensitive values.' });
+  } catch (error) {
+    const failure = h.sanitize(String(error.message).split('\nCall log:')[0]);
+    await h.writeResult({ ok: false, checks, inventory, stage, failure });
+    console.error(failure);
     console.error('Home state verification failed; inspect locally without publishing sensitive values.');
     process.exitCode = 1;
   } finally { await browser?.close(); }
