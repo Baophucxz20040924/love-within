@@ -64,12 +64,34 @@ async function main() {
     // Deleted and foreign-couple amounts must not affect the balance.
     await SavingsEntry.create({ coupleId: couple._id, goalId: ids[1], userId: members[0], amountVnd: 100000, occurredOn: '2026-01-01', source: 'manual', deletedAt: started });
     await SavingsEntry.create({ coupleId: new Types.ObjectId(), goalId: ids[1], userId: members[0], amountVnd: 100000, occurredOn: '2026-01-01', source: 'manual' });
+    const persistedBefore = await SavingsGoal.find({ coupleId: couple._id }).sort({ _id: 1 }).lean().exec();
+    // Constructed baseline, not a crash/journal reproduction. Capture the old repository
+    // query locally; detail uses the real service goalView/full totals for each returned row.
+    // No repository monkeypatch, backend source replacement, reconciliation or reseed.
+    const legacyPage = async (status: 'active' | 'reached') => {
+      const rows = await SavingsGoal.find({ coupleId: couple._id, status }).select('-appliedProposalIds')
+        .sort({ createdAt: -1, _id: -1 }).limit(51).maxTimeMS(3000).exec();
+      return Promise.all(rows.slice(0, 50).map(async (goal) =>
+        (await savingsService.detail(couple, members[0].toString(), goal.id)).goal));
+    };
+    const legacyActive = await legacyPage('active');
+    const legacyReached = await legacyPage('reached');
+    assert.deepEqual(legacyActive.map((goal) => goal.id), [ids[2], ids[0]].map(String));
+    assert.equal(legacyActive.find((goal) => goal.id === ids[0].toString())?.status, 'reached');
+    assert.deepEqual(legacyReached.map((goal) => goal.id), [ids[3], ids[1]].map(String));
+    assert.equal(legacyReached.find((goal) => goal.id === ids[1].toString())?.status, 'active');
+    assert.ok(!legacyReached.some((goal) => goal.id === ids[0].toString()));
+    assert.ok(!legacyActive.some((goal) => goal.id === ids[1].toString()));
+    console.log('EXPECTED_LEGACY_MISMATCH (constructed persisted-filter baseline only)');
     const expected = { all: [4, 3, 2, 1, 0], open: [3, 2, 1, 0], active: [2, 1], reached: [3, 0], closed: [4] } as const;
     for (const status of ['all', 'open', 'active', 'reached', 'closed'] as const) {
       const seen: string[] = [];
       let cursor: string | undefined;
       do {
         const page = await savingsService.list(couple, { status, limit: 1, cursor });
+        if (status === 'active' || status === 'reached' || status === 'closed') {
+          assert.ok(page.items.every((item) => item.status === status), 'exact filter must match the current DTO status');
+        }
         seen.push(...page.items.map((item) => item.id));
         cursor = page.nextCursor ?? undefined;
         assert.ok(seen.length <= 5, 'cursor repeated');
@@ -86,7 +108,9 @@ async function main() {
     const after = await Couple.findById(couple._id).exec();
     assert.equal(after?.savingsWriteToken, 'fixture-held-token');
     assert.equal(after?.savingsWriteStartedAt?.toISOString(), started.toISOString());
-    console.log('exclusive local savings list fixture passed');
+    const persistedAfter = await SavingsGoal.find({ coupleId: couple._id }).sort({ _id: 1 }).lean().exec();
+    assert.deepEqual(persistedAfter, persistedBefore, 'GET projections must not reconcile or modify persisted goals');
+    console.log('fixed savings list assertions passed on exclusive synthetic fixture; not production/crash evidence');
     // Leave the synthetic database intact for inspection; never release or recover the token.
   } finally {
     await mongoose.disconnect();
