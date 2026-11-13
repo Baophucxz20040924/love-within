@@ -22,6 +22,7 @@ import { LinkBankWizard } from '../features/finance/LinkBankWizard';
 import { NoteSheet } from '../features/finance/NoteSheet';
 import { ApiRequestError } from '../lib/apiClient';
 import { localDateOf, shortName, timeAgo } from '../lib/format';
+import { tokenStore } from '../lib/tokenStore';
 import type { BankTxn, FinanceConnection } from '../lib/types';
 
 function MineView({ conn, month, today, onLink }: { conn: FinanceConnection; month: string; today: string; onLink: () => void }) {
@@ -197,18 +198,25 @@ export function FinancePage() {
 
   // Opening the page asks the server to poll the bank now (it reuses a poll younger than 60 s).
   const synced = useRef(false);
+  const [generation] = useState(() => tokenStore.generation());
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
   const linked = conn.data?.linked ?? false;
   useEffect(() => {
-    if (!linked || synced.current) return;
+    if (!linked || synced.current || !mounted.current || !tokenStore.isCurrent(generation)) return;
     synced.current = true;
     financeApi
       .sync()
       .then((r) => {
+        if (!mounted.current || !tokenStore.isCurrent(generation)) return;
         qc.setQueryData(FINANCE_CONNECTION_KEY, r.connection);
         if (r.inserted > 0) void qc.invalidateQueries({ queryKey: financeOwnerKey('mine') });
       })
       .catch(() => undefined);
-  }, [linked, qc]);
+  }, [generation, linked, qc]);
 
   return (
     <Page
