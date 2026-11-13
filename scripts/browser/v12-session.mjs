@@ -138,6 +138,67 @@ try {
     passed.push(`${fault}: no old content/success toast in original document after login B`);
     await context.close();
   }
+  for (const operation of ['pin', 'remove', 'note']) {
+    const { context, page } = await h.fresh(browser, `late-${operation}-success`, errors);
+    await h.login(page, a);
+    const other = await context.newPage(); await other.goto(`${h.baseURL}/profile`);
+    await other.getByRole('button', { name: 'Đăng xuất', exact: true }).waitFor();
+    const arrived = gate(); const held = gate(); const completed = gate(); releases.push(held.resolve);
+    const goalId = '000000000000000000000011', entryId = '000000000000000000000012';
+    const txnId = '000000000000000000000013', at = '2026-11-13T02:00:00.000Z';
+    const goal = { id: goalId, title: 'V12 synthetic session goal', emoji: '💰', targetVnd: 1000000, totalVnd: 100000, status: 'active', reachedAt: null, dueOn: null, createdBy: a.id, createdAt: at, updatedAt: at, pinned: false, contributions: [{ userId: a.id, amountVnd: 100000 }], forecastOn: null, version: 1 };
+    const txn = { id: txnId, direction: 'out', amount: 100000, occurredAt: at, localDate: '2026-11-13', note: '', isMine: true };
+    let mutations = 0;
+    await context.route('**/api/**', async route => {
+      const request = route.request(), url = new URL(request.url());
+      if (request.frame().page() !== page) return route.continue();
+      const target = operation === 'pin' ? url.pathname === '/api/savings/pinned' && request.method() === 'PUT'
+        : operation === 'remove' ? url.pathname === `/api/savings/${goalId}/entries/${entryId}` && request.method() === 'DELETE'
+        : url.pathname === `/api/finance/transactions/${txnId}/note` && request.method() === 'PATCH';
+      if (target) {
+        mutations++; arrived.resolve(); await held.promise;
+        await json(route, 200, { data: operation === 'pin' ? { goalId } : operation === 'remove' ? { ok: true, goal } : { ...txn, note: 'V12 delayed old note' } });
+        completed.resolve(); return;
+      }
+      if (request.method() === 'GET' && url.pathname === `/api/savings/${goalId}`) return json(route, 200, { data: { goal, entries: [{ id: entryId, goalId, userId: a.id, amountVnd: 100000, occurredOn: '2026-11-13', note: 'Synthetic entry', source: 'manual', createdAt: at, isMine: true }], nextCursor: null } });
+      if (operation === 'note') {
+        const connection = { linked: true, status: 'active', bankBrand: 'mock', accountLast4: '0000', lastSuccessAt: at, lastError: null, visibility: 'private' };
+        if (url.pathname === '/api/finance/connection' && request.method() === 'GET') return json(route, 200, { data: connection });
+        // Prevent FinancePage's automatic sync from invoking even a local provider.
+        if (url.pathname === '/api/finance/connection/sync') return json(route, 200, { data: { connection, synced: false, inserted: 0, error: null } });
+        if (url.pathname.endsWith('/summary') && url.pathname.startsWith('/api/finance/')) return json(route, 200, { data: { month: '2026-11', totalIn: 0, totalOut: 100000, net: -100000, count: 1 } });
+        if (url.pathname.endsWith('/transactions') && url.pathname.startsWith('/api/finance/')) return json(route, 200, { data: { items: [txn], nextCursor: null } });
+      }
+      await route.continue();
+    });
+    if (operation === 'note') {
+      await page.goto(`${h.baseURL}/finance`);
+      await page.getByRole('button', { name: /^Tiền ra .*sửa ghi chú/ }).first().click();
+      const sheet = page.getByRole('dialog', { name: 'Ghi chú giao dịch', exact: true });
+      await sheet.getByLabel('Ghi chú', { exact: false }).fill('V12 delayed old note');
+      await sheet.getByRole('button', { name: 'Lưu ghi chú', exact: true }).click();
+    } else {
+      await page.goto(`${h.baseURL}/savings/${goalId}`);
+      if (operation === 'pin') await page.getByRole('button', { name: 'Ghim lên Trang chủ', exact: true }).click();
+      else {
+        await page.getByRole('button', { name: /^Xóa khoản của tôi ngày/ }).click();
+        await page.getByRole('dialog', { name: 'Xóa khoản ghi?', exact: true }).getByRole('button', { name: 'Xóa khoản này', exact: true }).click();
+      }
+    }
+    await bounded(arrived.promise);
+    await other.getByRole('button', { name: 'Đăng xuất', exact: true }).click();
+    await other.waitForURL(url => url.pathname === '/login'); await h.login(other, b);
+    const nextSession = await other.evaluate(() => ({ generation: localStorage.getItem('lw.sessionGeneration'), access: localStorage.getItem('lw.accessToken') }));
+    await page.waitForFunction(expected => localStorage.getItem('lw.sessionGeneration') === expected.generation, nextSession);
+    held.resolve(); await bounded(completed.promise);
+    await page.evaluate(() => { history.pushState(null, '', '/quests/bucket'); dispatchEvent(new PopStateEvent('popstate')); });
+    await page.getByRole('heading', { name: 'Bucket list', exact: true }).waitFor();
+    h.assert.equal(mutations, 1, 'Old mutation must never replay under account B');
+    h.assert.equal(await page.locator('.toast').count(), 0, 'Old pin/remove/note completion emitted a toast into account B');
+    h.assert(await page.evaluate(expected => localStorage.getItem('lw.sessionGeneration') === expected.generation && localStorage.getItem('lw.accessToken') === expected.access, nextSession), 'Old detail mutation changed the new session');
+    passed.push(`late-${operation}-success: no replay/toast/session change after login B (synthetic response)`);
+    await context.close();
+  }
   {
     const { context, page } = await h.fresh(browser, 'same-tab-duplicate-submit', errors);
     await page.goto(`${h.baseURL}/login`);
