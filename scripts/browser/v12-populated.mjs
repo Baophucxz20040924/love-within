@@ -43,7 +43,10 @@ try {
         const observer = new PerformanceObserver(list => {
           for (const entry of list.getEntries()) {
             if (entry.hadRecentInput) continue;
-            if (window.__labShifts.entries.length < 1000) window.__labShifts.entries.push({ time: entry.startTime, value: entry.value });
+            if (window.__labShifts.entries.length < 1000) window.__labShifts.entries.push({ time: entry.startTime, value: entry.value, scrollY: window.scrollY, sources: (entry.sources ?? []).slice(0, 5).map(source => {
+              const rect = value => ({ x: value.x, y: value.y, width: value.width, height: value.height });
+              return { tag: source.node?.tagName ?? null, class: typeof source.node?.className === 'string' ? source.node.className.slice(0, 100) : null, previous: rect(source.previousRect), current: rect(source.currentRect) };
+            }) });
             else window.__labShifts.dropped++;
           }
         });
@@ -183,6 +186,6 @@ export function summarizeShifts(entries) {
 }
 async function readCls(page, navigation, viewport) {
   const data = await page.evaluate(() => window.__labShifts);
-  return { navigation, viewport, supported: data.supported, observedEntries: data.entries.length, droppedEntries: data.dropped, truncated: data.dropped > 0, ...summarizeShifts(data.entries), scope: 'lab-only; navigation to capture during scripted interactions, excludes shifts after recent input; not field or full app' };
+  return { navigation, viewport, supported: data.supported, observedEntries: data.entries.length, entries: data.entries, droppedEntries: data.dropped, truncated: data.dropped > 0, ...summarizeShifts(data.entries), scope: 'lab-only; navigation to capture during scripted interactions, excludes shifts after recent input; not field or full app' };
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) await main();
