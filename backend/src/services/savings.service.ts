@@ -180,12 +180,14 @@ async function addEntry(ctx: SavingsWriteContext, userId: string, goal: SavingsG
 export const savingsService = {
   async list(couple: CoupleDoc, query: Partial<SavingsListInput> = {}): Promise<{ items: SavingsGoalView[]; nextCursor: string | null }> {
     const input = savingsListSchema.parse(query);
-    const rows = await savingsRepository.list(couple._id, input);
-    const goals = rows.slice(0, input.limit);
     const today = todayOf(couple);
-    const totals = await savingsRepository.totals(couple._id, goals.map((g) => g._id), addDays(today, -29), today);
+    const from = addDays(today, -29);
+    const exact = input.status === 'active' || input.status === 'reached';
+    const rows = await savingsRepository.list(couple._id, input, exact ? { from, today } : undefined);
+    const goals = rows.slice(0, input.limit);
+    const totals = exact ? null : await savingsRepository.totals(couple._id, goals.map((g) => g._id), from, today);
     const last = goals.at(-1);
-    return { items: goals.map((g) => goalView(couple, g, totals.get(g.id) ?? emptyTotals())),
+    return { items: goals.map((g) => goalView(couple, g, exact ? g.selectedTotals! : totals!.get(g.id) ?? emptyTotals())),
       nextCursor: rows.length > input.limit && last ? `${last.createdAt.toISOString()}_${last.id}` : null };
   },
   async detail(couple: CoupleDoc, userId: string, id: string, cursor?: string, limit = 20) {
