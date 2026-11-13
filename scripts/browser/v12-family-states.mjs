@@ -140,4 +140,7 @@ async function main() {
     await h.writeResult({ ok: false, checks, inventory, errors, blocked, failure, limitations }); console.error(failure); process.exitCode = 1;
   } finally { await browser?.close(); }
 }
-if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) await main();
+if (process.argv.includes('--validate')) {
+  validate(fixtures({ id: id(900), displayName: 'An' }, { id: id(901), displayName: 'Bình' }));
+  console.log('PASS pure market/pairing/invite fixtures; browser not run');
+} else if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) await main();
