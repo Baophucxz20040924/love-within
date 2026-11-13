@@ -3,7 +3,7 @@ import type { FormEvent } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { BottomSheet } from '../../components/BottomSheet';
 import { useToast } from '../../components/Toast';
-import { ApiRequestError } from '../../lib/apiClient';
+import { ApiRequestError, assertCurrentSession } from '../../lib/apiClient';
 import { formatDate, formatSignedVnd, formatTime } from '../../lib/format';
 import { tokenStore } from '../../lib/tokenStore';
 import type { BankTxn } from '../../lib/types';
@@ -12,7 +12,9 @@ import { BankSavingsAction } from '../savings/SavingsSheets';
 
 function useMutationSession() {
   const [generation] = useState(() => tokenStore.generation());
-  return { current: () => tokenStore.isCurrent(generation) };
+  const mounted = useRef(true);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+  return { generation, current: () => mounted.current && tokenStore.isCurrent(generation) };
 }
 
 const MAX_NOTE = 200;
@@ -34,7 +36,7 @@ export function NoteSheet({ txn, onClose }: { txn: BankTxn | null; onClose: () =
   }, [txn?.id]);
 
   const save = useMutation({
-    mutationFn: (value: string) => financeApi.setNote(txn!.id, value),
+    mutationFn: (value: string) => { assertCurrentSession(session.generation); return financeApi.setNote(txn!.id, value); },
     onSuccess: async (t) => {
       if (!session.current()) return;
       toast.success(t.note ? 'Đã lưu ghi chú' : 'Đã xóa ghi chú');
@@ -51,7 +53,7 @@ export function NoteSheet({ txn, onClose }: { txn: BankTxn | null; onClose: () =
   }
 
   function submit(value: string) {
-    if (!txn || submitting.current) return;
+    if (!txn || submitting.current || !session.current()) return;
     submitting.current = true;
     setError(null);
     save.mutate(value);

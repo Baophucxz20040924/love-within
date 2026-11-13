@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { BottomSheet } from '../components/BottomSheet';
@@ -9,13 +9,16 @@ import { refreshSavings, savingsApi, savingsDetailKey, savingsError } from '../f
 import { SavingsEntrySheet, SavingsGoalSheet } from '../features/savings/SavingsSheets';
 import { SavingsCelebration, SavingsMembers, SavingsProgress } from '../features/savings/SavingsViews';
 import { formatDay, formatNetVnd } from '../lib/format';
+import { assertCurrentSession } from '../lib/apiClient';
 import { tokenStore } from '../lib/tokenStore';
 import type { SavingsEntry } from '../lib/types';
 
-/** Ignore delayed completions from a previous login when this detail remains mounted. */
+/** Ignore delayed completions after unmount or a login change. */
 function useMutationSession() {
   const [generation] = useState(() => tokenStore.generation());
-  return { generation, current: () => tokenStore.isCurrent(generation) };
+  const mounted = useRef(true);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+  return { generation, current: () => mounted.current && tokenStore.isCurrent(generation) };
 }
 
 export function SavingsDetailPage() {
@@ -39,12 +42,12 @@ export function SavingsDetailPage() {
   const entries = detail.data?.pages.flatMap((p) => p.entries) ?? [];
   const closed = goal?.status === 'closed';
   const pin = useMutation({
-    mutationFn: () => savingsApi.pin(goal!.pinned ? null : id),
+    mutationFn: () => { assertCurrentSession(session.generation); return savingsApi.pin(goal!.pinned ? null : id); },
     onSuccess: async () => { if (!session.current()) return; toast.success(goal?.pinned ? 'Đã bỏ ghim' : 'Đã ghim lên Trang chủ'); await refreshSavings(qc); },
     onError: async (err) => { if (!session.current()) return; toast.error(savingsError(err)); await refreshSavings(qc); },
   });
   const remove = useMutation({
-    mutationFn: () => savingsApi.removeEntry(id, deleting!.id),
+    mutationFn: () => { assertCurrentSession(session.generation); return savingsApi.removeEntry(id, deleting!.id); },
     onSuccess: async () => { if (!session.current()) return; setDeleting(null); toast.success('Đã xóa khoản ghi'); await refreshSavings(qc); },
     onError: async (err) => { if (!session.current()) return; toast.error(savingsError(err)); await refreshSavings(qc); },
   });
