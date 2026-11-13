@@ -98,7 +98,7 @@ async function main() {
   process.env.LW_EVIDENCE_DIR ||= path.join(os.tmpdir(), 'lw_pw', 'shots', `v12-outing-states-${Date.now()}`);
   const h = await import('./harness.mjs');
   const inventory = [], checks = [], errors = []; let browser;
-  const limitations = ['Synthetic GET detail rendering only; no server ACL, mutation, capacity or login-flow proof', 'No synthetic social detail requests; no settlement confirmation submitted', 'Screenshots are explicit viewport-only captures requiring manual review; no full-page or visual acceptance implied', 'Control focus and Tab return are checked; comprehensive keyboard/assistive technology acceptance is not proved', 'Loading/error, 390px, short viewport, zoom, reduced motion and real device remain separate gates'];
+  const limitations = ['Synthetic GET detail rendering only; no server ACL, mutation, capacity or login-flow proof', 'No synthetic social detail requests; no settlement confirmation submitted', 'Screenshots are explicit viewport-only captures requiring manual review; no full-page or visual acceptance implied', 'Control focus and Tab return are checked; comprehensive keyboard/assistive technology acceptance is not proved', 'Loading/error, short viewport, zoom, reduced motion and real device remain separate gates'];
   const counts = () => ({ mainStates: inventory.filter(s => /-main-/.test(s.screenshot)).length, screenshots: inventory.length, checks: checks.length });
   try {
     assert(process.env.LW_BASELINE_FIXTURE, 'LW_BASELINE_FIXTURE required');
@@ -113,7 +113,7 @@ async function main() {
     assert(membership.ok, `Existing friends membership required (HTTP ${membership.status})`);
     const states = makeStates(owner, partner); validateStates(states, owner, partner);
     browser = await h.openBrowser();
-    for (const viewport of [{ width: 360, height: 780 }, { width: 1280, height: 900 }]) {
+    for (const viewport of [{ width: 360, height: 780 }, { width: 390, height: 844 }, { width: 1280, height: 900 }]) {
       for (const [name, view] of Object.entries(states)) {
         const { context, page } = await h.fresh(browser, `${name}-${viewport.width}`, errors);
         try {
