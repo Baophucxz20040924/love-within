@@ -10,12 +10,33 @@ export const savingsRepository = {
   },
   list(coupleId: Types.ObjectId, input: SavingsListInput) {
     const filter: Record<string, unknown> = { coupleId };
-    if (input.status === 'open') filter.status = { $in: ['active', 'reached'] };
+    if (input.status === 'open' || input.status === 'active' || input.status === 'reached') filter.status = { $in: ['active', 'reached'] };
     else if (input.status !== 'all') filter.status = input.status;
     if (input.q) filter.title = { $regex: input.q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), $options: 'i' };
     if (input.cursor) {
       const [date, id] = input.cursor.split('_');
       filter.$or = [{ createdAt: { $lt: new Date(date) } }, { createdAt: new Date(date), _id: { $lt: new Types.ObjectId(id) } }];
+    }
+    if (input.status === 'active' || input.status === 'reached') {
+      return SavingsGoal.aggregate([
+        { $match: filter },
+        { $sort: { createdAt: -1, _id: -1 } },
+        { $lookup: {
+          from: SavingsEntry.collection.name,
+          let: { goalId: '$_id' },
+          pipeline: [
+            { $match: { coupleId, deletedAt: null, $expr: { $eq: ['$goalId', '$$goalId'] } } },
+            { $group: { _id: null, totalVnd: { $sum: '$amountVnd' } } },
+          ],
+          as: '_entryTotals',
+        } },
+        { $match: { $expr: { [input.status === 'reached' ? '$gte' : '$lt']: [
+          { $ifNull: [{ $arrayElemAt: ['$_entryTotals.totalVnd', 0] }, 0] }, '$targetVnd',
+        ] } } },
+        { $limit: input.limit + 1 },
+        { $project: { _entryTotals: 0, appliedProposalIds: 0 } },
+      ]).option({ maxTimeMS: 3000 }).exec().then((rows) =>
+        rows.map((row) => SavingsGoal.hydrate(row, { appliedProposalIds: 0 })));
     }
     return SavingsGoal.find(filter).select('-appliedProposalIds').sort({ createdAt: -1, _id: -1 })
       .limit(input.limit + 1).maxTimeMS(3000).exec();
