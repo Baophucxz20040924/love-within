@@ -4,11 +4,18 @@ import { SavingsGoal } from '../src/models/SavingsGoal.js';
 import { SavingsEntry } from '../src/models/SavingsEntry.js';
 import { savingsRepository } from '../src/repositories/savings.repository.js';
 import type { SavingsListInput } from '../src/services/savings.validation.js';
-import { savingsService } from '../src/services/savings.service.js';
+import { randomBytes } from 'node:crypto';
+import { createRequire } from 'node:module';
+
+// Disable configuration loading before importing service dependencies for pure mocks.
+const require = createRequire(__filename);
+require('dotenv').config = () => ({ parsed: {} });
+process.env = { NODE_ENV: 'test', MONGODB_URI: 'mongodb://127.0.0.1:27017/never_connect_pure_mock', JWT_SECRET: randomBytes(48).toString('hex'), JWT_REFRESH_SECRET: randomBytes(48).toString('hex'), STORAGE_PROVIDER: 'memory', AI_PROVIDER: 'mock', AI_CHAT_PROVIDER: 'mock', BANK_PROVIDER: 'mock', PUSH_PROVIDER: 'mock', SCHEDULER_ENABLED: 'false' };
 import type { CoupleDoc } from '../src/models/Couple.js';
 
 // Pure mocks only: this script never connects to a database.
 async function main() {
+  const { savingsService } = await import('../src/services/savings.service.js');
   const coupleId = new Types.ObjectId('111111111111111111111111');
   const id = new Types.ObjectId('222222222222222222222222');
   const date = '2026-01-01T00:00:00.000Z';

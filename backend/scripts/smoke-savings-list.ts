@@ -5,14 +5,14 @@ import { Socket } from 'node:net';
 
 // Offline fixture only. App configuration receives synthetic process-only values;
 // dotenv is disabled before any app imports, so the real .env is never loaded.
-// The operator must ensure this fixed loopback database is fresh and exclusively owned.
+// Generate a fresh exclusive synthetic database for each run; retain prior fixtures.
 async function main() {
   if (process.argv.length !== 3 || process.argv[2] !== '--exclusive-local-fixture') {
     throw new Error('Requires --exclusive-local-fixture and an exclusively owned fresh local MongoDB fixture');
   }
   const require = createRequire(__filename);
   require('dotenv').config = () => ({ parsed: {} });
-  const uri = 'mongodb://127.0.0.1:27017/savings_list_exclusive_fixture';
+  const uri = `mongodb://127.0.0.1:27017/savings_list_exclusive_fixture_${randomBytes(8).toString('hex')}`;
   process.env = {
     NODE_ENV: 'test', MONGODB_URI: uri,
     JWT_SECRET: randomBytes(48).toString('hex'), JWT_REFRESH_SECRET: randomBytes(48).toString('hex'),
