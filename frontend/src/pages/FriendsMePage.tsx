@@ -30,8 +30,11 @@ function BioSheet({ open, onClose, userId, initial }: { open: boolean; onClose: 
       onClose();
       await qc.invalidateQueries({ queryKey: friendProfileKey(userId) });
     },
-    onError: (err) => toast.error(err instanceof ApiRequestError ? err.message : 'Không lưu được, thử lại nhé.'),
   });
+
+  useEffect(() => {
+    if (open && save.isError) save.reset();
+  }, [open, save.reset]);
 
   function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -48,6 +51,7 @@ function BioSheet({ open, onClose, userId, initial }: { open: boolean; onClose: 
             {bio.length}/{MAX_BIO}
           </span>
         </label>
+        {save.isError && <p className="form-feedback" role="alert">{save.error instanceof ApiRequestError ? save.error.message : 'Không lưu được, thử lại nhé.'}</p>}
         <button type="submit" className="btn btn-primary btn-lg btn-block" disabled={save.isPending}>
           {save.isPending && <span className="spinner" aria-hidden="true" />}
           Lưu

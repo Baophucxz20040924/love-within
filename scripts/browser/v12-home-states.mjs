@@ -5,10 +5,11 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { pathToFileURL } from 'node:url';
+import { classify, fixedTime, fixtures as dailyFixtures } from './v12-daily-states.mjs';
 
 const id = n => n.toString(16).padStart(24, '0');
 export function fixtures(owner, partner) {
-  const now = new Date(), date = now.toISOString().slice(0, 10), at = now.toISOString();
+  const now = new Date(fixedTime), date = now.toISOString().slice(0, 10), at = now.toISOString();
   const question = { id: id(901), localDate: date, text: 'Kỷ niệm nào của hai bạn khiến bạn mỉm cười ngay cả trong những ngày thật bận rộn?', category: 'Kỷ niệm', source: 'bank', askedBy: null, mine: null, partner: { answered: true }, locked: false, myAsk: null };
   const mood = (userId, value) => ({ userId, localDate: date, mood: value, note: '', updatedAt: at });
   const dense = {
@@ -42,33 +43,48 @@ async function main() {
   try {
     assert(process.env.LW_BASELINE_FIXTURE, 'LW_BASELINE_FIXTURE required');
     const baseline = JSON.parse(await readFile(process.env.LW_BASELINE_FIXTURE, 'utf8'));
-    assert(baseline.synthetic && baseline.users?.length === 2, 'Synthetic paired baseline required');
+    assert(baseline.synthetic === true && baseline.users?.length === 2, 'Synthetic paired baseline required');
     const [owner, partner] = baseline.users;
     assert(owner.id && partner.id && owner.id !== partner.id, 'Two distinct paired users required');
     // Ordinary API login, tokens retained in memory only; this is not login-flow proof.
     const login = await h.api('POST', '/auth/login', { email: owner.email, password: owner.password });
-    const data = fixtures(owner, partner);
+    const me = await h.api('GET', '/me', undefined, login.accessToken);
+    assert.equal(me.user.id, owner.id); assert(me.user.coupleId && me.couple, 'Paired baseline required');
+    assert(me.couple.members.some(m => m.id === partner.id), 'Baseline partner mismatch');
+    const data = fixtures(owner, partner), daily = dailyFixtures(owner, partner);
     browser = await h.openBrowser();
     const viewports = [{ width: 360, height: 780 }, { width: 390, height: 844 }, { width: 1280, height: 900 }];
-    // Eight selected cases, rather than a complete state/viewport matrix.
-    const cases = [...viewports.map(viewport => ({ state: 'dense', viewport })), ...viewports.map(viewport => ({ state: 'empty', viewport })), ...[viewports[0], viewports[2]].map(viewport => ({ state: 'pulse-error', viewport }))];
+    // Three explicit pulse states at every viewport, including the formerly missing 390 failure.
+    const cases = ['dense', 'empty', 'pulse-error'].flatMap(state => viewports.map(viewport => ({ state, viewport })));
     for (const { state, viewport } of cases) {
-      const observed = [], blocked = [];
+      const observed = [], blocked = []; let pulseFailures = 0, pulseRecovered = false, recoveryRequests = 0;
       const { context, page } = await h.fresh(browser, `${state}-${viewport.width}`, observed);
       await page.setViewportSize(viewport);
+      await page.clock.setFixedTime(new Date(fixedTime));
       await context.addInitScript(tokens => {
         localStorage.setItem('lw.accessToken', tokens.accessToken);
         localStorage.setItem('lw.refreshToken', tokens.refreshToken);
         localStorage.setItem('lw.space', 'couple');
       }, login);
-      // All mutations are blocked, not emulated. Only two exact GET endpoints are replaced.
+      // All mutations are blocked. Common Home dependencies are deterministic GET DTOs.
       await context.route('**/api/**', async route => {
         const request = route.request(), url = new URL(request.url());
         if (request.method() !== 'GET') { blocked.push(request.method()); return route.abort(); }
+        const send = value => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: value }) });
+        if (url.pathname === '/api/proposals' && url.searchParams.get('status') === 'pending') return send([]);
         if (url.search) return route.continue();
+        if (url.pathname === '/api/me') return send(me);
+        if (url.pathname === '/api/couple') return send(me.couple);
+        if (url.pathname === '/api/checkin') return send(daily.checkin);
+        if (url.pathname === '/api/quests/today') return send(daily.quests);
+        if (['/api/water/pending', '/api/market/redemptions/pending'].includes(url.pathname)) return send([]);
+        if (url.pathname === '/api/market/unread-count') return send({ count: 0, responded: 0, newItems: 0 });
+        if (url.pathname === '/api/wallet') return send({ coinBalance: 1000000, level: 12, exp: 1250, levelBaseExp: 1200, nextLevelExp: 1400 });
+        if (url.pathname === '/api/finance/connection') return send({ linked: false, status: null });
         if (url.pathname === '/api/couple/pulse') {
-          if (state === 'pulse-error') return route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: { code: 'UNAVAILABLE', message: 'Unavailable' } }) });
-          return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: data[state] }) });
+          if (state === 'pulse-error' && !pulseRecovered) { pulseFailures++; return route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: { code: 'UNAVAILABLE', message: 'Unavailable' } }) }); }
+          if (pulseRecovered) recoveryRequests++;
+          return send(data[state === 'pulse-error' ? 'dense' : state]);
         }
         if (url.pathname === '/api/questions/today') return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: data.question }) });
         return route.continue();
@@ -102,14 +118,26 @@ async function main() {
         await h.screenshot(page, name, { fullPage: false });
         inventory.push({ state, width: viewport.width, position, screenshot: `${name}.png` });
       }
+      const bottom = page.locator('.wallet-card');
+      await bottom.scrollIntoViewIfNeeded();
+      assert(await bottom.evaluate(el => { const r = el.getBoundingClientRect(); return r.bottom <= innerHeight && r.top >= 0; }), 'Home wallet bottom reachable');
+      if (state === 'pulse-error') {
+        assert.equal(pulseFailures, 2, 'Initial pulse failure and one automatic retry only');
+        const alert = page.getByRole('alert').filter({ hasText: 'Chưa cập nhật được hoạt động' });
+        pulseRecovered = true; await alert.getByRole('button', { name: 'Thử lại', exact: true }).click();
+        await alert.waitFor({ state: 'hidden' }); await page.getByRole('heading', { name: 'Khoảnh khắc đang mở' }).waitFor();
+        assert.equal(recoveryRequests, 1, 'One manual pulse recovery request');
+        await page.evaluate(() => scrollTo(0, 0)); await h.noOverflow(page);
+        const name = `home-${state}-${viewport.width}-retry`; await h.screenshot(page, name, { fullPage: false });
+        inventory.push({ state: 'pulse-retry', width: viewport.width, position: 'top', screenshot: `${name}.png` });
+      }
       assert.equal(blocked.length, 0, 'Unexpected mutation blocked');
-      // Do not serialize raw URLs, errors, account identifiers, or credentials to evidence.
-      const unexpected = observed.filter(e => !(state === 'pulse-error' && ((e.type === 'http' && e.path === '/api/couple/pulse' && e.status === 503) || (e.type === 'console' && /503/.test(e.message)))));
-      assert.equal(unexpected.length, 0, 'Unexpected browser errors');
+      classify(observed, state === 'pulse-error' ? [{ label: `${state}-${viewport.width}`, path: '/api/couple/pulse', status: 503, count: 2 }] : []);
+      errors.push(...observed);
       checks.push(`${state} ${viewport.width}: headings and state checked; three viewport captures`);
       await context.close();
     }
-    await h.writeResult({ ok: true, checks, inventory, limitations: ['Synthetic browser GET fixtures; no backend population, login-flow or mutation proof', 'Pulse failure is injected; dependent live requests remain real', 'Screenshots require manual visual review; selected cases only'] });
+    await h.writeResult({ ok: true, checks, inventory, errors, limitations: ['Synthetic browser GET fixtures; no backend population, login-flow or mutation proof', 'Pulse failure/retry is injected and exactly counted; fixed browser date and common GET fixtures', 'Screenshots require manual visual review; selected cases only'] });
     console.log(`PASS ${checks.length} cases; ${inventory.length} captures; ${h.evidenceDir}`);
   } catch (error) {
     const failure = h.sanitize(String(error.message).split('\nCall log:')[0]);
