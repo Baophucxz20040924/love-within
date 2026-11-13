@@ -136,7 +136,7 @@ async function main() {
           if (name === 'invited' || name === 'declined') {
             assert.equal(await page.locator('.outing-hero, .outing-expense').count(), 0);
             if (name === 'invited') { assert(await button('Nhận lời tham gia').isEnabled()); assert(await button('Từ chối').isEnabled()); }
-            else { await absent('Nhận lời tham gia'); await absent('Từ chối'); }
+            else { await absent('Nhận lời tham gia'); await absent('Từ chối'); await page.getByText('Bạn đã từ chối lời mời này, không được tính phần tiền và không xem được sổ.', { exact: true }).waitFor(); }
           } else {
             if (name === 'collecting-empty') { await page.getByText('Chưa có khoản chi nào', { exact: true }).waitFor(); assert(await button('Thêm chi phí').isEnabled()); }
             if (name === 'review-one-left') { await page.getByText('1/2 người đã đồng ý', { exact: true }).waitFor(); assert(await button('Kiểm tra xong, đồng ý chốt').isEnabled()); }
