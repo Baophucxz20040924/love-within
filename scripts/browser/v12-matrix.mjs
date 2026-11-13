@@ -20,6 +20,8 @@ async function capture(page, id, route, viewport, state) {
   await page.goto(`${h.baseURL}${route}`);
   await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {});
   await page.evaluate(() => document.fonts.ready);
+  h.assert.equal(new URL(page.url()).pathname, route, `${id}: capture must remain on its expected route`);
+  h.assert(await page.locator('h1').count() > 0, `${id}: rendered page needs a heading`);
   await h.noOverflow(page);
   const name = `${id}-${viewport.width}-${state}`;
   await h.screenshot(page, name);
