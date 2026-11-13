@@ -9,12 +9,20 @@ import { refreshSavings, savingsApi, savingsDetailKey, savingsError } from '../f
 import { SavingsEntrySheet, SavingsGoalSheet } from '../features/savings/SavingsSheets';
 import { SavingsCelebration, SavingsMembers, SavingsProgress } from '../features/savings/SavingsViews';
 import { formatDay, formatNetVnd } from '../lib/format';
+import { tokenStore } from '../lib/tokenStore';
 import type { SavingsEntry } from '../lib/types';
+
+/** Ignore delayed completions from a previous login when this detail remains mounted. */
+function useMutationSession() {
+  const [generation] = useState(() => tokenStore.generation());
+  return { generation, current: () => tokenStore.isCurrent(generation) };
+}
 
 export function SavingsDetailPage() {
   const { id = '' } = useParams();
   const qc = useQueryClient();
   const toast = useToast();
+  const session = useMutationSession();
   const { partnerName } = useCouplePeople();
   const [sheet, setSheet] = useState<'give' | 'withdraw' | 'update' | 'close' | null>(null);
   const [deleting, setDeleting] = useState<SavingsEntry | null>(null);
@@ -32,14 +40,16 @@ export function SavingsDetailPage() {
   const closed = goal?.status === 'closed';
   const pin = useMutation({
     mutationFn: () => savingsApi.pin(goal!.pinned ? null : id),
-    onSuccess: async () => { toast.success(goal?.pinned ? 'Đã bỏ ghim' : 'Đã ghim lên Trang chủ'); await refreshSavings(qc); },
-    onError: async (err) => { toast.error(savingsError(err)); await refreshSavings(qc); },
+    onSuccess: async () => { if (!session.current()) return; toast.success(goal?.pinned ? 'Đã bỏ ghim' : 'Đã ghim lên Trang chủ'); await refreshSavings(qc); },
+    onError: async (err) => { if (!session.current()) return; toast.error(savingsError(err)); await refreshSavings(qc); },
   });
   const remove = useMutation({
     mutationFn: () => savingsApi.removeEntry(id, deleting!.id),
-    onSuccess: async () => { setDeleting(null); toast.success('Đã xóa khoản ghi'); await refreshSavings(qc); },
-    onError: async (err) => { toast.error(savingsError(err)); await refreshSavings(qc); },
+    onSuccess: async () => { if (!session.current()) return; setDeleting(null); toast.success('Đã xóa khoản ghi'); await refreshSavings(qc); },
+    onError: async (err) => { if (!session.current()) return; toast.error(savingsError(err)); await refreshSavings(qc); },
   });
+  const pinFromCurrentSession = () => { if (session.current()) pin.mutate(); };
+  const removeFromCurrentSession = () => { if (session.current()) remove.mutate(); };
   return <Page title={goal ? `${goal.emoji} ${goal.title}` : 'Chi tiết quỹ'} back="/savings">
     {detail.isLoading && <Skeleton height={220} count={2} />}
     {detail.isError && !detail.isFetchNextPageError && <ErrorState onRetry={() => void detail.refetch()} />}
@@ -54,7 +64,7 @@ export function SavingsDetailPage() {
       </section>
       {closed ? <p className="card text-sm" role="status">Quỹ đã đóng, chỉ xem lại lịch sử. Không thể góp, rút hay xóa khoản.</p> : <>
         <div className="btn-row"><button type="button" className="btn btn-primary" onClick={() => setSheet('give')}>Góp tiền</button><button type="button" className="btn btn-outline" onClick={() => setSheet('withdraw')}>Rút tiền</button></div>
-        <div className="savings-actions"><button type="button" className="btn btn-outline" disabled={pin.isPending} onClick={() => pin.mutate()}>{goal.pinned ? 'Bỏ ghim' : 'Ghim lên Trang chủ'}</button><button type="button" className="btn btn-ghost" onClick={() => setSheet('update')}>Đổi mục tiêu / hạn</button><button type="button" className="btn btn-ghost" onClick={() => setSheet('close')}>Đóng quỹ</button></div>
+        <div className="savings-actions"><button type="button" className="btn btn-outline" disabled={pin.isPending} onClick={pinFromCurrentSession}>{goal.pinned ? 'Bỏ ghim' : 'Ghim lên Trang chủ'}</button><button type="button" className="btn btn-ghost" onClick={() => setSheet('update')}>Đổi mục tiêu / hạn</button><button type="button" className="btn btn-ghost" onClick={() => setSheet('close')}>Đóng quỹ</button></div>
         <p className="text-sm text-muted">Đổi mục tiêu, hạn hoặc đóng quỹ cần cả hai đồng ý. <Link to="/approvals" className="text-link">Xem Cần duyệt</Link></p>
       </>}
       {goal.reachedAt && <section className="card stack" aria-label="Cột mốc của quỹ">
@@ -79,7 +89,7 @@ export function SavingsDetailPage() {
       {(sheet === 'give' || sheet === 'withdraw') && <SavingsEntrySheet key={sheet} goal={goal} withdraw={sheet === 'withdraw'} onClose={() => setSheet(null)} />}
       {!closed && (sheet === 'update' || sheet === 'close') && <SavingsGoalSheet key={sheet} goal={goal} closeGoal={sheet === 'close'} onClose={() => setSheet(null)} />}
       <BottomSheet open={Boolean(deleting) && !closed} title="Xóa khoản ghi?" onClose={() => { if (!remove.isPending) setDeleting(null); }}>
-        <div className="stack"><p>Xóa khoản {deleting ? formatNetVnd(deleting.amountVnd) : ''}? Tổng quỹ sẽ được tính lại. Không thể hoàn tác.</p>{deleting?.source === 'bank' && <p className="text-sm text-muted">Giao dịch ngân hàng này vẫn không thể gắn lại.</p>}{remove.isError && <p className="text-sm text-danger" role="alert">{savingsError(remove.error)}</p>}<button type="button" className="btn btn-primary" disabled={remove.isPending} onClick={() => remove.mutate()}>Xóa khoản này</button><button type="button" className="btn btn-ghost" disabled={remove.isPending} onClick={() => setDeleting(null)}>Giữ lại</button></div>
+        <div className="stack"><p>Xóa khoản {deleting ? formatNetVnd(deleting.amountVnd) : ''}? Tổng quỹ sẽ được tính lại. Không thể hoàn tác.</p>{deleting?.source === 'bank' && <p className="text-sm text-muted">Giao dịch ngân hàng này vẫn không thể gắn lại.</p>}{remove.isError && <p className="text-sm text-danger" role="alert">{savingsError(remove.error)}</p>}<button type="button" className="btn btn-primary" disabled={remove.isPending} onClick={removeFromCurrentSession}>Xóa khoản này</button><button type="button" className="btn btn-ghost" disabled={remove.isPending} onClick={() => setDeleting(null)}>Giữ lại</button></div>
       </BottomSheet>
     </>}
   </Page>;
