@@ -37,6 +37,41 @@ jobs:
           npm ci
           npm run build # tsc -b && vite build -> dist/ (API base is the relative /api, no env needed)
 
+      - name: Diagnose AWS OIDC identity (no credentials logged)
+        env:
+          DEPLOY_ROLE_ARN: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+        run: |
+          node --input-type=module <<'NODE'
+          const arn = process.env.DEPLOY_ROLE_ARN ?? '';
+          const role = /^arn:aws:iam::(\d{12}):role\/(\S+)$/.exec(arn);
+          if (!role) {
+            console.error('::error::AWS_DEPLOY_ROLE_ARN must be a complete IAM role ARN without whitespace. Update the secret in environment dev.');
+            process.exit(1);
+          }
+          // Account and role name are identifiers, not credentials. Never log the JWT.
+          console.log(JSON.stringify({ roleAccount: role[1], roleName: role[2] }));
+          const url = new URL(process.env.ACTIONS_ID_TOKEN_REQUEST_URL);
+          url.searchParams.set('audience', 'sts.amazonaws.com');
+          const response = await fetch(url, {
+            headers: { Authorization: `Bearer ${process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN}` },
+          });
+          if (!response.ok) {
+            console.error(`::error::Unable to request OIDC token (HTTP ${response.status}).`);
+            process.exit(1);
+          }
+          const { value } = await response.json();
+          const claims = JSON.parse(Buffer.from(value.split('.')[1], 'base64url').toString('utf8'));
+          const expectedSub = `repo:${process.env.GITHUB_REPOSITORY}:environment:dev`;
+          console.log(JSON.stringify({
+            sub: claims.sub, aud: claims.aud, iss: claims.iss, expectedSub,
+          }));
+          if (claims.sub !== expectedSub || claims.aud !== 'sts.amazonaws.com' ||
+              claims.iss !== 'https://token.actions.githubusercontent.com') {
+            console.error('::error::OIDC claims differ from the standard environment dev trust policy. Check repository OIDC subject customization and the IAM role trust conditions.');
+            process.exit(1);
+          }
+          NODE
+
       - uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
