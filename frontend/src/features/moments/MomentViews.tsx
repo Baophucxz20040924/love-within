@@ -52,6 +52,7 @@ function PostMomentSheet({ file, onRetake, onClose, onPosted }: { file: File; on
   const [caption, setCaption] = useState('');
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const uploaded = useRef<{ key: string; width: number; height: number } | null>(null);
 
@@ -66,6 +67,7 @@ function PostMomentSheet({ file, onRetake, onClose, onPosted }: { file: File; on
     e.preventDefault();
     if (busy) return;
     setBusy(true);
+    setError(null);
     try {
       if (!uploaded.current) {
         setStatus('Đang tải ảnh…');
@@ -77,8 +79,10 @@ function PostMomentSheet({ file, onRetake, onClose, onPosted }: { file: File; on
       await refreshMoments(qc);
       onPosted(day);
     } catch (err) {
-      toast.error(err instanceof ApiRequestError || err instanceof Error ? err.message : 'Chưa đăng được, thử lại nhé.');
+      const message = err instanceof ApiRequestError || err instanceof Error ? err.message : 'Chưa đăng được, thử lại nhé.';
+      setError(message);
       if (err instanceof ApiRequestError && (err.code === 'MOMENT_ALREADY_POSTED' || err.code === 'MOMENT_NOT_YET')) {
+        toast.error(message);
         await refreshMoments(qc);
         onClose();
       }
@@ -112,6 +116,7 @@ function PostMomentSheet({ file, onRetake, onClose, onPosted }: { file: File; on
             {status}
           </p>
         )}
+        {error && <p className="form-feedback" role="alert">{error}</p>}
         <div className="btn-row">
           <button type="button" className="btn btn-secondary" disabled={busy} onClick={onRetake}>
             Chụp lại

@@ -7,7 +7,7 @@ import { Icon } from '../components/Icon';
 import { ErrorState, Page, Skeleton } from '../components/StatusViews';
 import { useToast } from '../components/Toast';
 import { FRIEND_EVENTS_KEY, friendEventKey, friendEventsApi } from '../features/friends/api';
-import { countsLabel, downloadEventIcs, mapHref, RSVP_LABEL, statusLabel, whenLabel } from '../features/friends/eventFormat';
+import { downloadEventIcs, mapHref, RSVP_LABEL, statusLabel, whenLabel } from '../features/friends/eventFormat';
 import { eventCommentApi, FriendComments } from '../features/friends/FriendComments';
 import { FriendComposer } from '../features/friends/FriendComposer';
 import { FriendEventSheet } from '../features/friends/FriendEventSheet';
@@ -243,7 +243,6 @@ export function FriendEventPage() {
             <h2 id="fev-guests-title" className="card__title">
               Khách mời
             </h2>
-            <p className="fev-guests__summary">{countsLabel(ev.counts)}</p>
             {GROUPS.map((g) => (
               <GuestGroup key={g.key} label={g.label} people={ev.guests[g.key]} />
             ))}

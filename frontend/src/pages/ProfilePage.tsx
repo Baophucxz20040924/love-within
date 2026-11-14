@@ -5,7 +5,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Avatar } from '../components/Avatar';
 import { BottomSheet } from '../components/BottomSheet';
 import { Icon } from '../components/Icon';
-import { EmptyState, Page, Skeleton } from '../components/StatusViews';
+import { EmptyState, ErrorState, Page, Skeleton } from '../components/StatusViews';
 import { useToast } from '../components/Toast';
 import { WalletCard } from '../components/WalletCard';
 import { useAuth } from '../features/auth/AuthContext';
@@ -43,8 +43,11 @@ function AnniversarySheet({ open, onClose, current }: { open: boolean; onClose: 
       onClose();
       await qc.invalidateQueries({ queryKey: PROPOSAL_KEY });
     },
-    onError: (err) => toast.error(err instanceof ApiRequestError ? err.message : 'Có lỗi xảy ra'),
   });
+
+  useEffect(() => {
+    if (open && propose.isError) propose.reset();
+  }, [open, propose.reset]);
 
   function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -59,6 +62,7 @@ function AnniversarySheet({ open, onClose, current }: { open: boolean; onClose: 
           <span className="field__label">Ngày</span>
           <input className="input" type="date" value={date} onChange={(e) => setDate(e.target.value)} max={new Date().toISOString().slice(0, 10)} required />
         </label>
+        {propose.isError && <p className="form-feedback" role="alert">{propose.error instanceof ApiRequestError ? propose.error.message : 'Có lỗi xảy ra'}</p>}
         <button type="submit" className="btn btn-primary btn-lg btn-block" disabled={!date || propose.isPending}>
           Gửi đề xuất
         </button>
@@ -70,6 +74,7 @@ function AnniversarySheet({ open, onClose, current }: { open: boolean; onClose: 
 function Ledger() {
   const ledger = useQuery({ queryKey: LEDGER_KEY, queryFn: () => walletApi.ledger() });
   if (ledger.isLoading) return <Skeleton height={56} count={3} />;
+  if (ledger.isError) return <ErrorState onRetry={() => ledger.refetch()} />;
   if (!ledger.data?.length) {
     return (
       <div className="card">

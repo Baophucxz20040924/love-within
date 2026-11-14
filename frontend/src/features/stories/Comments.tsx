@@ -65,7 +65,10 @@ export function CommentSection({ storyId, focusKey }: Props) {
   });
 
   useEffect(() => {
-    if (add.isError) errorRef.current?.focus();
+    if (add.isError) {
+      errorRef.current?.focus({ preventScroll: true });
+      errorRef.current?.scrollIntoView({ block: 'center', behavior: 'auto' });
+    }
   }, [add.isError, add.error]);
 
   const del = useMutation({

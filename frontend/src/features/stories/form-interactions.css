@@ -46,19 +46,6 @@
 .composer--form .tool-btn { background: var(--surface-2); min-width: 44px; min-height: 44px; }
 .composer__action { display: flex; align-items: flex-end; }
 .composer--form .composer__submit { min-height: 44px; min-width: 92px; font-size: 16px; }
-.form-feedback {
-  grid-column: 1 / -1;
-  margin: 0;
-  padding: 12px;
-  border: 1px solid var(--danger-700, #a52b39);
-  border-radius: 10px;
-  background: var(--surface);
-  color: var(--danger-700, #a52b39);
-  font-size: 14px;
-  line-height: 1.5;
-  overflow-wrap: anywhere;
-}
-.form-feedback:focus { outline: 2px solid var(--focus, var(--brand-700)); outline-offset: 2px; }
 .comments--form .comment-bar { margin-bottom: 8px; }
 .comments--form .comment-bar[disabled] { opacity: .75; }
 .comments--form .comment-bar__fields { display: contents; }

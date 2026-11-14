@@ -14,7 +14,7 @@ export function ProgressBar({ value, tone = 'brand', label }: Props) {
       aria-label={label}
       aria-valuemin={0}
       aria-valuemax={100}
-      aria-valuenow={Math.round(v)}
+      aria-valuenow={Math.round(v * 10) / 10}
     >
       <div className="progress__fill" style={{ width: `${v}%` }} />
     </div>

@@ -40,7 +40,6 @@ interface ReportProps {
 
 /** "Báo cáo": pick a reason (+ optional note). The reported person never learns who reported them. */
 export function ReportSheet({ target, onClose, onBlock, onHide }: ReportProps) {
-  const toast = useToast();
   const [reason, setReason] = useState<ReportReason | null>(null);
   const [note, setNote] = useState('');
   const [sent, setSent] = useState(false);
@@ -55,8 +54,11 @@ export function ReportSheet({ target, onClose, onBlock, onHide }: ReportProps) {
   const send = useMutation({
     mutationFn: () => friendsApi.report({ targetType: target!.type, targetId: target!.id, reason: reason!, note }),
     onSuccess: () => setSent(true),
-    onError: (err) => toast.error(errorText(err)),
   });
+
+  useEffect(() => {
+    if (target && send.isError) send.reset();
+  }, [target, send.reset]);
 
   if (!target) return null;
   const name = shortName(target.owner.displayName);
@@ -131,6 +133,7 @@ export function ReportSheet({ target, onClose, onBlock, onHide }: ReportProps) {
             <span className="field__label">Ghi chú (không bắt buộc)</span>
             <textarea className="input" value={note} onChange={(e) => setNote(e.target.value)} maxLength={500} rows={2} placeholder="Kể thêm nếu cần" />
           </label>
+          {send.isError && <p className="form-feedback" role="alert">{errorText(send.error)}</p>}
           <button type="submit" className="btn btn-danger btn-lg btn-block" disabled={!reason || send.isPending}>
             {send.isPending && <span className="spinner" aria-hidden="true" />}
             Gửi báo cáo
@@ -160,8 +163,11 @@ export function BlockSheet({ user, onClose, onBlocked }: BlockProps) {
       onBlocked?.();
       await qc.invalidateQueries({ queryKey: ['friends'] });
     },
-    onError: (err) => toast.error(errorText(err)),
   });
+
+  useEffect(() => {
+    if (user && block.isError) block.reset();
+  }, [user, block.reset]);
 
   if (!user) return null;
   const name = shortName(user.displayName);
@@ -174,6 +180,7 @@ export function BlockSheet({ user, onClose, onBlocked }: BlockProps) {
           <li>{name} sẽ không được báo là bạn đã chặn.</li>
         </ul>
         <p className="text-sm text-muted">Bạn có thể bỏ chặn ở Tôi → Đã chặn.</p>
+        {block.isError && <p className="form-feedback" role="alert">{errorText(block.error)}</p>}
         <div className="btn-row">
           <button type="button" className="btn btn-secondary" onClick={onClose}>
             Hủy

@@ -23,8 +23,8 @@ function ItemTile({ item, onOpen, badge }: { item: MarketItem; onOpen: () => voi
         {item.emoji}
       </span>
       <span className="tile__title">{item.title}</span>
-      <span className="row row--between" style={{ width: '100%' }}>
-        <span className="coin-chip">🪙 {formatNumber(item.priceCoin)}</span>
+      <span className="row row--between" style={{ width: '100%', flexWrap: 'wrap', gap: 8 }}>
+        <span className="coin-chip" style={{ whiteSpace: 'nowrap' }}>🪙 {formatNumber(item.priceCoin)}</span>
         {badge && <span className="chip chip--brand">{badge}</span>}
       </span>
     </button>
@@ -156,7 +156,7 @@ export function MarketPage() {
         <>
           {history.isLoading && <Skeleton height={96} count={3} />}
           {history.isError && <ErrorState onRetry={() => void history.refetch()} />}
-          {history.isSuccess && all.length === 0 && (
+          {history.isSuccess && myWaiting.length === 0 && myRequested.length === 0 && done.length === 0 && (
             <div className="card">
               <EmptyState art="🎁" title="Chưa đổi món nào" hint={`Sang mục “Đổi quà” để chọn một món của ${partnerName}.`} />
             </div>

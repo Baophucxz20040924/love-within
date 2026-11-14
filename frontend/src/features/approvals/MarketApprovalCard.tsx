@@ -56,7 +56,6 @@ export function MarketApprovalCard({ item, mode }: Props) {
       toast.info(`Đã từ chối. ${formatNumber(item.priceCoin)} Xu được hoàn lại ví chung.`);
       await refresh();
     },
-    onError: (err) => toast.error(errorText(err)),
   });
   const cancel = useMutation({
     mutationFn: () => marketApi.cancel(item.id),
@@ -92,7 +91,7 @@ export function MarketApprovalCard({ item, mode }: Props) {
         <>
           <p className="text-sm text-muted">Bạn có thực hiện phần thưởng này được không? Từ chối thì Xu sẽ hoàn lại ví chung.</p>
           <div className="btn-row">
-            <button type="button" className="btn btn-secondary" disabled={busy} onClick={() => setDeclining(true)}>
+            <button type="button" className="btn btn-secondary" disabled={busy} onClick={() => { decline.reset(); setDeclining(true); }}>
               Từ chối
             </button>
             <button type="button" className="btn btn-primary" disabled={busy} onClick={() => accept.mutate()}>
@@ -127,6 +126,7 @@ export function MarketApprovalCard({ item, mode }: Props) {
               onChange={(e) => setNote(e.target.value)}
             />
           </label>
+          {decline.isError && <p className="form-feedback" role="alert">{errorText(decline.error)}</p>}
           <div className="btn-row">
             <button type="button" className="btn btn-secondary" onClick={() => setDeclining(false)}>
               Để sau

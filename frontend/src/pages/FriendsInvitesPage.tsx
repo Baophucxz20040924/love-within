@@ -37,21 +37,25 @@ export function FriendsInvitesPage() {
   const [days, setDays] = useState<Days>('7');
   const [uses, setUses] = useState<Uses>('5');
   const [created, setCreated] = useState<FriendInvite | null>(null);
+  const [copyFallback, setCopyFallback] = useState<string | null>(null);
+  const [createError, setCreateError] = useState<string | null>(null);
   const invites = useQuery({ queryKey: FRIEND_INVITES_KEY, queryFn: friendsApi.invites });
 
   const create = useMutation({
     mutationFn: () => friendsApi.createInvite(Number(days), Number(uses)),
+    onMutate: () => setCreateError(null),
     onSuccess: (inv) => {
       setCreated(inv);
       void qc.invalidateQueries({ queryKey: FRIEND_INVITES_KEY });
     },
-    onError: (err) => toast.error(errorText(err)),
+    onError: (err) => setCreateError(errorText(err)),
   });
   const revoke = useMutation({
     mutationFn: (id: string) => friendsApi.revokeInvite(id),
     onSuccess: (inv) => {
       toast.info('Đã thu hồi link');
       if (created?.id === inv.id) setCreated(null);
+      setCopyFallback((url) => (url === linkOf(inv.code) ? null : url));
       void qc.invalidateQueries({ queryKey: FRIEND_INVITES_KEY });
     },
     onError: (err) => toast.error(errorText(err)),
@@ -60,10 +64,10 @@ export function FriendsInvitesPage() {
   async function copy(url: string) {
     try {
       await navigator.clipboard.writeText(url);
+      setCopyFallback(null);
       toast.success('Đã sao chép link');
     } catch {
-      // Clipboard needs HTTPS; the link stays selectable in the box below.
-      toast.info('Hãy giữ vào link bên dưới để sao chép');
+      setCopyFallback(url);
     }
   }
 
@@ -122,6 +126,7 @@ export function FriendsInvitesPage() {
           {create.isPending ? <span className="spinner" aria-hidden="true" /> : <Icon name="userPlus" size={18} />}
           Tạo link mời
         </button>
+        {createError && <p className="text-sm text-danger" role="alert">{createError}</p>}
       </div>
 
       {created && (
@@ -141,6 +146,14 @@ export function FriendsInvitesPage() {
             Thu hồi link này
           </button>
         </div>
+      )}
+
+      {copyFallback && (
+        <label className="field">
+          <span className="field__label">Link để sao chép</span>
+          <span className="text-sm text-muted" role="status">Chọn ô bên dưới rồi sao chép thủ công.</span>
+          <input className="input invite-link" readOnly value={copyFallback} onFocus={(e) => e.currentTarget.select()} />
+        </label>
       )}
 
       <div className="section">

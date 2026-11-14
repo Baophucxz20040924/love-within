@@ -1,0 +1,8 @@
+{
+  "name": "look-within-browser-verification-tooling",
+  "version": "1.0.0",
+  "private": true,
+  "description": "External Playwright tooling only; never install in frontend",
+  "engines": { "node": ">=20" },
+  "dependencies": { "playwright-core": "1.65.0" }
+}

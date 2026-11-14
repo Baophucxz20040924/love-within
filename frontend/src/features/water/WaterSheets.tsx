@@ -48,8 +48,11 @@ export function ManualWaterSheet({ open, onClose }: SheetProps) {
         qc.invalidateQueries({ queryKey: WATER_PENDING_KEY }),
       ]);
     },
-    onError: (err) => toast.error(errorText(err)),
   });
+
+  useEffect(() => {
+    if (open && submit.isError) submit.reset();
+  }, [open, submit.reset]);
 
   function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -91,6 +94,7 @@ export function ManualWaterSheet({ open, onClose }: SheetProps) {
           </div>
           <span className="field__hint">Từ 10 đến 3.000 ml. {partnerName} sẽ xác nhận trước khi được cộng.</span>
         </label>
+        {submit.isError && <p className="form-feedback" role="alert">{errorText(submit.error)}</p>}
         <button type="submit" className="btn btn-water btn-lg btn-block" disabled={!valid || submit.isPending}>
           {submit.isPending ? <span className="spinner" aria-hidden="true" /> : <Icon name="check" size={18} />}
           Gửi để {partnerName} xác nhận
@@ -123,8 +127,11 @@ export function WaterGoalSheet({ open, onClose, currentGoal }: SheetProps & { cu
         qc.invalidateQueries({ queryKey: WATER_KEY }),
       ]);
     },
-    onError: (err) => toast.error(errorText(err)),
   });
+
+  useEffect(() => {
+    if (open && propose.isError) propose.reset();
+  }, [open, propose.reset]);
 
   function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -168,6 +175,7 @@ export function WaterGoalSheet({ open, onClose, currentGoal }: SheetProps & { cu
           </div>
           <span className="field__hint">Từ 250 đến 6.000 ml.</span>
         </label>
+        {propose.isError && <p className="form-feedback" role="alert">{errorText(propose.error)}</p>}
         <button type="submit" className="btn btn-primary btn-lg btn-block" disabled={!valid || propose.isPending}>
           Gửi đề xuất cho {partnerName}
         </button>
