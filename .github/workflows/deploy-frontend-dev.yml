@@ -61,13 +61,12 @@ jobs:
           }
           const { value } = await response.json();
           const claims = JSON.parse(Buffer.from(value.split('.')[1], 'base64url').toString('utf8'));
-          const expectedSub = `repo:${process.env.GITHUB_REPOSITORY}:environment:dev`;
-          console.log(JSON.stringify({
-            sub: claims.sub, aud: claims.aud, iss: claims.iss, expectedSub,
-          }));
-          if (claims.sub !== expectedSub || claims.aud !== 'sts.amazonaws.com' ||
+          // Subject formats may include immutable owner/repository IDs or be customized.
+          // AWS must enforce the exact subject via the role trust policy, not this diagnostic.
+          console.log(JSON.stringify({ sub: claims.sub, aud: claims.aud, iss: claims.iss }));
+          if (claims.aud !== 'sts.amazonaws.com' ||
               claims.iss !== 'https://token.actions.githubusercontent.com') {
-            console.error('::error::OIDC claims differ from the standard environment dev trust policy. Check repository OIDC subject customization and the IAM role trust conditions.');
+            console.error('::error::Unexpected OIDC audience or issuer.');
             process.exit(1);
           }
           NODE
