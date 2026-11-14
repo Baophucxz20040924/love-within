@@ -68,10 +68,22 @@ jobs:
           VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
         run: |
           set -eu
+          if [ -z "$VPS_HOST" ] || [ -z "$VPS_USER" ] || [ -z "$VPS_SSH_KEY" ]; then
+            echo '::error::Set VPS_HOST, VPS_USER and VPS_SSH_KEY in the GitHub environment dev.'
+            exit 1
+          fi
           install -m 700 -d ~/.ssh
-          printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/id_ed25519
+          umask 077
+          # Normalize Windows CRLF and ensure the private key ends with a newline.
+          printf '%s\n' "$VPS_SSH_KEY" | tr -d '\r' > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
+          if ! ssh-keygen -y -P '' -f ~/.ssh/id_ed25519 > /dev/null 2>&1; then
+            echo '::error::VPS_SSH_KEY must contain the complete, unencrypted private key with real line breaks, including BEGIN/END lines. Do not paste the .pub file, a file path, or literal \\n characters.'
+            exit 1
+          fi
           ssh-keyscan -p "$VPS_PORT" -H "$VPS_HOST" >> ~/.ssh/known_hosts
+          ssh -o BatchMode=yes -o IdentitiesOnly=yes -i ~/.ssh/id_ed25519 \
+            -p "$VPS_PORT" "$VPS_USER@$VPS_HOST" 'true'
 
       - name: Upload compose files
         run: |
