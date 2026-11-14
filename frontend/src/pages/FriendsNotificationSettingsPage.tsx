@@ -20,7 +20,7 @@ export function FriendsNotificationSettingsPage() {
         groups={GROUPS}
         previewText={{
           on: 'Màn hình khóa hiện tên người và việc họ vừa làm, ví dụ “Long đã bình luận về bài viết của bạn”. Ai cầm điện thoại của bạn cũng đọc được.',
-          off: 'Đang ẩn: màn hình khóa chỉ hiện “Look Within · Bạn có thông báo mới”, không có tên ai hay nội dung gì. Người khác nhìn thấy điện thoại của bạn cũng không biết là gì. Chạm vào để mở trang Thông báo.',
+          off: 'Đang ẩn: màn hình khóa chỉ hiện “Love Within · Bạn có thông báo mới”, không có tên ai hay nội dung gì. Người khác nhìn thấy điện thoại của bạn cũng không biết là gì. Chạm vào để mở trang Thông báo.',
         }}
         quietHint="Trong giờ yên lặng máy không báo. Trang Thông báo trong app vẫn có đủ."
       />

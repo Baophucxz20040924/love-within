@@ -28,7 +28,7 @@ export function PushSuggestCard({ space, text }: Props) {
     state === 'ios-install' ? 'Nhận thông báo trên iPhone' : state === 'denied' ? 'Thông báo đang bị chặn' : 'Bật thông báo trên máy này?';
   const body =
     state === 'ios-install'
-      ? 'Thêm Look Within vào Màn hình chính, mở app từ biểu tượng đó rồi bật thông báo (iOS 16.4 trở lên).'
+      ? 'Thêm Love Within vào Màn hình chính, mở app từ biểu tượng đó rồi bật thông báo (iOS 16.4 trở lên).'
       : state === 'denied'
         ? deniedSteps()
         : text;

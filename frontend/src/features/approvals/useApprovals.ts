@@ -66,7 +66,7 @@ export function useApprovals() {
 }
 
 /** Mirror the count in the tab title and (installed PWA) the home-screen icon badge. */
-export function useApprovalSignals(count: number, brand = 'Look Within', approximate = false) {
+export function useApprovalSignals(count: number, brand = 'Love Within', approximate = false) {
   useEffect(() => {
     const badge = count > 0 ? `${count}${approximate ? '+' : ''}` : approximate ? '•' : '';
     document.title = badge ? `(${badge}) ${brand}` : brand;

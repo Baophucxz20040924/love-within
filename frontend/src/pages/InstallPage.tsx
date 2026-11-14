@@ -20,7 +20,7 @@ function AppTile() {
   return (
     <span className="install-shot install-shot--app" aria-hidden="true">
       <img src="/icons/icon-192.png" alt="" width={48} height={48} className="install-shot__icon" />
-      <span>Look Within</span>
+      <span>Love Within</span>
     </span>
   );
 }
@@ -68,7 +68,7 @@ function IosGuide({ notSafari }: { notSafari: boolean }) {
         <li>
           <span className="install-step">
             <span>
-              Mở <strong>Look Within</strong> từ biểu tượng mới trên màn hình chính.
+              Mở <strong>Love Within</strong> từ biểu tượng mới trên màn hình chính.
             </span>
             <AppTile />
           </span>
@@ -105,7 +105,7 @@ function AndroidGuide({ withButton }: { withButton: boolean }) {
         <li>
           <span className="install-step">
             <span>
-              Mở <strong>Look Within</strong> từ màn hình chính.
+              Mở <strong>Love Within</strong> từ màn hình chính.
             </span>
             <AppTile />
           </span>
@@ -116,7 +116,7 @@ function AndroidGuide({ withButton }: { withButton: boolean }) {
 }
 
 /**
- * /install — public (no login). How to add Look Within to the home screen: Share → "Thêm vào MH chính" on iPhone/iPad,
+ * /install — public (no login). How to add Love Within to the home screen: Share → "Thêm vào MH chính" on iPhone/iPad,
  * the browser's install prompt (beforeinstallprompt, captured in main.tsx) or the ⋮ menu on Android, "Bạn đang dùng app"
  * when already running as the installed app. Same page and words for every session: nothing here names another space.
  */
@@ -138,7 +138,7 @@ export function InstallPage() {
     setBusy(true);
     try {
       const outcome = await promptInstall();
-      if (outcome === 'accepted') toast.success('Đang cài Look Within lên máy');
+      if (outcome === 'accepted') toast.success('Đang cài Love Within lên máy');
     } catch {
       toast.error('Không mở được hộp cài đặt. Dùng menu ⋮ của trình duyệt nhé.');
     } finally {
@@ -149,14 +149,14 @@ export function InstallPage() {
   return (
     <div className="app-shell">
       <main className="app-content app-content--bare">
-        <Page title="Cài app lên điện thoại" subtitle="Mở Look Within như một ứng dụng" onBack={goBack} bell={false}>
+        <Page title="Cài app lên điện thoại" subtitle="Mở Love Within như một ứng dụng" onBack={goBack} bell={false}>
           {standalone ? (
             <div className="card stack center install-done">
               <span className="icon-tile icon-tile--success install-done__icon" aria-hidden="true">
                 <Icon name="check" />
               </span>
               <h2 className="card__title">Bạn đang dùng app</h2>
-              <p className="text-muted">Look Within đã có trên màn hình chính của máy này. Lần sau, mở app từ biểu tượng đó.</p>
+              <p className="text-muted">Love Within đã có trên màn hình chính của máy này. Lần sau, mở app từ biểu tượng đó.</p>
               <Link to={home} replace className="btn btn-primary btn-lg btn-block">
                 {isAuthenticated ? 'Về trang chính' : 'Đăng nhập'}
               </Link>
@@ -165,7 +165,7 @@ export function InstallPage() {
             <>
               <div className="card install-intro">
                 <img src="/icons/icon-192.png" alt="" width={56} height={56} className="install-intro__icon" />
-                <p>Thêm Look Within vào màn hình chính để mở bằng một chạm, toàn màn hình như ứng dụng. Không cần tải từ App Store hay CH Play.</p>
+                <p>Thêm Love Within vào màn hình chính để mở bằng một chạm, toàn màn hình như ứng dụng. Không cần tải từ App Store hay CH Play.</p>
               </div>
 
               {device.inApp && (
@@ -181,7 +181,7 @@ export function InstallPage() {
               {installed && (
                 <p className="callout install-ok" role="status">
                   <Icon name="check" size={18} />
-                  <span>Đã cài Look Within. Mở app từ màn hình chính.</span>
+                  <span>Đã cài Love Within. Mở app từ màn hình chính.</span>
                 </p>
               )}
 

@@ -97,7 +97,7 @@ export function InviteLandingPage() {
 
       {isAuthenticated ? (
         <div className="card stack">
-          <p className="text-muted">Bạn đang đăng nhập Look Within. Đăng xuất để vào Hội bạn bè bằng link này.</p>
+          <p className="text-muted">Bạn đang đăng nhập Love Within. Đăng xuất để vào Hội bạn bè bằng link này.</p>
           <button type="button" className="btn btn-primary btn-lg btn-block" onClick={logout}>
             Đăng xuất và tiếp tục
           </button>

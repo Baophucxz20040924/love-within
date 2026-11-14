@@ -6,8 +6,8 @@ import { detectDevice, isStandalone } from '../../lib/installPrompt';
 export function deniedSteps(): string {
   const { platform } = detectDevice();
   const app = isStandalone();
-  if (platform === 'ios') return 'Mở Cài đặt của iPhone → Thông báo → Look Within → bật Cho phép thông báo, rồi mở lại app.';
-  if (platform === 'android' && app) return 'Mở Cài đặt của điện thoại → Ứng dụng → Look Within → Thông báo → bật, rồi mở lại app.';
+  if (platform === 'ios') return 'Mở Cài đặt của iPhone → Thông báo → Love Within → bật Cho phép thông báo, rồi mở lại app.';
+  if (platform === 'android' && app) return 'Mở Cài đặt của điện thoại → Ứng dụng → Love Within → Thông báo → bật, rồi mở lại app.';
   if (platform === 'android') return 'Chạm biểu tượng bên trái thanh địa chỉ (hoặc ⋮ → Cài đặt trang web) → Thông báo → Cho phép, rồi tải lại trang.';
   return 'Bấm biểu tượng bên trái thanh địa chỉ → Thông báo → Cho phép, rồi tải lại trang.';
 }
@@ -27,7 +27,7 @@ export function PushDeviceHelp({ state, serverEnabled }: { state: string; server
       <div className="callout push-help">
         <Icon name="smartphone" size={16} />
         <span>
-          Trên iPhone và iPad, thông báo chỉ dùng được khi Look Within đã được thêm vào Màn hình chính và mở từ biểu tượng đó (iOS 16.4 trở lên).{' '}
+          Trên iPhone và iPad, thông báo chỉ dùng được khi Love Within đã được thêm vào Màn hình chính và mở từ biểu tượng đó (iOS 16.4 trở lên).{' '}
           <Link to="/install" className="text-link">
             Xem cách cài app
           </Link>

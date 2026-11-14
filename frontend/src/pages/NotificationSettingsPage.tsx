@@ -26,7 +26,7 @@ export function NotificationSettingsPage() {
         groups={GROUPS}
         previewText={{
           on: `Màn hình khóa hiện tên và việc vừa xảy ra, ví dụ “${name} vừa uống 300 ml, chờ bạn duyệt 💧”. Không bao giờ hiện chữ trong bài viết, bình luận, câu trả lời hay thư.`,
-          off: 'Màn hình khóa chỉ hiện “Look Within · Bạn có thông báo mới”. Chạm vào để mở app và xem.',
+          off: 'Màn hình khóa chỉ hiện “Love Within · Bạn có thông báo mới”. Chạm vào để mở app và xem.',
         }}
         quietHint="Trong giờ yên lặng máy không báo. Trang chủ và hộp Cần duyệt vẫn có đủ khi bạn mở app."
       />

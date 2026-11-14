@@ -96,7 +96,7 @@ self.addEventListener('push', (event) => {
   } catch {
     data = {};
   }
-  const title = typeof data.title === 'string' && data.title ? data.title.slice(0, 80) : 'Look Within';
+  const title = typeof data.title === 'string' && data.title ? data.title.slice(0, 80) : 'Love Within';
   const body = typeof data.body === 'string' ? data.body.slice(0, 300) : 'Bạn có thông báo mới';
   const tag = typeof data.tag === 'string' && data.tag ? data.tag.slice(0, 100) : undefined;
   const options = {

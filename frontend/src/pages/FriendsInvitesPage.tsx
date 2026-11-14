@@ -75,7 +75,7 @@ export function FriendsInvitesPage() {
     const url = linkOf(inv.code);
     if (navigator.share) {
       try {
-        await navigator.share({ title: 'Look Within', text: 'Vào đây kết bạn với mình nhé', url });
+        await navigator.share({ title: 'Love Within', text: 'Vào đây kết bạn với mình nhé', url });
         return;
       } catch (err) {
         if ((err as DOMException).name === 'AbortError') return;

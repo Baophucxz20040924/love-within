@@ -113,6 +113,18 @@ p {
   margin: 0;
 }
 
+/* App chrome should not select text on repeated taps or a long press. Keep
+   reading content selectable and explicitly preserve editing inside labels. */
+:where(h1, h2, h3, button, a, label, summary, [role='tab']) {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+:where(input, textarea, [contenteditable]:not([contenteditable='false'])) {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
 button,
 input,
 textarea,

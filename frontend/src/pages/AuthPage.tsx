@@ -39,9 +39,9 @@ function messageForError(err: unknown, mode: Mode): string {
 
 const COPY = {
   couple: {
-    title: 'Look Within',
+    title: 'Love Within',
     tagline: 'A couple space for you and your partner.',
-    footer: 'The Love Universe. built with ❤️ by Look Within.',
+    footer: 'The Love Universe. built with ❤️ by Love Within.',
   },
   friends: {
     title: 'Dark Within',
@@ -252,7 +252,7 @@ export function AuthPage({ variant = 'couple', invite, initialMode = 'login' }: 
       )}
       {variant === 'friends' && (
         <Link to="/login" replace className="auth__back">
-          <Icon name="chevronLeft" size={18} /> Về trang đăng nhập Look Within
+          <Icon name="chevronLeft" size={18} /> Về trang đăng nhập Love Within
         </Link>
       )}
     </main>
