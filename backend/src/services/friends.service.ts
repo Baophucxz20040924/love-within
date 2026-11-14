@@ -8,6 +8,8 @@ import { AppError, Errors } from '../utils/errors.js';
 import { logger } from '../utils/logger.js';
 import { friendInviteService, type InviteRedeemResult } from './friendInvite.service.js';
 import { notificationService } from './notification.service.js';
+import { realtimeAudience } from './realtimeAudience.service.js';
+import { captureRelationshipAudience, invalidateRelationshipAudience } from './friendOuting.service.js';
 import { avatarUrlOf, profileOf, profileService, type PublicProfile } from './profile.service.js';
 
 /** How the caller relates to another member. incoming = they sent me a request; outgoing = I sent one. */
@@ -103,6 +105,7 @@ export const friendsService = {
     if (!user) throw Errors.unauthorized('Tài khoản không tồn tại');
     const joinedAt = user.friendsJoinedAt ?? new Date();
     await userRepository.setFriendsMember(user._id, joinedAt, searchNameOf(user.displayName));
+    await realtimeAudience.own(userId, 'friends', ['friends', 'account']).catch(() => {});
     if (!user.friendsJoinedAt) logger.info('User joined friends space', { userId, viaInvite: Boolean(inviteCode) });
     const result: { joinedAt: string; invite?: InviteRedeemResult } = { joinedAt: joinedAt.toISOString() };
     if (inviteCode) result.invite = await friendInviteService.redeem(user, inviteCode);
@@ -166,8 +169,10 @@ export const friendsService = {
     if (existing && existing.requesterId.equals(me._id)) throw Errors.conflict('Bạn đã gửi lời mời cho người này rồi');
 
     if (existing) {
+      const audience = await captureRelationshipAudience(me._id.toString(), targetId);
       const accepted = await friendshipRepository.accept(existing._id, me._id);
       if (!accepted) throw Errors.conflict('Lời mời vừa thay đổi, tải lại trang nhé');
+      invalidateRelationshipAudience(audience);
       await notificationService.forgetEntity(existing._id);
       await notificationService.emit({ space: 'friends', to: target._id, type: 'friend_accepted', actorId: me._id });
       logger.info('Friend request accepted (mutual)', { userId: me._id.toString(), friendId: targetId });
@@ -176,6 +181,7 @@ export const friendsService = {
 
     try {
       const created = await friendshipRepository.create(me._id, target._id);
+      invalidateRelationshipAudience([me._id.toString(), targetId]);
       await notificationService.emit({ space: 'friends', to: target._id, type: 'friend_request', actorId: me._id, entityId: created._id });
       logger.info('Friend request sent', { userId: me._id.toString(), toUserId: targetId, requestId: created._id.toString() });
       return personView(targetProfile, created, me._id);
@@ -191,8 +197,10 @@ export const friendsService = {
     if (!pending || (await friendBlockRepository.isBlockedBetween(me._id, pending.requesterId))) {
       throw Errors.notFound('Lời mời không tồn tại hoặc đã được xử lý');
     }
+    const audience = await captureRelationshipAudience(me._id.toString(), pending.requesterId.toString());
     const accepted = await friendshipRepository.accept(requestId, me._id);
     if (!accepted) throw Errors.notFound('Lời mời không tồn tại hoặc đã được xử lý');
+    invalidateRelationshipAudience(audience);
     const other = otherOf(accepted, me._id);
     await notificationService.forgetEntity(accepted._id);
     await notificationService.emit({ space: 'friends', to: other, type: 'friend_accepted', actorId: me._id });
@@ -204,14 +212,17 @@ export const friendsService = {
   async removeRequest(me: UserDoc, requestId: string): Promise<void> {
     const deleted = await friendshipRepository.deletePending(requestId, me._id);
     if (!deleted) throw Errors.notFound('Lời mời không tồn tại hoặc đã được xử lý');
+    invalidateRelationshipAudience([me._id.toString(), otherOf(deleted, me._id).toString()]);
     await notificationService.forgetEntity(deleted._id);
     const action = deleted.requesterId.equals(me._id) ? 'cancelled' : 'declined';
     logger.info(`Friend request ${action}`, { userId: me._id.toString(), requestId });
   },
 
   async unfriend(me: UserDoc, friendId: string): Promise<void> {
+    const audience = await captureRelationshipAudience(me._id.toString(), friendId);
     const deleted = await friendshipRepository.deleteAccepted(me._id, friendId);
     if (!deleted) throw Errors.notFound('Hai bạn không phải bạn bè');
+    invalidateRelationshipAudience(audience, true);
     await notificationService.forgetBetween(me._id, otherOf(deleted, me._id));
     logger.info('Unfriended', { userId: me._id.toString(), friendId });
   },
@@ -268,6 +279,7 @@ export const friendsService = {
   async updateMe(me: UserDoc, input: { bio: string }): Promise<{ bio: string }> {
     const bio = input.bio.trim();
     await userRepository.setFriendsBio(me._id, bio);
+    await realtimeAudience.friendsOf(me._id.toString(), ['friend-profile']).catch(() => {});
     return { bio };
   },
 };

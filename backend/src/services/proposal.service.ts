@@ -1,3 +1,4 @@
+import { realtimeAudience } from './realtimeAudience.service.js';
 import { Types } from 'mongoose';
 import type { ZodTypeAny } from 'zod';
 import type { CoupleDoc } from '../models/Couple.js';
@@ -77,6 +78,7 @@ async function createSavings(couple: CoupleDoc, userId: string, kind: ProposalKi
       if (err && typeof err === 'object' && 'code' in err && err.code === 11000) throw Errors.conflict('Đã có một đề xuất cùng loại đang chờ duyệt');
       throw err;
     }
+    ctx.dirty.add('proposals');
     ctx.afterRelease.push(() => notificationService.toPartner(ctx.couple, userId, {
       type: 'proposal_created', entityId: doc._id,
       push: { body: (name) => `${name} đề xuất ${handler.summary?.(prepared) ?? 'thay đổi quỹ chung'}. Chờ bạn duyệt`, url: '/approvals', tag: `proposal:${doc.id}` },
@@ -96,10 +98,12 @@ async function resolveSavings(couple: CoupleDoc, userId: string, id: string, rej
     if (reject && !effect) {
       const rejected = await proposalRepository.resolve(ctx.couple._id, current._id, 'rejected');
       if (!rejected) throw Errors.conflict('Đề xuất đã được xử lý');
+      ctx.dirty.add('proposals');
       return toView(rejected);
     }
     const updated = effect ? current : await proposalRepository.addApproval(ctx.couple._id, current._id, new Types.ObjectId(userId));
     if (!updated) throw Errors.conflict('Đề xuất đã được xử lý');
+    if (!effect) ctx.dirty.add('proposals');
     if (!effect && !hasAllApprovals(ctx.couple, updated.approvals)) return toView(updated);
     const handler = handlers.get(updated.kind);
     if (!handler) throw new AppError(503, 'SAVINGS_APPLY_UNAVAILABLE', 'Chưa thể áp dụng đề xuất quỹ');
@@ -107,6 +111,7 @@ async function resolveSavings(couple: CoupleDoc, userId: string, id: string, rej
     await handler.apply(ctx.couple, updated.payload, { proposalId: updated._id, createdBy: updated.createdBy, savingsWrite: ctx });
     const resolved = await proposalRepository.resolve(ctx.couple._id, updated._id, 'approved');
     if (!resolved) throw new Error('Savings proposal resolve outcome requires reconciliation');
+    ctx.dirty.add('proposals');
     return toView(resolved);
   });
 }
@@ -132,6 +137,7 @@ export const proposalService = {
       payload,
       createdBy: new Types.ObjectId(userId),
     });
+    await realtimeAudience.couple(couple._id, ['proposals']);
     logger.info('Proposal created', { coupleId: couple._id.toString(), userId, kind, proposalId: doc._id.toString() });
     let what: string | null = null;
     try {
@@ -164,6 +170,7 @@ export const proposalService = {
 
     const updated = await proposalRepository.addApproval(couple._id, current._id, new Types.ObjectId(userId));
     if (!updated) throw Errors.conflict('Đề xuất đã được xử lý');
+    await realtimeAudience.couple(couple._id, ['proposals']);
 
     if (!hasAllApprovals(couple, updated.approvals)) {
       logger.info('Proposal approved by one member', { coupleId: couple._id.toString(), userId, proposalId: id });
@@ -173,6 +180,7 @@ export const proposalService = {
     // Both approved: resolve atomically so apply() runs exactly once.
     const resolved = await proposalRepository.resolve(couple._id, current._id, 'approved');
     if (!resolved) throw Errors.conflict('Đề xuất đã được xử lý');
+    await realtimeAudience.couple(couple._id, ['proposals']);
 
     const handler = handlers.get(resolved.kind);
     if (handler) {
@@ -193,6 +201,7 @@ export const proposalService = {
     if (isSavings(current.kind)) return resolveSavings(couple, userId, id, true);
     const resolved = await proposalRepository.resolve(couple._id, current._id, 'rejected');
     if (!resolved) throw Errors.conflict('Đề xuất đã được xử lý');
+    await realtimeAudience.couple(couple._id, ['proposals']);
     logger.info('Proposal rejected', { coupleId: couple._id.toString(), userId, proposalId: id });
     return toView(resolved);
   },

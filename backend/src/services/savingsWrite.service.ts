@@ -1,3 +1,4 @@
+import { realtimeAudience } from './realtimeAudience.service.js';
 import { randomUUID } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
 import { observeSavingsWrite } from '../utils/monitor.js';
@@ -19,6 +20,8 @@ export interface SavingsWriteContext {
   couple: CoupleDoc;
   /** Only local post-release callbacks; never push while the token is held. */
   afterRelease: Array<() => Promise<void>>;
+  /** Domains with acknowledged writes, emitted only after the token is released. */
+  dirty: Set<'savings' | 'proposals'>;
 }
 export const savingsBusy = () => new AppError(409, 'SAVINGS_BUSY', 'Quỹ đang được cập nhật. Thử lại sau; nếu vẫn bị khóa, hãy liên hệ quản trị viên.');
 const recoveryRequired = () => new AppError(503, 'SAVINGS_RECOVERY_REQUIRED', 'Chưa xác định được kết quả ghi quỹ. Cần quản trị viên kiểm tra trước khi ghi tiếp.');
@@ -48,7 +51,7 @@ export async function withSavingsWrite<T>(couple: CoupleDoc, userId: string, wor
   }
   const heldStart = performance.now();
   let heldOutcome: LockOutcome = 'ok';
-  const ctx: SavingsWriteContext = { couple: fresh, afterRelease: [] };
+  const ctx: SavingsWriteContext = { couple: fresh, afterRelease: [], dirty: new Set() };
   let value: T;
   let knownError: AppError | undefined;
   try {
@@ -74,7 +77,8 @@ export async function withSavingsWrite<T>(couple: CoupleDoc, userId: string, wor
     // On recovery-required this is an observed interval, NOT a claim that the durable token was released.
     observeSavingsWrite('held', heldOutcome, performance.now() - heldStart);
   }
-  // Notification latency is deliberately outside the held interval.
+  // Invalidation and notification latency are deliberately outside the held interval.
+  if (ctx.dirty.size) await realtimeAudience.couple(couple._id, [...ctx.dirty]);
   for (const notify of ctx.afterRelease) {
     await notify().catch(() => logger.warn('Savings notification failed'));
   }

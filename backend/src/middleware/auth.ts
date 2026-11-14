@@ -11,5 +11,6 @@ export function requireAuth(req: Request, _res: Response, next: NextFunction): v
   const token = header.slice('Bearer '.length).trim();
   const payload = tokenService.verifyAccess(token);
   req.userId = payload.sub;
+  req.accessExpiresAtMs = payload.expiresAtMs;
   next();
 }

@@ -1,3 +1,4 @@
+import { realtimeAudience } from '../realtimeAudience.service.js';
 import type { Types } from 'mongoose';
 import { MOMENT_NOTIFY_MAX_LATE_MIN } from '../../models/DuoMoment.js';
 import { coupleRepository } from '../../repositories/couple.repository.js';
@@ -56,6 +57,7 @@ async function announceDue(now: Date): Promise<number> {
     const m = await momentRepository.markNotified(id, now, MAX_LATE_MS);
     // null: another run took it a moment ago.
     if (!m) continue;
+    await realtimeAudience.couple(m.coupleId, ['moments']);
     const couple = await coupleRepository.findById(m.coupleId);
     if (!couple || couple.status !== 'active') continue;
     const posted = new Set(m.posts.map((p) => p.userId.toString()));

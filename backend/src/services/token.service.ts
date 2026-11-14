@@ -4,6 +4,8 @@ import { Errors } from '../utils/errors.js';
 
 export interface AccessPayload {
   sub: string; // user id
+  /** Effective JWT expiry, bounded by both exp and the configured verification maxAge. */
+  expiresAtMs: number;
 }
 
 export interface RefreshPayload {
@@ -28,6 +30,20 @@ function validatePayload(decoded: string | jwt.JwtPayload, type: 'access' | 'ref
   return decoded as jwt.JwtPayload & { sub: string };
 }
 
+// jsonwebtoken uses the same `timespan` parser for sign expiresIn and verify maxAge.
+// Derive the exact integer-second offset with that parser, avoiding a divergent TTL parser.
+let accessMaxAgeSeconds: number | undefined;
+function maxAgeSeconds(): number {
+  if (accessMaxAgeSeconds === undefined) {
+    const base = 1_000_000_000;
+    const probe = jwt.sign({ iat: base }, env.jwt.accessSecret, { algorithm: ALGORITHM, expiresIn: env.jwt.accessTtl as SignOptions['expiresIn'] });
+    const decoded = jwt.decode(probe) as jwt.JwtPayload;
+    if (typeof decoded.exp !== 'number') throw new Error('Invalid access TTL');
+    accessMaxAgeSeconds = decoded.exp - base;
+  }
+  return accessMaxAgeSeconds;
+}
+
 export const tokenService = {
   signAccess(userId: string): string {
     const opts: SignOptions = { algorithm: ALGORITHM, expiresIn: env.jwt.accessTtl as SignOptions['expiresIn'] };
@@ -42,7 +58,7 @@ export const tokenService = {
   verifyAccess(token: string): AccessPayload {
     try {
       const decoded = validatePayload(jwt.verify(token, env.jwt.accessSecret, { algorithms: [ALGORITHM], maxAge: env.jwt.accessTtl }), 'access');
-      return { sub: decoded.sub };
+      return { sub: decoded.sub, expiresAtMs: Math.min(decoded.exp!, decoded.iat! + maxAgeSeconds()) * 1000 };
     } catch {
       throw Errors.unauthorized('Invalid or expired access token');
     }

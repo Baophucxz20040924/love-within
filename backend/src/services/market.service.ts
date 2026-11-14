@@ -1,3 +1,4 @@
+import { realtimeAudience } from './realtimeAudience.service.js';
 import { Types } from 'mongoose';
 import type { CoupleDoc } from '../models/Couple.js';
 import type { MarketItemDoc, MarketRedemptionDoc, RedemptionStatus } from '../models/Market.js';
@@ -142,6 +143,7 @@ export const marketService = {
       priceCoin: input.priceCoin,
       createdBy: new Types.ObjectId(userId),
     });
+    await realtimeAudience.couple(coupleId, ['market']);
     logger.info('Market item created', { coupleId: coupleId.toString(), userId, itemId: doc._id.toString() });
     return itemView(doc, userId);
   },
@@ -153,6 +155,7 @@ export const marketService = {
     if (existing.createdBy.toString() !== userId) throw Errors.forbidden('Chỉ người đăng mới sửa được món này');
     const doc = await marketRepository.updateItem(coupleId, id, new Types.ObjectId(userId), patch);
     if (!doc) throw Errors.notFound('Món hàng không tồn tại');
+    await realtimeAudience.couple(coupleId, ['market']);
     logger.info('Market item updated', { coupleId: coupleId.toString(), userId, itemId: id });
     return itemView(doc, userId);
   },
@@ -164,6 +167,7 @@ export const marketService = {
     if (existing.createdBy.toString() !== userId) throw Errors.forbidden('Chỉ người đăng mới gỡ được món này');
     const doc = await marketRepository.archiveItem(coupleId, id, new Types.ObjectId(userId));
     if (!doc) throw Errors.notFound('Món hàng không tồn tại');
+    await realtimeAudience.couple(coupleId, ['market']);
     logger.info('Market item archived', { coupleId: coupleId.toString(), userId, itemId: id });
   },
 
@@ -200,6 +204,7 @@ export const marketService = {
       sellerUserId: item.createdBy,
       priceCoin: item.priceCoin,
     });
+    await realtimeAudience.couple(couple._id, ['market']);
     logger.info('Redemption requested', {
       coupleId: couple._id.toString(),
       userId,
@@ -227,6 +232,7 @@ export const marketService = {
     if (r.status !== 'requested') throw Errors.conflict('Yêu cầu này đã được xử lý');
     const updated = await marketRepository.transition(couple._id, r._id, 'requested', 'accepted', { respondedAt: new Date() });
     if (!updated) throw Errors.conflict('Yêu cầu này đã được xử lý');
+    await realtimeAudience.couple(couple._id, ['market']);
     logger.info('Redemption accepted', { coupleId: couple._id.toString(), userId, redemptionId: id });
     await notifyAnswered(updated, (name) => `${name} đã đồng ý đổi ${updated.itemEmoji} ${updated.itemTitle} 🎁`);
     return redemptionView(updated, userId, await memberNames(couple));
@@ -242,6 +248,7 @@ export const marketService = {
       responseNote: note?.trim() || null,
     });
     if (!updated) throw Errors.conflict('Yêu cầu này đã được xử lý');
+    await realtimeAudience.couple(couple._id, ['market']);
     const balance = await refund(couple, userId, updated);
     logger.info('Redemption declined (refunded)', { coupleId: couple._id.toString(), userId, redemptionId: id, balance });
     await notifyAnswered(updated, (name) => `${name} chưa đồng ý đổi ${updated.itemEmoji} ${updated.itemTitle}. Xu đã được hoàn lại`);
@@ -255,6 +262,7 @@ export const marketService = {
     if (r.status !== 'requested') throw Errors.conflict('Yêu cầu này đã được xử lý');
     const updated = await marketRepository.transition(couple._id, r._id, 'requested', 'cancelled', { respondedAt: new Date() });
     if (!updated) throw Errors.conflict('Yêu cầu này đã được xử lý');
+    await realtimeAudience.couple(couple._id, ['market']);
     const balance = await refund(couple, userId, updated);
     logger.info('Redemption cancelled (refunded)', { coupleId: couple._id.toString(), userId, redemptionId: id, balance });
     return redemptionView(updated, userId, await memberNames(couple));
@@ -267,6 +275,7 @@ export const marketService = {
     if (r.status !== 'accepted') throw Errors.conflict(r.status === 'fulfilled' ? 'Món này đã được đánh dấu xong' : 'Món này chưa được người ấy đồng ý');
     const updated = await marketRepository.transition(couple._id, r._id, 'accepted', 'fulfilled', { fulfilledAt: new Date() });
     if (!updated) throw Errors.conflict('Món này đã được xử lý');
+    await realtimeAudience.couple(couple._id, ['market']);
     logger.info('Redemption fulfilled', { coupleId: couple._id.toString(), userId, redemptionId: id });
     return redemptionView(updated, userId, await memberNames(couple));
   },
@@ -296,5 +305,6 @@ export const marketService = {
 
   async markSeen(userId: string): Promise<void> {
     await userRepository.setMarketSeenAt(userId, new Date());
+    await realtimeAudience.own(userId, 'couple', ['market']);
   },
 };

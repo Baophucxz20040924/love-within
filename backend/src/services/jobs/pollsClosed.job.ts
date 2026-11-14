@@ -1,6 +1,7 @@
 import { friendStoryRepository } from '../../repositories/friendStory.repository.js';
 import { logger } from '../../utils/logger.js';
 import { notificationService } from '../notification.service.js';
+import { realtimeAudience } from '../realtimeAudience.service.js';
 import type { SchedulerJob } from '../scheduler.service.js';
 
 // Job polls.closed (plan/ENGINEERING_WORKFLOW.md BB6, plan/OPERATIONS.md N2): when the deadline of a poll in a friends post
@@ -23,6 +24,9 @@ export const pollsClosedJob: SchedulerJob = {
       const story = await friendStoryRepository.markPollClosedNotified(id, now);
       // null: another run took it, or the post was deleted or its poll replaced a moment ago.
       if (!story) continue;
+      await (story.hiddenByReportsAt
+        ? realtimeAudience.own(story.authorId.toString(), 'friends', ['friend-posts'])
+        : realtimeAudience.friendsOf(story.authorId.toString(), ['friend-posts'])).catch(() => {});
       logger.debug('Friend poll closed', { userId: story.authorId.toString(), storyId: story._id.toString() });
       await notificationService.emit({ space: 'friends', to: story.authorId, type: 'poll_closed', actorId: null, entityId: story._id });
       sent += 1;

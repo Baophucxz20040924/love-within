@@ -1,3 +1,4 @@
+import { realtimeAudience } from './realtimeAudience.service.js';
 import { Types } from 'mongoose';
 import { ECONOMY } from '../config/economy.js';
 import type { CoupleDoc } from '../models/Couple.js';
@@ -174,6 +175,7 @@ export const questService = {
     if (!resolved) return;
     await questRepository.ensureProgress(couple._id, q.key, localDate, resolved.target);
     await questRepository.setProgress(couple._id, q.key, localDate, resolved.progress, resolved.target);
+    await realtimeAudience.couple(couple._id, ['quests']);
   },
 
   /** Claim the reward of a completed quest exactly once (atomic status transition). */
@@ -192,6 +194,7 @@ export const questService = {
     const rewarded = await questRepository.markRewarded(couple._id, questKey, localDate, new Types.ObjectId(userId));
     if (!rewarded) throw Errors.conflict('Nhiệm vụ đã nhận thưởng hôm nay');
 
+    await realtimeAudience.couple(couple._id, ['quests']);
     const r = rewardFor(q);
     await walletService.reward({ coupleId: couple._id, actorUserId: userId, reason: 'quest', refId: rewarded._id, coin: r.coin, exp: r.exp });
     logger.info('Quest reward claimed', { coupleId: couple._id.toString(), userId, questKey, localDate });

@@ -1,3 +1,4 @@
+import { realtimeAudience } from './realtimeAudience.service.js';
 import { Types } from 'mongoose';
 import { ECONOMY, levelFromExp } from '../config/economy.js';
 import type { LedgerEntryDoc, LedgerReason, LedgerType } from '../models/LedgerEntry.js';
@@ -64,6 +65,7 @@ export const walletService = {
         throw Errors.unprocessable(`Không đủ Xu (thiếu ${missing} Xu)`, { missing, balance: wallet.coinBalance });
       }
     }
+    await realtimeAudience.couple(input.coupleId, ['wallet', 'couple']);
     await walletRepository.appendLedger({
       coupleId: input.coupleId,
       type: 'coin',
@@ -73,6 +75,7 @@ export const walletService = {
       refId: input.refId ?? null,
       actorUserId: new Types.ObjectId(input.actorUserId),
     });
+    await realtimeAudience.couple(input.coupleId, ['wallet']);
     logger.info('Coin applied', {
       coupleId: input.coupleId.toString(),
       userId: input.actorUserId,
@@ -93,6 +96,7 @@ export const walletService = {
     if (newLevel !== couple.level) {
       await coupleRepository.setLevel(input.coupleId, newLevel);
     }
+    await realtimeAudience.couple(input.coupleId, ['wallet', 'couple']);
     await walletRepository.appendLedger({
       coupleId: input.coupleId,
       type: 'exp',
@@ -102,6 +106,7 @@ export const walletService = {
       refId: input.refId ?? null,
       actorUserId: new Types.ObjectId(input.actorUserId),
     });
+    await realtimeAudience.couple(input.coupleId, ['wallet', 'couple']);
     logger.info('EXP applied', {
       coupleId: input.coupleId.toString(),
       userId: input.actorUserId,

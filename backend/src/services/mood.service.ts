@@ -1,3 +1,4 @@
+import { realtimeAudience } from './realtimeAudience.service.js';
 import { Types } from 'mongoose';
 import type { CoupleDoc } from '../models/Couple.js';
 import type { CoupleMoodDoc, Mood } from '../models/CoupleMood.js';
@@ -48,6 +49,7 @@ export const moodService = {
       mood: input.mood,
       note: input.note.trim(),
     });
+    await realtimeAudience.couple(couple._id, ['moods']);
     logger.debug('Mood set', { coupleId: couple._id.toString(), userId, localDate });
     return toView(doc);
   },

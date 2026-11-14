@@ -114,6 +114,12 @@ export const friendNotificationRepository = {
     await FriendNotification.updateMany({ userId, readAt: null }, { $set: { readAt: new Date() } }).exec();
   },
 
+  /** Snapshot owners before a bulk deletion so their other devices can refresh. */
+  async ownersForEntities(entityIds: Types.ObjectId[], type?: FriendNotificationType): Promise<Types.ObjectId[]> {
+    if (!entityIds.length) return [];
+    return FriendNotification.distinct('userId', { entityId: { $in: entityIds }, ...(type ? { type } : {}) }).exec() as Promise<Types.ObjectId[]>;
+  },
+
   async deleteForEntity(entityId: Types.ObjectId): Promise<void> {
     await FriendNotification.deleteMany({ entityId }).exec();
   },

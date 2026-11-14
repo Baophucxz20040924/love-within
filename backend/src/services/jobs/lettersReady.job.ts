@@ -1,3 +1,4 @@
+import { realtimeAudience } from '../realtimeAudience.service.js';
 import type { CoupleLetterDoc } from '../../models/CoupleLetter.js';
 import { coupleRepository } from '../../repositories/couple.repository.js';
 import { letterRepository } from '../../repositories/letter.repository.js';
@@ -47,6 +48,7 @@ export const lettersReadyJob: SchedulerJob = {
       const letter = await letterRepository.markReadyNotified(id, now);
       // null: another run took it, or it was opened, moved or deleted a moment ago.
       if (!letter) continue;
+      await realtimeAudience.couple(letter.coupleId, ['letters']);
       await deliverLetterReady(letter);
       sent += 1;
     }

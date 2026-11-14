@@ -19,6 +19,9 @@ interface AuthState {
   register: (email: string, password: string, displayName: string, space?: Space, opts?: SessionOptions) => Promise<JoinResult | null>;
   logout: () => void;
   refreshMe: () => Promise<void>;
+  /** Discard access-sensitive /me data and invalidate older in-flight /me responses. */
+  revokeMe: (maskCouple: boolean) => void;
+  verifyMe: () => Promise<boolean>;
 }
 
 interface SessionOptions {
@@ -35,6 +38,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [bootstrapFailed, setBootstrapFailed] = useState(false);
   const [space, setSpaceState] = useState<Space>(() => spaceStore.get());
   const loginAttempt = useRef(0);
+  const meEpoch = useRef(0);
+  const meFlight = useRef<{ generation: string; epoch: number; promise: Promise<void> } | null>(null);
 
   const setSpace = useCallback((s: Space) => {
     spaceStore.set(s);
@@ -47,6 +52,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
    */
   const clearView = useCallback(() => {
     loginAttempt.current += 1;
+    meEpoch.current += 1;
     setMe(null);
     setBootstrapFailed(false);
     void qc.cancelQueries();
@@ -59,23 +65,48 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     clearView();
   }, [clearView, setSpace]);
 
-  const refreshMe = useCallback(async () => {
+  const revokeMe = useCallback((maskCouple: boolean) => {
+    meEpoch.current += 1;
+    if (maskCouple) setMe((current) => current ? {
+      ...current, couple: null, wallet: null, level: 0, exp: 0,
+    } : null);
+  }, []);
+
+  const refreshMe = useCallback((): Promise<void> => {
     const generation = tokenStore.generation();
+    const epoch = meEpoch.current;
     if (!tokenStore.get()) {
       setMe(null);
       setBootstrapFailed(false);
-      return;
+      return Promise.resolve();
     }
+    if (meFlight.current?.generation === generation && meFlight.current.epoch === epoch) return meFlight.current.promise;
+    const promise = (async () => {
+      try {
+        const data = await apiRequest<Me>('/me');
+        if (tokenStore.isCurrent(generation) && meEpoch.current === epoch) {
+          setMe(data);
+          setBootstrapFailed(false);
+        }
+      } catch {
+        if (tokenStore.isCurrent(generation) && meEpoch.current === epoch && tokenStore.get()) setBootstrapFailed(true);
+      }
+    })().finally(() => { if (meFlight.current?.promise === promise) meFlight.current = null; });
+    meFlight.current = { generation, epoch, promise };
+    return promise;
+  }, []);
+
+  const verifyMe = useCallback(async (): Promise<boolean> => {
+    const generation = tokenStore.generation();
+    const epoch = ++meEpoch.current;
     try {
       const data = await apiRequest<Me>('/me');
-      if (tokenStore.isCurrent(generation)) {
-        setMe(data);
-        setBootstrapFailed(false);
-      }
+      if (!tokenStore.isCurrent(generation) || meEpoch.current !== epoch) return false;
+      setMe(data);
+      setBootstrapFailed(false);
+      return true;
     } catch {
-      // Keep valid credentials on transient bootstrap failure; offer retry instead
-      // of redirecting to a login form while the previous session still exists.
-      if (tokenStore.isCurrent(generation) && tokenStore.get()) setBootstrapFailed(true);
+      return false;
     }
   }, []);
 
@@ -193,8 +224,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       register,
       logout,
       refreshMe,
+      revokeMe,
+      verifyMe,
     }),
-    [me, loading, space, login, register, logout, refreshMe],
+    [me, loading, space, login, register, logout, refreshMe, revokeMe, verifyMe],
   );
 
   const bootstrapError = !me && bootstrapFailed && tokenStore.get();

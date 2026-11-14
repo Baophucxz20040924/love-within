@@ -2,10 +2,16 @@ import { Types } from 'mongoose';
 import type { UserDoc } from '../models/User.js';
 import { OUTING_LIMITS, type FriendOutingRecord, type OutingParticipant, type OutingReceipt } from '../models/FriendOuting.js';
 import { assertOutingCapacity, friendOutingRepository, outingBsonBytes } from '../repositories/friendOuting.repository.js';
+import { friendBlockRepository } from '../repositories/friendSafety.repository.js';
 import { friendshipRepository } from '../repositories/friendship.repository.js';
 import { AppError, Errors } from '../utils/errors.js';
 import { logger } from '../utils/logger.js';
 import { friendEventService } from './friendEvent.service.js';
+import { realtimeAudience } from './realtimeAudience.service.js';
+import { realtimeService } from './realtime.service.js';
+import { invalidateSuggestionCache } from './friendSuggestion.service.js';
+
+const invalidateOuting = (doc: FriendOutingRecord) => realtimeAudience.outing(doc, ['friend-outings']).catch(() => {});
 import { profileService } from './profile.service.js';
 import { outingAccess, outingInvitationEligible, outingRestricted, outingSummary, outingView } from './friendOuting.views.js';
 import { applyOutingMutation, outingOperationConflict, outingRevisionConflict, outingRestrictedError } from './friendOuting.mutations.js';
@@ -68,6 +74,31 @@ function decodeCursor(cursor?: string): string | undefined {
   if (!/^v1:[a-f0-9]{24}$/.test(decoded) || Buffer.from(decoded).toString('base64url') !== cursor) throw Errors.badRequest('Cursor không hợp lệ');
   return decoded.slice(3);
 }
+/** Capture viewers while the relationship still grants access; never expose relationship details in hints. */
+export async function captureRelationshipAudience(a: string, b: string): Promise<string[]> {
+  const recipients = new Set<string>([a, b]);
+  try {
+    const [af, bf, ab, bb] = await Promise.all([
+      friendshipRepository.friendIds(a), friendshipRepository.friendIds(b),
+      friendBlockRepository.blockedIdsFor(new Types.ObjectId(a)), friendBlockRepository.blockedIdsFor(new Types.ObjectId(b)),
+    ]);
+    for (const id of af) if (!ab.has(id.toString())) recipients.add(id.toString());
+    for (const id of bf) if (!bb.has(id.toString())) recipients.add(id.toString());
+  } catch { /* Hints must never prevent the relationship write. */ }
+  try {
+    for (const doc of await friendOutingRepository.affectedByRelationship(a, b)) {
+      for (const p of doc.participants) {
+        if (p.status === 'accepted' || await outingInvitationEligible(doc, p.userId).catch(() => false)) recipients.add(p.userId);
+      }
+    }
+  } catch { /* Preserve already captured recipients. */ }
+  return [...recipients];
+}
+export function invalidateRelationshipAudience(ids: string[], access = false): void {
+  invalidateSuggestionCache(ids);
+  try { realtimeService.publish(ids, 'friends', ['friends'], access); } catch { /* committed writes remain successful */ }
+}
+
 export const friendOutingService = {
   async create(me: UserDoc, input: OutingCreateInput) {
     const actorId = me._id.toString(), hash = outingPayloadHash('create', input);
@@ -99,11 +130,13 @@ export const friendOutingService = {
       const saved = await friendOutingRepository.findCreate(actorId, input.operationId).catch(() => { throw outcomeUnknown(); });
       if (saved) {
         if (saved.createHash !== hash) throw outingOperationConflict();
+        await invalidateOuting(saved);
         return result(saved, me, saved.receipts[0], true);
       }
       if (duplicate(err)) throw new AppError(409, 'OUTING_EVENT_EXISTS', 'Kèo này đã có sổ chia tiền');
       throw outcomeUnknown();
     }
+    await invalidateOuting(doc);
     await notify({ type: 'outing_invite', outingId: id.toString(), actorId, recipientIds: input.inviteeIds, operationId: input.operationId });
     return result(doc, me, receipt, false);
   },
@@ -159,7 +192,10 @@ export const friendOutingService = {
         throw outcomeUnknown();
       });
       const confirmed = receiptFor(fresh, actorId, input.operationId, kind, hash);
-      if (confirmed) return result(fresh, me, confirmed, true);
+      if (confirmed) {
+        await invalidateOuting(fresh);
+        return result(fresh, me, confirmed, true);
+      }
       throw outcomeUnknown();
     }
     if (!committed) {
@@ -167,6 +203,7 @@ export const friendOutingService = {
       if (confirmed) return result(fresh, me, confirmed, true);
       throw outingRevisionConflict();
     }
+    await invalidateOuting(doc);
     await notify(notificationFor(doc, actorId, kind, input, applied.resultId));
     return result(doc, me, receipt, false);
   },

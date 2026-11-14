@@ -1,3 +1,4 @@
+import { realtimeAudience } from '../realtimeAudience.service.js';
 import { z } from 'zod';
 import type { ProposalHandler } from '../proposal.service.js';
 import { coupleRepository } from '../../repositories/couple.repository.js';
@@ -18,6 +19,7 @@ export const anniversaryHandler: ProposalHandler = {
   async apply(couple, payload) {
     const { date } = anniversaryPayloadSchema.parse(payload);
     await coupleRepository.setAnniversaryDate(couple._id, new Date(`${date}T00:00:00Z`));
+    await realtimeAudience.couple(couple._id, ['couple', 'events']);
   },
   summary(payload) {
     return `ngày bắt đầu yêu thành ${formatDayVi(anniversaryPayloadSchema.parse(payload).date)}`;

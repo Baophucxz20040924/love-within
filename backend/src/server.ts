@@ -6,10 +6,12 @@ import { startResourceMonitor, stopResourceMonitor } from './utils/monitor.js';
 import { startBankSync, stopBankSync } from './services/bankSync.service.js';
 import { startScheduler, stopScheduler } from './services/scheduler.service.js';
 import { logger } from './utils/logger.js';
+import { realtimeService, assertSingleRealtimeProcess } from './services/realtime.service.js';
 
 let startupSection = 'connectDb';
 
 async function bootstrap(): Promise<void> {
+  assertSingleRealtimeProcess();
   await connectDb();
   startupSection = 'syncIndexes';
   await syncIndexes();
@@ -33,6 +35,7 @@ async function bootstrap(): Promise<void> {
     stopBankSync();
     // Stops the loop now; resolves when a running tick has finished (at most 10 s).
     const schedulerStopped = stopScheduler();
+    realtimeService.drain();
     server.close(async () => {
       await schedulerStopped;
       await disconnectDb();

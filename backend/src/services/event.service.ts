@@ -1,3 +1,4 @@
+import { realtimeAudience } from './realtimeAudience.service.js';
 import { Types } from 'mongoose';
 import type { CoupleDoc } from '../models/Couple.js';
 import { DEFAULT_EVENT_EMOJI, defaultRepeatFor, type CoupleEventDoc, type EventKind, type EventRepeat } from '../models/CoupleEvent.js';
@@ -239,6 +240,7 @@ export const eventService = {
   async create(couple: CoupleDoc, userId: string, input: EventFields): Promise<EventView> {
     const uid = new Types.ObjectId(userId);
     const doc = await eventRepository.create({ ...normalize(couple, input), coupleId: couple._id, createdBy: uid });
+    await realtimeAudience.couple(couple._id, ['events']);
     logger.info('Couple event created', {
       coupleId: couple._id.toString(),
       userId,
@@ -280,6 +282,7 @@ export const eventService = {
     }
     const doc = await eventRepository.update(couple._id, existing._id, normalize(couple, merged), new Types.ObjectId(userId));
     if (!doc) throw notFound(); // deleted by the partner a moment ago
+    await realtimeAudience.couple(couple._id, ['events']);
     logger.info('Couple event updated', { coupleId: couple._id.toString(), userId, eventId: id, kind: doc.kind, repeat: doc.repeat });
     return viewOf(couple, doc, todayOf(couple));
   },
@@ -288,6 +291,7 @@ export const eventService = {
   async remove(couple: CoupleDoc, userId: string, id: string): Promise<void> {
     const doc = await eventRepository.softDelete(couple._id, id, new Types.ObjectId(userId));
     if (!doc) throw notFound();
+    await realtimeAudience.couple(couple._id, ['events']);
     logger.info('Couple event deleted', { coupleId: couple._id.toString(), userId, eventId: id });
   },
 

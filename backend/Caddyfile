@@ -21,6 +21,8 @@
 				max_size 6MB
 			}
 			reverse_proxy api:4000 {
+				# Flush promptly while retaining upstream cancellation on disconnect.
+				flush_interval 1ms
 				transport http {
 					dial_timeout 5s
 					response_header_timeout 70s

@@ -6,6 +6,9 @@ import { friendNotificationRepository } from '../repositories/friendNotification
 import { friendBlockRepository } from '../repositories/friendSafety.repository.js';
 import { logger } from '../utils/logger.js';
 import { pushService, type PushContent } from './push.service.js';
+import { realtimeAudience } from './realtimeAudience.service.js';
+
+const invalidateNotifications = (userId: Types.ObjectId) => realtimeAudience.own(userId.toString(), 'friends', ['friend-notifications']).catch(() => {});
 
 export type NotificationSpace = 'couple' | 'friends';
 export type { PushContent };
@@ -134,6 +137,7 @@ export const notificationService = {
       logger.warn('Notification not stored', { userId: input.to.toString(), type: input.type, message: (err as Error).message });
       return;
     }
+    await invalidateNotifications(input.to);
     if (rule.onlyNewActor && !newActor) return;
     pushService.enqueue({
       userId: input.to,
@@ -165,29 +169,32 @@ export const notificationService = {
 
   /** Unfriend or block: forget what each of the two did for the other. */
   async forgetBetween(a: Types.ObjectId, b: Types.ObjectId): Promise<void> {
-    await friendNotificationRepository
-      .purgeBetween(a, b)
-      .catch((err: Error) => logger.warn('Could not purge notifications', { userId: a.toString(), message: err.message }));
+    try { await friendNotificationRepository.purgeBetween(a, b); }
+    catch (err) { logger.warn('Could not purge notifications', { userId: a.toString(), message: (err as Error).message }); }
+    finally { await Promise.all([invalidateNotifications(a), invalidateNotifications(b)]); }
   },
 
   /** A post was deleted or a friend request answered: its notifications are no longer useful. */
   async forgetEntity(entityId: Types.ObjectId, type?: FriendNotificationType): Promise<void> {
+    const owners = await friendNotificationRepository.ownersForEntities([entityId], type).catch(() => [] as Types.ObjectId[]);
     await (type ? friendNotificationRepository.deleteForEntityOfType(entityId, type) : friendNotificationRepository.deleteForEntity(entityId))
+      .then(() => Promise.all(owners.map(invalidateNotifications)))
       .catch((err: Error) => logger.warn('Could not delete notifications', { entityId: entityId.toString(), message: err.message }));
   },
 
   /** Comments were deleted (a root with its replies): replies to them and mentions in them go. */
   async forgetEntities(entityIds: Types.ObjectId[]): Promise<void> {
     if (entityIds.length === 0) return;
-    await friendNotificationRepository
-      .deleteForEntities(entityIds)
+    const owners = await friendNotificationRepository.ownersForEntities(entityIds).catch(() => [] as Types.ObjectId[]);
+    await friendNotificationRepository.deleteForEntities(entityIds)
+      .then(() => Promise.all(owners.map(invalidateNotifications)))
       .catch((err: Error) => logger.warn('Could not delete notifications', { entities: entityIds.length, message: err.message }));
   },
 
   /** A grouped row no longer holds for one person (BB5: "Đi" taken back): that person leaves the row. */
   async forgetActor(to: Types.ObjectId, type: FriendNotificationType, entityId: Types.ObjectId, actorId: Types.ObjectId): Promise<void> {
-    await friendNotificationRepository
-      .removeGroupedActor(to, type, entityId, actorId)
-      .catch((err: Error) => logger.warn('Could not update notification', { userId: to.toString(), type, message: err.message }));
+    try { await friendNotificationRepository.removeGroupedActor(to, type, entityId, actorId); }
+    catch (err) { logger.warn('Could not update notification', { userId: to.toString(), type, message: (err as Error).message }); }
+    finally { await invalidateNotifications(to); }
   },
 };

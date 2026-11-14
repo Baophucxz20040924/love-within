@@ -1,3 +1,4 @@
+import { realtimeAudience } from './realtimeAudience.service.js';
 import { Types } from 'mongoose';
 import { BUCKET_IDEAS, BUCKET_IDEAS_BY_ID } from '../config/bucketIdeas.js';
 import { ECONOMY } from '../config/economy.js';
@@ -196,6 +197,7 @@ export const bucketService = {
       createdBy: new Types.ObjectId(userId),
       ideaId: idea?.id ?? null,
     });
+    await realtimeAudience.couple(couple._id, ['bucket']);
     logger.info('Bucket item created', {
       coupleId: couple._id.toString(),
       userId,
@@ -220,6 +222,7 @@ export const bucketService = {
     };
     const doc = await bucketRepository.update(couple._id, existing._id, normalize(merged), new Types.ObjectId(userId));
     if (!doc) throw notFound(); // deleted by the partner a moment ago
+    await realtimeAudience.couple(couple._id, ['bucket']);
     logger.info('Bucket item updated', { coupleId: couple._id.toString(), userId, itemId: id, pinned: doc.pinned });
     return oneView(couple, doc);
   },
@@ -228,6 +231,7 @@ export const bucketService = {
   async remove(couple: CoupleDoc, userId: string, id: string): Promise<void> {
     const doc = await bucketRepository.softDelete(couple._id, id, new Types.ObjectId(userId));
     if (!doc) throw notFound();
+    await realtimeAudience.couple(couple._id, ['bucket']);
     logger.info('Bucket item deleted', { coupleId: couple._id.toString(), userId, itemId: id });
   },
 
@@ -235,6 +239,7 @@ export const bucketService = {
   async restore(couple: CoupleDoc, userId: string, id: string): Promise<BucketItemView> {
     const doc = await bucketRepository.restore(couple._id, id, new Types.ObjectId(userId));
     if (doc) {
+      await realtimeAudience.couple(couple._id, ['bucket']);
       logger.info('Bucket item restored', { coupleId: couple._id.toString(), userId, itemId: id });
       return oneView(couple, doc);
     }
@@ -269,15 +274,18 @@ export const bucketService = {
       throw new AppError(409, 'BUCKET_ALREADY_DONE', 'Mục này đã được đánh dấu làm xong rồi');
     }
 
+    await realtimeAudience.couple(couple._id, ['bucket']);
     let story: StoryView | null = null;
     if (input.postStory) {
       try {
         story = await storyService.create(couple, userId, { body: storyBody(done, feeling), mood: null, happenedOn: doneOn, photos: input.photos }, { notify: false });
       } catch (err) {
         await bucketRepository.revertDone(couple._id, item._id, now);
+        await realtimeAudience.couple(couple._id, ['bucket']);
         throw err;
       }
       done = (await bucketRepository.setStory(couple._id, item._id, now, new Types.ObjectId(story.id))) ?? done;
+      await realtimeAudience.couple(couple._id, ['bucket']);
     }
 
     const { reward, skipped } = await tryReward(couple, userId, done, now);
@@ -322,6 +330,7 @@ export const bucketService = {
       if (current.status !== 'done') throw new AppError(409, 'BUCKET_NOT_DONE', 'Mục này vẫn đang ở "Chưa làm"');
       throw new AppError(409, 'BUCKET_REOPEN_EXPIRED', 'Chỉ đánh dấu chưa làm được trong 24 giờ sau khi làm xong');
     }
+    await realtimeAudience.couple(couple._id, ['bucket']);
     logger.info('Bucket item reopened', { coupleId: couple._id.toString(), userId, itemId: id });
     return oneView(couple, doc);
   },

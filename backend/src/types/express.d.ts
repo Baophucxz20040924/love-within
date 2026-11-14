@@ -7,6 +7,8 @@ declare global {
     interface Request {
       /** Authenticated user id (set by requireAuth). */
       userId?: string;
+      /** Verified effective access token deadline. */
+      accessExpiresAtMs?: number;
       /** Couple id for the authenticated user (set by requireCouple). */
       coupleId?: Types.ObjectId;
       /** Active couple document (set by requireCouple). */

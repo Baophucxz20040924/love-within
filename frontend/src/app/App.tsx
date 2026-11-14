@@ -14,6 +14,8 @@ import { HomePage } from '../pages/HomePage';
 import { homeOf } from '../lib/spaceStore';
 import { useFriendsTheme } from '../features/friends/useFriendsTheme';
 import { PushSync } from '../features/push/PushSync';
+import { RealtimeSync } from '../features/realtime/RealtimeSync';
+import { RealtimeBoundary } from '../features/realtime/verification';
 import {
   ApprovalsPage,
   BucketPage,
@@ -113,7 +115,8 @@ export function App() {
             <SpaceTheme />
             <RouteNavigation />
             <PushSync />
-            <Routes>
+            <RealtimeSync />
+            <RealtimeBoundary><Routes>
               <Route path="/login" element={<LoginRoute />} />
               <Route path={FRIENDS_LOGIN} element={<FriendsLoginRoute />} />
               <Route
@@ -216,7 +219,7 @@ export function App() {
                 }
               />
               <Route path="*" element={<Navigate to="/" replace />} />
-            </Routes>
+            </Routes></RealtimeBoundary>
           </AuthProvider>
         </BrowserRouter>
       </ToastProvider>

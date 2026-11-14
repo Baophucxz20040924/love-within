@@ -8,6 +8,7 @@ import { userRepository } from '../repositories/user.repository.js';
 import { assertSecretKey, decryptSecret } from '../utils/crypto.js';
 import { getLocalDate } from '../utils/date.js';
 import { logger } from '../utils/logger.js';
+import { publishFinanceChange } from './financeRealtime.service.js';
 
 /** Consecutive failed polls before a connection is parked in 'error' (user must retry). */
 export const BANK_ERROR_THRESHOLD = 5;
@@ -27,15 +28,24 @@ function errorText(err: unknown): { code: string; message: string; fatal: boolea
 
 export const bankSyncService = {
   /** Store transactions we have not seen yet. Returns the number of new rows. */
-  async ingest(conn: BankConnectionDoc, txns: BankFeedTxn[]): Promise<number> {
+  async ingest(conn: BankConnectionDoc, txns: BankFeedTxn[], onPersisted?: () => void): Promise<number> {
     if (txns.length === 0) return 0;
     const user = await userRepository.findById(conn.userId);
     const tz = user?.timezone ?? 'Asia/Ho_Chi_Minh';
-    return bankTransactionRepository.upsertMany(
-      conn.userId,
-      conn._id,
-      txns.map((t) => ({ ...t, localDate: getLocalDate(t.occurredAt, tz) })),
-    );
+    try {
+      const inserted = await bankTransactionRepository.upsertMany(
+        conn.userId,
+        conn._id,
+        txns.map((t) => ({ ...t, localDate: getLocalDate(t.occurredAt, tz) })),
+      );
+      if (inserted > 0) onPersisted?.();
+      return inserted;
+    } catch (err) {
+      // An unordered Mongo bulk can acknowledge inserts before another row fails.
+      const result = (err as { result?: { upsertedCount?: number } } | null)?.result;
+      if (typeof result?.upsertedCount === 'number' && result.upsertedCount > 0) onPersisted?.();
+      throw err;
+    }
   },
 
   /** Poll one connection. Never throws for provider errors: the outcome + connection state record them. */
@@ -45,10 +55,13 @@ export const bankSyncService = {
       return { ok: false, fetched: 0, inserted: 0, error: { code: 'NOT_LINKED', message: 'Chưa liên kết ngân hàng' } };
     }
     const at = new Date();
+    let persisted = false;
+    const acknowledge = () => { persisted = true; };
     try {
       const txns = await getBankFeed().fetchRecent(decryptSecret(conn.tokenEnc));
-      const inserted = await this.ingest(conn, txns);
-      await bankConnectionRepository.recordSuccess(conn._id, at);
+      const inserted = await this.ingest(conn, txns, acknowledge);
+      const updated = await bankConnectionRepository.recordSuccess(conn._id, at);
+      if (updated) acknowledge();
       if (inserted > 0) logger.info('Bank transactions synced', { userId, fetched: txns.length, inserted });
       return { ok: true, fetched: txns.length, inserted };
     } catch (err) {
@@ -59,10 +72,15 @@ export const bankSyncService = {
         `${e.code}: ${e.message}`,
         BANK_ERROR_THRESHOLD,
         e.fatal,
+        acknowledge,
       );
+      if (updated) acknowledge();
       logger.warn('Bank sync failed', { userId, code: e.code, consecutiveErrors: updated?.consecutiveErrors, status: updated?.status });
       if (!(err instanceof BankFeedError)) logger.error('Bank sync crashed', { userId, message: (err as Error).message });
       return { ok: false, fetched: 0, inserted: 0, error: { code: e.code, message: e.message } };
+    } finally {
+      // Rejected/no-write polls are not changes; acknowledged partial imports are.
+      if (persisted) await publishFinanceChange(userId);
     }
   },
 };

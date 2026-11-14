@@ -15,6 +15,7 @@ import { friendBlockRepository } from '../repositories/friendSafety.repository.j
 import { userRepository } from '../repositories/user.repository.js';
 import { Errors } from '../utils/errors.js';
 import { friendOutingService } from './friendOuting.service.js';
+import { realtimeAudience } from './realtimeAudience.service.js';
 import { profileOf, profileService, type PublicProfile } from './profile.service.js';
 
 const PAGE = 20;
@@ -240,13 +241,16 @@ export const friendNotificationsService = {
 
   async seen(me: UserDoc): Promise<void> {
     await userRepository.setFriendsNotifSeenAt(me._id, new Date());
+    await realtimeAudience.own(me._id.toString(), 'friends', ['friend-notifications']).catch(() => {});
   },
 
   async read(me: UserDoc, id: string): Promise<void> {
     if (!(await friendNotificationRepository.markRead(me._id, id))) throw Errors.notFound('Thông báo không tồn tại');
+    await realtimeAudience.own(me._id.toString(), 'friends', ['friend-notifications']).catch(() => {});
   },
 
   async readAll(me: UserDoc): Promise<void> {
     await friendNotificationRepository.markAllRead(me._id);
+    await realtimeAudience.own(me._id.toString(), 'friends', ['friend-notifications']).catch(() => {});
   },
 };

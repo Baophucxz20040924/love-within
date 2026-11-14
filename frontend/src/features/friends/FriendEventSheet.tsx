@@ -7,7 +7,7 @@ import { FormError, useFormDismiss } from '../../components/useFormDismiss';
 import { Icon } from '../../components/Icon';
 import { Switch } from '../../components/Switch';
 import { useToast } from '../../components/Toast';
-import { ApiRequestError } from '../../lib/apiClient';
+import { ApiRequestError, currentAccessEpoch } from '../../lib/apiClient';
 import type { FriendEventDetail, FriendEventInput } from '../../lib/types';
 import { FRIEND_EVENTS_KEY, FRIENDS_OVERVIEW_KEY, friendEventKey, friendEventsApi, friendsApi, uploadFriendPhoto } from './api';
 import { fromLocalInputs, plainName, toLocalInputs } from './eventFormat';
@@ -152,6 +152,7 @@ function EventForm({ editing, onClose, onSaved }: Omit<Props, 'open'>) {
     if (problem || busy || !startIso) return;
     setBusy(true);
     setError(null);
+    const accessEpoch = currentAccessEpoch();
     try {
       let coverInput: FriendEventInput['cover'] = null;
       if (cover?.kind === 'existing') coverInput = { key: cover.key, width: cover.width, height: cover.height };
@@ -184,9 +185,13 @@ function EventForm({ editing, onClose, onSaved }: Omit<Props, 'open'>) {
         const moved = patch.startAt !== undefined || patch.endAt !== undefined || patch.place !== undefined || patch.mapUrl !== undefined;
         toast.success(moved ? 'Đã lưu. Những người Đi và Có thể sẽ được báo.' : 'Đã lưu thay đổi');
       }
-      qc.setQueryData(friendEventKey(saved.id), saved);
+      if (accessEpoch === currentAccessEpoch()) {
+        qc.setQueryData(friendEventKey(saved.id), saved);
+        onSaved?.(saved);
+      } else {
+        void qc.invalidateQueries({ queryKey: friendEventKey(saved.id) });
+      }
       void qc.invalidateQueries({ queryKey: FRIEND_EVENTS_KEY });
-      onSaved?.(saved);
       onClose();
     } catch (err) {
       setError(errorText(err));

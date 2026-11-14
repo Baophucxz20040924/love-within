@@ -1,3 +1,4 @@
+import { realtimeAudience } from './realtimeAudience.service.js';
 import { randomInt, randomUUID } from 'node:crypto';
 import { Types } from 'mongoose';
 import { env } from '../config/env.js';
@@ -276,6 +277,7 @@ export const momentService = {
       throw notYet();
     }
 
+    await realtimeAudience.couple(couple._id, ['moments']);
     const both = updated.posts.length >= 2;
     logger.info('Duo moment posted', { coupleId: couple._id.toString(), userId, localDate: m.localDate, lateMin: post.lateMin, both });
     await questService.refresh(couple, DUO_MOMENT_QUEST_KEY, m.localDate);
@@ -327,9 +329,11 @@ export const momentService = {
     if (!linked) {
       // The partner tapped at the same moment and won: take this duplicate post back.
       await storyRepository.softDelete(couple._id, story.id, uid);
+      await realtimeAudience.couple(couple._id, ['stories']);
       const current = await momentRepository.findDay(couple._id, localDate);
       throw new AppError(409, 'MOMENT_STORY_EXISTS', 'Khoảnh khắc này đã có trên Story rồi.', { storyId: current?.storyId?.toString() ?? null });
     }
+    await realtimeAudience.couple(couple._id, ['moments']);
     logger.info('Duo moment posted to Story', { coupleId: couple._id.toString(), userId, localDate, storyId: story.id });
     await notificationService.toPartner(couple, uid, {
       type: 'couple_story',

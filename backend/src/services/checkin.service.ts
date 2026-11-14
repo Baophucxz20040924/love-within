@@ -1,3 +1,4 @@
+import { realtimeAudience } from './realtimeAudience.service.js';
 import { Types } from 'mongoose';
 import { ECONOMY } from '../config/economy.js';
 import type { CoupleDoc } from '../models/Couple.js';
@@ -69,6 +70,7 @@ export const checkinService = {
       throw err;
     }
 
+    await realtimeAudience.couple(couple._id, ['quests', 'couple']);
     const reward = await walletService.reward({ coupleId: couple._id, actorUserId: userId, reason: 'checkin', refId: doc._id, coin, exp });
     await questService.refresh(couple, 'daily_checkin', localDate);
 

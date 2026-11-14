@@ -8,6 +8,7 @@ import { userRepository } from '../repositories/user.repository.js';
 import { Errors } from '../utils/errors.js';
 import { logger } from '../utils/logger.js';
 import { profileOf, profileService, type PublicProfile } from './profile.service.js';
+import { realtimeAudience } from './realtimeAudience.service.js';
 
 export interface FriendSuggestionView {
   user: PublicProfile;
@@ -90,6 +91,10 @@ async function rank(me: string, friendIds: Types.ObjectId[]): Promise<Candidate[
 }
 
 /** "Những người bạn có thể biết" (plan/ENGINEERING_WORKFLOW.md, BB7). */
+export function invalidateSuggestionCache(ids: readonly string[]): void {
+  for (const id of ids) cache.delete(id);
+}
+
 export const friendSuggestionService = {
   /**
    * Up to 20 friends of my friends, most mutual friends first. Never me, my friends, pending requests (either way),
@@ -146,6 +151,7 @@ export const friendSuggestionService = {
     }
     const until = new Date(Date.now() + SUGGESTION_DISMISS_DAYS * DAY_MS);
     await friendSuggestionRepository.dismiss(me._id, target._id, until);
+    await realtimeAudience.own(me._id.toString(), 'friends', ['friends']).catch(() => {});
     logger.info('Friend suggestion dismissed', { userId: me._id.toString(), dismissedId: targetId });
     return { until: until.toISOString() };
   },

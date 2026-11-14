@@ -70,6 +70,7 @@ export async function reconcileSavingsGoal(ctx: SavingsWriteContext, goal: Savin
   if (goal.status === 'closed' && ctx.couple.pinnedSavingsGoalId?.equals(goal._id)) {
     await Couple.updateOne({ _id: ctx.couple._id, savingsWriteToken: ctx.couple.savingsWriteToken,
       pinnedSavingsGoalId: goal._id }, { $set: { pinnedSavingsGoalId: null } }).exec();
+    ctx.dirty.add('savings');
     ctx.couple.pinnedSavingsGoalId = null;
   }
   if (goal.status !== 'closed') {
@@ -78,6 +79,7 @@ export async function reconcileSavingsGoal(ctx: SavingsWriteContext, goal: Savin
       const claimed = await SavingsGoal.findOneAndUpdate({ _id: goal._id, coupleId: ctx.couple._id, reachedAt: null,
         status: { $ne: 'closed' }, version: goal.version }, { $set: { reachedAt: new Date(), status: 'reached' } }, { new: true }).exec();
       if (claimed) {
+        ctx.dirty.add('savings');
         goal = claimed;
         if (notify) ctx.afterRelease.push(async () => {
           await Promise.all(ctx.couple.memberIds.map((to) => notificationService.emit({
@@ -89,7 +91,7 @@ export async function reconcileSavingsGoal(ctx: SavingsWriteContext, goal: Savin
     } else if (goal.status !== (reached ? 'reached' : 'active')) {
       const changed = await SavingsGoal.findOneAndUpdate({ _id: goal._id, coupleId: ctx.couple._id, version: goal.version, status: { $ne: 'closed' } },
         { $set: { status: reached ? 'reached' : 'active' } }, { new: true }).exec();
-      if (changed) goal = changed;
+      if (changed) { ctx.dirty.add('savings'); goal = changed; }
     }
   }
   return goalView(ctx.couple, goal, totals);
@@ -119,6 +121,7 @@ export async function applySavingsProposal(ctx: SavingsWriteContext, payload: Re
     if (!goal) {
       const input = savingsCreateSchema.parse(payload);
       goal = await SavingsGoal.create({ ...input, _id: proposalId, coupleId: ctx.couple._id, createdBy, appliedProposalIds: [proposalId] });
+      ctx.dirty.add('savings');
     } else if (!goal.appliedProposalIds.some((id) => id.equals(proposalId))) throw stale();
     await reconcileSavingsGoal(ctx, goal);
     return;
@@ -138,6 +141,7 @@ export async function applySavingsProposal(ctx: SavingsWriteContext, payload: Re
     version: input.expectedVersion, status: { $ne: 'closed' }, appliedProposalIds: { $ne: proposalId } },
   { $set: changes, $inc: { version: 1 }, $addToSet: { appliedProposalIds: proposalId } }, { new: true }).exec();
   if (!changed) throw stale();
+  ctx.dirty.add('savings');
   goal = changed;
   await reconcileSavingsGoal(ctx, goal);
 }
@@ -174,6 +178,7 @@ async function addEntry(ctx: SavingsWriteContext, userId: string, goal: SavingsG
     if (duplicate(err) && bank) throw new AppError(409, 'SAVINGS_TRANSACTION_USED', 'Giao dịch này đã được ghi vào quỹ.');
     throw err;
   }
+  ctx.dirty.add('savings');
   return { entry: entryView(entry, userId), goal: await reconcileSavingsGoal(ctx, goal) };
 }
 
@@ -221,6 +226,7 @@ export const savingsService = {
           throw Errors.badRequest('Tổng tiền vượt giới hạn an toàn');
         }
         await SavingsEntry.updateOne({ _id: entry._id, coupleId: ctx.couple._id, goalId: goal._id, deletedAt: null }, { $set: { deletedAt: new Date() } }).exec();
+        ctx.dirty.add('savings');
       }
       return { ok: true, goal: await reconcileSavingsGoal(ctx, goal) };
     });
@@ -229,6 +235,7 @@ export const savingsService = {
     return withSavingsWrite(couple, userId, async (ctx) => {
       if (goalId && (await requireGoal(ctx.couple, goalId)).status === 'closed') throw closed();
       await Couple.updateOne({ _id: ctx.couple._id, savingsWriteToken: ctx.couple.savingsWriteToken }, { $set: { pinnedSavingsGoalId: goalId } }).exec();
+      ctx.dirty.add('savings');
       return { goalId };
     });
   },

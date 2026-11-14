@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import { Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -19,9 +19,11 @@ function BioSheet({ open, onClose, userId, initial }: { open: boolean; onClose: 
   const qc = useQueryClient();
   const toast = useToast();
   const [bio, setBio] = useState(initial);
+  const initialized = useRef<{ open: boolean; userId: string }>({ open: false, userId });
   useEffect(() => {
-    if (open) setBio(initial);
-  }, [open, initial]);
+    if (open && (!initialized.current.open || initialized.current.userId !== userId)) setBio(initial);
+    initialized.current = { open, userId };
+  }, [open, userId, initial]);
 
   const save = useMutation({
     mutationFn: () => friendsApi.updateMe(bio),

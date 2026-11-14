@@ -1,3 +1,4 @@
+import { realtimeAudience } from './realtimeAudience.service.js';
 import { Types } from 'mongoose';
 import type { CoupleDoc } from '../models/Couple.js';
 import { MAX_NUDGES_PER_DAY, NUDGE_COOLDOWN_SEC, type NudgeKind } from '../models/CoupleNudge.js';
@@ -83,6 +84,7 @@ export const nudgeService = {
       throw closer > 0 ? tooSoon(NUDGE_COOLDOWN_SEC) : dailyLimit(untilTomorrow);
     }
 
+    await realtimeAudience.couple(couple._id, ['couple']);
     const sentToday = earlierToday + 1;
     await notificationService.toPartner(couple, me, {
       type: 'nudge',

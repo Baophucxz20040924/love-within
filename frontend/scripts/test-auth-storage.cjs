@@ -146,7 +146,7 @@ async function main() {
   storage({ key: 'lw.accessToken', newValue: 'rotated-access' });
   values.set('lw.refreshToken', 'rotated-refresh');
   storage({ key: 'lw.refreshToken', newValue: 'rotated-refresh' });
-  assert.equal(calls.requests.length, 4, 'both rotation writes trigger refresh');
+  assert.equal(calls.requests.length, 3, 'rotation writes share the pending refresh');
   assert.equal(render().me, current);
   assert.equal(calls.cacheClear, 1, 'rotation does not clear cache');
   assert.equal(calls.clear, 0, 'rotation does not clear credentials');
@@ -154,7 +154,6 @@ async function main() {
   assert.equal(values.get('lw.accessToken'), 'rotated-access');
   assert.equal(values.get('lw.refreshToken'), 'rotated-refresh');
   calls.requests[2].resolve(current);
-  calls.requests[3].resolve(current);
   await new Promise(setImmediate);
 
   values.delete('lw.accessToken');
@@ -164,7 +163,7 @@ async function main() {
   assert.equal(calls.cacheClear, 2, 'token removal clears cache');
   assert.equal(calls.cancel, 2);
   assert.equal(calls.clear, 0, 'storage events do not write credential clears');
-  assert.equal(calls.requests.length, 4, 'token removal does not fetch without both credentials');
+  assert.equal(calls.requests.length, 3, 'token removal does not fetch without both credentials');
   cleanups.forEach((cleanup) => cleanup());
   assert.equal(listeners.has('storage'), false);
   console.log('PASS: isolated AuthContext storage events, stale response, rotation and removal');

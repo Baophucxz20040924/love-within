@@ -1,3 +1,4 @@
+import { realtimeAudience } from './realtimeAudience.service.js';
 import { randomUUID } from 'node:crypto';
 import { Types } from 'mongoose';
 import { env } from '../config/env.js';
@@ -278,6 +279,7 @@ export const letterService = {
     const content = normalize(couple, input, null);
     await validatePhotos(couple, userId, content.photos, new Set());
     const letter = await letterRepository.create({ ...content, coupleId: couple._id, authorId: new Types.ObjectId(userId), recipientId });
+    await realtimeAudience.couple(couple._id, ['letters']);
     logger.info('Letter created', {
       coupleId: couple._id.toString(),
       userId,
@@ -306,6 +308,7 @@ export const letterService = {
       throw again?.openedAt ? opened409() : notFound();
     }
 
+    await realtimeAudience.couple(couple._id, ['letters']);
     const kept = new Set(content.photos.map((p) => p.key));
     const dropped = current.photos.filter((p) => !kept.has(p.key));
     await Promise.all(
@@ -335,6 +338,7 @@ export const letterService = {
       const again = await letterRepository.findById(couple._id, id);
       throw again?.openedAt ? opened409() : notFound();
     }
+    await realtimeAudience.couple(couple._id, ['letters']);
     logger.warn('Letter deleted (soft)', { coupleId: couple._id.toString(), userId, letterId: id });
   },
 
@@ -353,6 +357,7 @@ export const letterService = {
     if (!letter.openedAt) {
       doc = await letterRepository.markOpened(couple._id, letter._id, new Types.ObjectId(userId), now);
       if (doc) {
+        await realtimeAudience.couple(couple._id, ['letters']);
         logger.info('Letter opened', { coupleId: couple._id.toString(), userId, letterId: id });
         await notificationService.emit({
           space: 'couple',

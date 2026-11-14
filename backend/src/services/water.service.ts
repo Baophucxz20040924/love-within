@@ -1,3 +1,4 @@
+import { realtimeAudience } from './realtimeAudience.service.js';
 import { randomUUID } from 'node:crypto';
 import { Types } from 'mongoose';
 import { env } from '../config/env.js';
@@ -131,6 +132,7 @@ async function submit(
     imageKey,
     status: 'pending',
   });
+  await realtimeAudience.couple(couple._id, ['water']);
   const [daily, pendingMl, settings] = await Promise.all([
     waterRepository.getDaily(couple._id, uid, localDate),
     sumPending(couple, uid, localDate),
@@ -279,6 +281,7 @@ export const waterService = {
     const updated = await waterRepository.review(couple._id, log._id, status, new Types.ObjectId(reviewerId));
     if (!updated) throw Errors.conflict('Bản ghi này đã được xử lý');
 
+    await realtimeAudience.couple(couple._id, ['water']);
     const settings = await coupleSettingsRepository.getOrCreate(couple._id);
     let totalMl: number;
     let goalMet: boolean;
@@ -290,6 +293,7 @@ export const waterService = {
         updated.amountMl,
         settings.waterGoalMl,
       );
+      await realtimeAudience.couple(couple._id, ['water']);
       await questService.refresh(couple, 'drink_water', updated.localDate);
       totalMl = daily.totalMl;
       goalMet = daily.goalMet;

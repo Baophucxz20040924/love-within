@@ -8,6 +8,8 @@ import { userRepository } from '../repositories/user.repository.js';
 import { Errors } from '../utils/errors.js';
 import { logger } from '../utils/logger.js';
 import { notificationService } from './notification.service.js';
+import { realtimeAudience } from './realtimeAudience.service.js';
+import { captureRelationshipAudience, invalidateRelationshipAudience } from './friendOuting.service.js';
 import { profileService, type PublicProfile } from './profile.service.js';
 
 const ALPHABET = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
@@ -80,6 +82,7 @@ export const friendInviteService = {
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
         const inv = await friendInviteRepository.create({ code: newCode(), inviterId: me._id, maxUses, expiresAt });
+        await realtimeAudience.own(me._id.toString(), 'friends', ['friends']).catch(() => {});
         logger.info('Friend invite created', { userId: me._id.toString(), inviteId: inv._id.toString(), days, maxUses });
         return toView(inv);
       } catch (err) {
@@ -96,6 +99,7 @@ export const friendInviteService = {
   async revoke(me: UserDoc, id: string): Promise<InviteView> {
     const inv = await friendInviteRepository.revoke(id, me._id);
     if (!inv) throw Errors.notFound('Link mời không tồn tại hoặc đã bị thu hồi');
+    await realtimeAudience.own(me._id.toString(), 'friends', ['friends']).catch(() => {});
     logger.info('Friend invite revoked', { userId: me._id.toString(), inviteId: id });
     return toView(inv);
   },
@@ -129,26 +133,29 @@ export const friendInviteService = {
     const existing = await friendshipRepository.findBetween(me._id, inviter._id);
     if (existing?.status === 'accepted') return { status: 'already_friends', inviter: inviterProfile };
 
+    const audience = await captureRelationshipAudience(me._id.toString(), inviter._id.toString());
     const firstUse = await friendInviteRepository.recordUse(inv._id, me._id);
     if (firstUse) {
       if (!(await friendInviteRepository.takeSeat(inv._id, new Date()))) {
         await friendInviteRepository.forgetUse(inv._id, me._id);
         return { status: 'invalid' };
       }
+      await realtimeAudience.own(inviter._id.toString(), 'friends', ['friends']).catch(() => {});
     } else if (inv.revokedAt || inv.expiresAt.getTime() <= Date.now()) {
       // Used this link before (and has since unfriended): allowed again only while the link is alive.
       return { status: 'invalid' };
     }
 
     // A request already waiting (either way) becomes the friendship; otherwise create it.
-    if (existing) await friendshipRepository.acceptAny(existing._id);
+    if (existing && await friendshipRepository.acceptAny(existing._id)) invalidateRelationshipAudience(audience);
     if (!(await friendshipRepository.areFriends(me._id, inviter._id))) {
       try {
         await friendshipRepository.createAccepted(inviter._id, me._id);
+        invalidateRelationshipAudience(audience);
       } catch (err) {
         if (!isDuplicateKey(err)) throw err;
         const row = await friendshipRepository.findBetween(me._id, inviter._id);
-        if (row) await friendshipRepository.acceptAny(row._id);
+        if (row && await friendshipRepository.acceptAny(row._id)) invalidateRelationshipAudience(audience);
       }
     }
     if (existing) await notificationService.forgetEntity(existing._id);

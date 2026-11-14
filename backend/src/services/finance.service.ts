@@ -14,6 +14,7 @@ import { encryptSecret } from '../utils/crypto.js';
 import { getLocalDate } from '../utils/date.js';
 import { AppError, Errors } from '../utils/errors.js';
 import { logger } from '../utils/logger.js';
+import { publishFinanceChange } from './financeRealtime.service.js';
 
 /** On-demand syncs closer together than this reuse the last poll (no extra call to thueapibank). */
 const MIN_SYNC_GAP_MS = 60_000;
@@ -160,9 +161,14 @@ export const financeService = {
       tokenEnc: encryptSecret(input.token),
       at: new Date(),
     });
-    const imported = await bankSyncService.ingest(conn, txns);
-    logger.info('Bank connected', { userId, provider: conn.provider, fetched: txns.length, imported, relinked: !!existing });
-    return { connection: connectionView(conn, user.financeVisibility), imported };
+    try {
+      const imported = await bankSyncService.ingest(conn, txns);
+      logger.info('Bank connected', { userId, provider: conn.provider, fetched: txns.length, imported, relinked: !!existing });
+      return { connection: connectionView(conn, user.financeVisibility), imported };
+    } finally {
+      // The connection was persisted even if importing transactions failed.
+      await publishFinanceChange(userId);
+    }
   },
 
   /** Called when the finance page opens and by "Thử lại". Throttled to one provider call per minute per user. */
@@ -185,16 +191,21 @@ export const financeService = {
     const user = await loadUser(userId);
     const conn = await bankConnectionRepository.revoke(userId);
     if (!conn) throw new AppError(404, 'FINANCE_NOT_LINKED', 'Bạn chưa liên kết ngân hàng');
-    const deleted = purge ? await bankTransactionRepository.deleteAllForUser(user._id) : 0;
-    // Purging the data also drops what the AI assistant derived from it.
-    if (purge) await assistantThreadRepository.deleteByUser(user._id);
-    logger.info('Bank disconnected', { userId, purge, deleted });
-    return { connection: connectionView(conn, user.financeVisibility), deleted };
+    try {
+      const deleted = purge ? await bankTransactionRepository.deleteAllForUser(user._id) : 0;
+      // Purging the data also drops what the AI assistant derived from it.
+      if (purge) await assistantThreadRepository.deleteByUser(user._id);
+      logger.info('Bank disconnected', { userId, purge, deleted });
+      return { connection: connectionView(conn, user.financeVisibility), deleted };
+    } finally {
+      await publishFinanceChange(userId, { access: purge });
+    }
   },
 
   async setVisibility(userId: string, visibility: FinanceVisibility): Promise<{ visibility: FinanceVisibility }> {
     await loadUser(userId);
     await userRepository.setFinanceVisibility(userId, visibility);
+    await publishFinanceChange(userId, { visibilityChanged: true, access: true });
     logger.info('Finance visibility changed', { userId, visibility });
     return { visibility };
   },
@@ -211,6 +222,7 @@ export const financeService = {
   async setNote(userId: string, id: string, note: string): Promise<TxnView> {
     const t = await bankTransactionRepository.updateNote(new Types.ObjectId(userId), id, note);
     if (!t) throw Errors.notFound('Giao dịch không tồn tại');
+    await publishFinanceChange(userId);
     return txnView(t, true);
   },
 

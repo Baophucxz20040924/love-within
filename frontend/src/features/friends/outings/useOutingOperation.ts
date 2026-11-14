@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { ApiRequestError, assertCurrentSession } from '../../../lib/apiClient';
+import { ApiRequestError, assertCurrentSession, currentAccessEpoch } from '../../../lib/apiClient';
 import { tokenStore } from '../../../lib/tokenStore';
 import { OUTINGS_KEY, outingKey } from './api';
 import type { MutationMeta, OutingResult } from './types';
 
 /** A submitted payload and key remain immutable until a definite outcome. Never replay a new key after a lost response. */
-export function useOutingOperation(id?: string) {
+export function useOutingOperation(id?: string, draftRevision?: number) {
   const qc = useQueryClient();
   const generation = useRef(tokenStore.generation()).current;
   const mounted = useRef(true);
@@ -18,18 +18,21 @@ export function useOutingOperation(id?: string) {
   const [error, setError] = useState('');
   const [uncertain, setUncertain] = useState(false);
   const [stale, setStale] = useState(false);
+  const baseRevision = useRef(draftRevision);
   async function run(revision: number, send: (meta: MutationMeta) => Promise<OutingResult>): Promise<OutingResult | undefined> {
     // An old form must never retry its captured payload using a new account's tokens.
     if (!isCurrentSession() || busyRef.current || stale) return;
-    if (!attempt.current) attempt.current = { meta: { operationId: crypto.randomUUID(), expectedRevision: revision }, send };
+    if (!attempt.current) attempt.current = { meta: { operationId: crypto.randomUUID(), expectedRevision: baseRevision.current ?? revision }, send };
     busyRef.current = true; setBusy(true); setError('');
+    const accessEpoch = currentAccessEpoch();
     try {
       assertCurrentSession(generation);
       const result = await attempt.current.send(attempt.current.meta);
       // Transport checks alone cannot protect this later cache continuation.
       if (!isCurrentSession()) return;
       assertCurrentSession(generation);
-      qc.setQueryData(outingKey(result.outing.id), result.outing);
+      if (accessEpoch === currentAccessEpoch()) qc.setQueryData(outingKey(result.outing.id), result.outing);
+      else void qc.invalidateQueries({ queryKey: outingKey(result.outing.id) });
       void qc.invalidateQueries({ queryKey: OUTINGS_KEY });
       attempt.current = null; setUncertain(false); setStale(false);
       return result;
@@ -51,7 +54,7 @@ export function useOutingOperation(id?: string) {
   }
   function reset() {
     if (!isCurrentSession() || busyRef.current || uncertain) return;
-    attempt.current = null; setStale(false); setError('');
+    attempt.current = null; baseRevision.current = draftRevision; setStale(false); setError('');
   }
   // Callers must check again after awaiting run(), before closing a sheet or navigating.
   return { run, busy, error, uncertain, stale, reset, isCurrentSession, locked: busy || uncertain || stale };

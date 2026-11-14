@@ -52,12 +52,14 @@ export const bankConnectionRepository = {
     error: string,
     threshold: number,
     fatal: boolean,
+    onPersisted?: () => void,
   ): Promise<BankConnectionDoc | null> {
     const doc = await BankConnection.findOneAndUpdate(
       { _id: id, status: { $ne: 'revoked' } },
       { $set: { lastPolledAt: at, lastError: error }, $inc: { consecutiveErrors: 1 } },
       { new: true },
     ).exec();
+    if (doc) onPersisted?.();
     if (doc && doc.status === 'active' && (fatal || doc.consecutiveErrors >= threshold)) {
       return BankConnection.findOneAndUpdate({ _id: id, status: 'active' }, { $set: { status: 'error' } }, { new: true }).exec();
     }

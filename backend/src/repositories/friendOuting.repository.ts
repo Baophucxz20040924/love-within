@@ -43,6 +43,11 @@ export const friendOutingRepository = {
     return FriendOuting.find({ _id: { $in: ids.map((id) => new Types.ObjectId(id)) }, 'participants.userId': userId })
       .select(headerProjection).lean<OutingHeader[]>().exec();
   },
+  /** Relationship changes can revoke pending invitations or restrict historical ledgers. */
+  affectedByRelationship(a: string, b: string): Promise<OutingHeader[]> {
+    return FriendOuting.find({ 'participants.userId': { $all: [a, b] } })
+      .select(headerProjection).lean<OutingHeader[]>().exec();
+  },
   /** Bounded to the <=50 members, unlike loading every user's entire block history. */
   async groupHasBlock(ids: string[]): Promise<boolean> {
     const objectIds = ids.map((id) => new Types.ObjectId(id));

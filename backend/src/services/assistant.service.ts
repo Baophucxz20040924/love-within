@@ -24,6 +24,7 @@ import {
 } from './assistantContext.service.js';
 import { AppError, Errors } from '../utils/errors.js';
 import { logger } from '../utils/logger.js';
+import { realtimeAudience } from './realtimeAudience.service.js';
 
 /**
  * Finance assistant (plan/PROJECT_SUMMARY.md): insights + chat over the owner's own cash flow
@@ -233,6 +234,7 @@ export const assistantService = {
     await loadUser(userId);
     const at = new Date();
     await userRepository.setAiFinanceConsent(userId, at);
+    await realtimeAudience.own(userId, 'couple', ['assistant', 'account']);
     logger.info('AI finance consent given', { userId });
     return { consented: true, consentedAt: at.toISOString() };
   },
@@ -241,9 +243,13 @@ export const assistantService = {
   async clear(userId: string, revoke: boolean): Promise<{ cleared: boolean; consented: boolean }> {
     const user = await loadUser(userId);
     const deleted = await assistantThreadRepository.deleteByUser(user._id);
-    if (revoke) await userRepository.setAiFinanceConsent(userId, null);
-    logger.info('AI finance assistant cleared', { userId, revoke, deleted });
-    return { cleared: deleted > 0, consented: !revoke && !!user.aiFinanceConsentAt };
+    try {
+      if (revoke) await userRepository.setAiFinanceConsent(userId, null);
+      logger.info('AI finance assistant cleared', { userId, revoke, deleted });
+      return { cleared: deleted > 0, consented: !revoke && !!user.aiFinanceConsentAt };
+    } finally {
+      await realtimeAudience.own(userId, 'couple', ['assistant', 'account'], revoke);
+    }
   },
 
   async insights(userId: string, refresh: boolean): Promise<{ insights: InsightsView; stale: boolean; coverage: Coverage }> {
@@ -300,6 +306,7 @@ export const assistantService = {
         model: result.model,
       };
       await assistantThreadRepository.setInsights(user._id, insights);
+      await realtimeAudience.own(userId, 'couple', ['assistant']);
       return { insights: insightsView(insights), stale: false, coverage: snap.coverage };
     });
   },
@@ -327,6 +334,7 @@ export const assistantService = {
       const q: AssistantMessage = { role: 'user', content: message, createdAt: at };
       const a: AssistantMessage = { role: 'assistant', content: reply, createdAt: new Date(at.getTime() + 1) };
       await assistantThreadRepository.appendExchange(user._id, q, a);
+      await realtimeAudience.own(userId, 'couple', ['assistant']);
       return { question: messageView(q), reply: messageView(a) };
     });
   },

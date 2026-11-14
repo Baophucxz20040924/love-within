@@ -1,3 +1,4 @@
+import { realtimeAudience } from './realtimeAudience.service.js';
 import { Types } from 'mongoose';
 import { userRepository } from '../repositories/user.repository.js';
 import { coupleRepository } from '../repositories/couple.repository.js';
@@ -67,6 +68,7 @@ export const pairingService = {
       toEmail: email,
       expiresAt: new Date(Date.now() + INVITE_TTL_DAYS * 86_400_000),
     });
+    await Promise.all([realtimeAudience.own(fromUserId, 'couple', ['pairing']), ...(target ? [realtimeAudience.own(target._id, 'couple', ['pairing'])] : [])]);
     logger.info('Pairing invite sent', { userId: fromUserId, toEmail: maskEmail(email), inviteId: inv._id.toString() });
     return toView(inv, 'sent');
   },
@@ -95,6 +97,7 @@ export const pairingService = {
     if (inv.status !== 'pending') throw Errors.conflict('Lời mời không còn hiệu lực');
     if (isExpired(inv)) {
       await pairingInviteRepository.setStatus(inv._id, 'expired');
+      await Promise.all([realtimeAudience.own(userId, 'couple', ['pairing']), realtimeAudience.own(inv.fromUserId, 'couple', ['pairing'])]);
       throw Errors.conflict('Lời mời đã hết hạn');
     }
 
@@ -102,6 +105,7 @@ export const pairingService = {
     if (!from) throw Errors.notFound('Người gửi không tồn tại');
     if (from.coupleId) {
       await pairingInviteRepository.setStatus(inv._id, 'cancelled');
+      await Promise.all([realtimeAudience.own(userId, 'couple', ['pairing']), realtimeAudience.own(inv.fromUserId, 'couple', ['pairing'])]);
       throw Errors.conflict('Người gửi đã thuộc một couple khác');
     }
 
@@ -110,11 +114,30 @@ export const pairingService = {
       timezone: from.timezone,
     });
     await Promise.all([
-      userRepository.setCoupleId(from._id, couple._id),
-      userRepository.setCoupleId(user._id, couple._id),
-      pairingInviteRepository.setStatus(inv._id, 'accepted'),
+      userRepository.setCoupleId(from._id, couple._id).then(() => Promise.all([
+        realtimeAudience.own(from._id, 'couple', ['account', 'couple', 'pairing'], true), realtimeAudience.own(from._id, 'friends', ['account']),
+      ])),
+      userRepository.setCoupleId(user._id, couple._id).then(() => Promise.all([
+        realtimeAudience.own(user._id, 'couple', ['account', 'couple', 'pairing'], true), realtimeAudience.own(user._id, 'friends', ['account']),
+      ])),
+      pairingInviteRepository.setStatus(inv._id, 'accepted').then(() => Promise.all([
+        realtimeAudience.own(from._id, 'couple', ['pairing']), realtimeAudience.own(user._id, 'couple', ['pairing']),
+      ])),
     ]);
+    // Snapshot other pending invite participants before cancellation. Lookup is best effort and
+    // independent of the pairing write; only account holders can have open streams.
+    const pending = await Promise.all([
+      pairingInviteRepository.findPendingSentBy(from._id), pairingInviteRepository.findPendingSentBy(user._id),
+      pairingInviteRepository.findPendingReceivedBy(from.email), pairingInviteRepository.findPendingReceivedBy(user.email),
+    ]).catch(() => []);
+    const affected = new Set<string>([from._id.toString(), user._id.toString()]);
+    const invites = pending.flat();
+    for (const pendingInvite of invites) affected.add(pendingInvite.fromUserId.toString());
+    const targets = await Promise.all([...new Set(invites.map((i) => i.toEmail))].map((email) => userRepository.findByEmail(email).catch(() => null)));
+    for (const target of targets) if (target) affected.add(target._id.toString());
     await pairingInviteRepository.cancelPendingFor([from._id, user._id], [from.email, user.email]);
+    await Promise.all([...affected].map((id) => realtimeAudience.own(id, 'couple', ['pairing'])));
+
 
     logger.info('Couple created', {
       coupleId: couple._id.toString(),
@@ -131,6 +154,7 @@ export const pairingService = {
     if (!inv || inv.toEmail !== user.email) throw Errors.notFound('Lời mời không tồn tại');
     if (inv.status !== 'pending') throw Errors.conflict('Lời mời không còn hiệu lực');
     await pairingInviteRepository.setStatus(inv._id, 'rejected');
+    await Promise.all([realtimeAudience.own(userId, 'couple', ['pairing']), realtimeAudience.own(inv.fromUserId, 'couple', ['pairing'])]);
     logger.info('Pairing invite rejected', { userId, inviteId });
   },
 
@@ -139,6 +163,8 @@ export const pairingService = {
     if (!inv || inv.fromUserId.toString() !== userId) throw Errors.notFound('Lời mời không tồn tại');
     if (inv.status !== 'pending') throw Errors.conflict('Lời mời không còn hiệu lực');
     await pairingInviteRepository.setStatus(inv._id, 'cancelled');
+    const target = await userRepository.findByEmail(inv.toEmail).catch(() => null);
+    await Promise.all([realtimeAudience.own(userId, 'couple', ['pairing']), ...(target ? [realtimeAudience.own(target._id, 'couple', ['pairing'])] : [])]);
     logger.info('Pairing invite cancelled', { userId, inviteId });
   },
 
@@ -151,7 +177,14 @@ export const pairingService = {
     const couple = await coupleRepository.findActiveById(coupleId);
     if (!couple) throw Errors.notFound('Couple không tồn tại');
     await coupleRepository.archive(couple._id);
-    await Promise.all(couple.memberIds.map((id) => userRepository.setCoupleId(id, null)));
+    await Promise.all(couple.memberIds.map((id) => realtimeAudience.own(id, 'couple', [], true)));
+    await Promise.all(couple.memberIds.map(async (id) => {
+      await userRepository.setCoupleId(id, null);
+      await Promise.all([
+        realtimeAudience.own(id, 'couple', ['account', 'pairing'], true),
+        realtimeAudience.own(id, 'friends', ['account']),
+      ]);
+    }));
     logger.warn('Couple unpaired (archived)', { coupleId: coupleId.toString(), userId });
   },
 };

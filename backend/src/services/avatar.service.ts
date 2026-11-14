@@ -4,6 +4,16 @@ import { userRepository } from '../repositories/user.repository.js';
 import { Errors } from '../utils/errors.js';
 import { logger } from '../utils/logger.js';
 import { avatarUrlOf } from './profile.service.js';
+import { realtimeAudience } from './realtimeAudience.service.js';
+
+async function invalidateAvatar(userId: string): Promise<void> {
+  await Promise.all([
+    realtimeAudience.own(userId, 'couple', ['account']).catch(() => {}),
+    realtimeAudience.own(userId, 'friends', ['account', 'friend-profile']).catch(() => {}),
+    realtimeAudience.coupleForUser(userId, ['account', 'couple']).catch(() => {}),
+    realtimeAudience.friendsOf(userId, ['friend-profile', 'friend-posts', 'friend-events']).catch(() => {}),
+  ]);
+}
 
 /** The phone makes a 512×512 JPEG (~40–80 KB); 1 MB leaves room for PNG/WebP. */
 export const AVATAR_MAX_BYTES = 1024 * 1024;
@@ -45,6 +55,7 @@ export const avatarService = {
     const user = await userRepository.findById(userId);
     if (!user) throw Errors.unauthorized('Tài khoản không tồn tại');
     await userRepository.setAvatarKey(user._id, key);
+    await invalidateAvatar(userId);
     if (user.avatarKey && user.avatarKey !== key) await deleteQuietly(user.avatarKey);
     logger.info('Avatar updated', { userId });
     return { avatarUrl: await avatarUrlOf(key) };
@@ -55,6 +66,7 @@ export const avatarService = {
     if (!user) throw Errors.unauthorized('Tài khoản không tồn tại');
     if (user.avatarKey) {
       await userRepository.setAvatarKey(user._id, null);
+      await invalidateAvatar(userId);
       await deleteQuietly(user.avatarKey);
       logger.info('Avatar removed', { userId });
     }

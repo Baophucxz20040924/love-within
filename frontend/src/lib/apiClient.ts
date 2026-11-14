@@ -27,6 +27,15 @@ let refreshing: { generation: string; promise: Promise<AuthTokens | null> } | nu
 /** Carries the generation after clearing, so a delayed event cannot log out a newer account. */
 export const SESSION_EXPIRED_EVENT = 'lw:session-expired';
 
+// A response issued before a privacy change cannot be applied after the change.
+// A rejected mutation may already have committed; callers must preserve their retry/idempotency policy.
+let accessEpoch = 0;
+export function currentAccessEpoch(): number { return accessEpoch; }
+export function advanceAccessEpoch(): void { accessEpoch += 1; }
+function assertAccessEpoch(epoch: number): void {
+  if (epoch !== accessEpoch) throw new ApiRequestError(503, 'ACCESS_CHANGED', 'Quyền truy cập đã thay đổi. Kết quả có thể đã được lưu; hãy kiểm tra trước khi tiếp tục.');
+}
+
 export function assertCurrentSession(generation: string): void {
   if (!tokenStore.isCurrent(generation)) {
     throw new ApiRequestError(409, 'SESSION_CHANGED', 'Phiên đăng nhập đã thay đổi.');
@@ -64,36 +73,46 @@ async function refreshTokens(generation: string): Promise<AuthTokens | null> {
   return promise;
 }
 
-export async function apiRequest<T>(path: string, options: RequestOptions = {}): Promise<T> {
-  const { method = 'GET', body, auth = true, _retry = false } = options;
-  // Capture once, BEFORE the original request. A retry may rotate tokens, never switch logins.
+/** Fetch with the same session/refresh rules as JSON requests. A caller's abort never cancels the shared refresh. */
+export async function authenticatedResponse(path: string, init: RequestInit = {}, auth = true, retry = true, requestEpoch?: number): Promise<Response> {
   const generation = tokenStore.generation();
-  const send = () => {
+  const check = () => {
     assertCurrentSession(generation);
-    const headers: Record<string, string> = {};
-    if (body !== undefined) headers['Content-Type'] = 'application/json';
+    if (requestEpoch !== undefined) assertAccessEpoch(requestEpoch);
+    if (init.signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+  };
+  const send = () => {
+    check();
+    const headers = new Headers(init.headers);
     const tokens = auth ? tokenStore.get() : null;
-    // Cache cancellation/clearing can briefly wake mounted observers during logout.
-    // Fail locally instead of dispatching tokenless private requests in that interval.
     if (auth && !tokens) throw new ApiRequestError(401, 'SESSION_REQUIRED', 'Vui lòng đăng nhập lại.');
-    if (tokens) headers.Authorization = `Bearer ${tokens.accessToken}`;
-    return fetch(`${BASE}${path}`, {
-      method,
-      headers,
-      body: body !== undefined ? JSON.stringify(body) : undefined,
-      cache: 'no-store',
-    });
+    if (tokens) headers.set('Authorization', `Bearer ${tokens.accessToken}`);
+    return fetch(`${BASE}${path}`, { ...init, headers, cache: 'no-store' });
   };
   let res = await send();
-  assertCurrentSession(generation);
-  if (res.status === 401 && auth && !_retry) {
+  check();
+  if (res.status === 401 && auth && retry) {
     const refreshed = await refreshTokens(generation);
-    assertCurrentSession(generation);
+    check();
     if (refreshed) {
       res = await send();
-      assertCurrentSession(generation);
+      check();
     }
   }
+  return res;
+}
+
+export async function apiRequest<T>(path: string, options: RequestOptions = {}): Promise<T> {
+  const { method = 'GET', body, auth = true, _retry = false } = options;
+  const generation = tokenStore.generation();
+  const epoch = currentAccessEpoch();
+  const res = await authenticatedResponse(path, {
+    method,
+    headers: body !== undefined ? { 'Content-Type': 'application/json' } : undefined,
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  }, auth, !_retry, auth ? epoch : undefined);
+  assertCurrentSession(generation);
+  if (auth) assertAccessEpoch(epoch);
   if (!res.ok) {
     let payload: ApiError | null = null;
     try {
@@ -102,6 +121,7 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
       // Proxies can answer with HTML or an empty body.
     }
     assertCurrentSession(generation);
+    if (auth) assertAccessEpoch(epoch);
     throw new ApiRequestError(
       res.status,
       payload?.error?.code ?? 'ERROR',
@@ -112,5 +132,6 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
   if (res.status === 204) return undefined as T;
   const json = (await res.json()) as { data: T };
   assertCurrentSession(generation);
+  if (auth) assertAccessEpoch(epoch);
   return json.data;
 }

@@ -1,3 +1,4 @@
+import { realtimeAudience } from './realtimeAudience.service.js';
 import { Types } from 'mongoose';
 import { DAILY_QUESTIONS, QUESTION_CATEGORIES, type DailyQuestion } from '../config/dailyQuestions.js';
 import type { CoupleDoc } from '../models/Couple.js';
@@ -258,11 +259,15 @@ export const questionService = {
       }
     }
 
+    await realtimeAudience.couple(couple._id, ['questions']);
     if (created) {
       const count = await answerRepository.countFor(couple._id, q._id);
       const lockedNow = count >= couple.memberIds.length;
       // Lock both answers before reading the partner's for the response, so no edit can land after it was shown.
-      if (lockedNow) await answerRepository.lockAll(couple._id, q._id, new Date());
+      if (lockedNow) {
+        await answerRepository.lockAll(couple._id, q._id, new Date());
+        await realtimeAudience.couple(couple._id, ['questions']);
+      }
       const localDate = today(couple);
       // Push to the partner (never the answer itself): first answer → their turn; second answer → both can read now.
       const day = q.localDate === localDate ? 'câu hỏi hôm nay' : `câu hỏi ngày ${formatDayVi(q.localDate)}`;
@@ -295,6 +300,7 @@ export const questionService = {
     if (!updated) {
       throw new AppError(409, 'QUESTION_NOT_LOCKED', 'Khi cả hai cùng trả lời xong, bạn mới thả cảm xúc được.');
     }
+    await realtimeAudience.couple(couple._id, ['questions']);
     return viewOf(couple, q, userId);
   },
 
@@ -309,6 +315,7 @@ export const questionService = {
         text: value,
         localDate: today(couple),
       });
+      await realtimeAudience.own(userId, 'couple', ['questions']);
       logger.info('Daily question ask queued', { coupleId: couple._id.toString(), userId });
       return { text: ask.text, createdAt: ask.createdAt.toISOString() };
     } catch (err) {

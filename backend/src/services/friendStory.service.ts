@@ -18,6 +18,11 @@ import { getLocalDate } from '../utils/date.js';
 import { AppError, Errors } from '../utils/errors.js';
 import { logger } from '../utils/logger.js';
 import { notificationService } from './notification.service.js';
+import { realtimeAudience } from './realtimeAudience.service.js';
+
+const invalidateStory = (story: FriendStoryDoc) => (story.hiddenByReportsAt
+  ? realtimeAudience.own(story.authorId.toString(), 'friends', ['friend-posts'])
+  : realtimeAudience.friendsOf(story.authorId.toString(), ['friend-posts'])).catch(() => {});
 import { searchNameOf } from './friends.service.js';
 import { profileOf, profileService, type PublicProfile } from './profile.service.js';
 import {
@@ -394,6 +399,7 @@ export const friendStoryService = {
     const poll = input.poll ? newPoll(input.poll) : null;
     await validatePhotos(me, content.photos, new Set());
     const story = await friendStoryRepository.create({ ...content, authorId: me._id, poll });
+    await invalidateStory(story);
     logger.info('Friend story created', {
       userId: me._id.toString(),
       storyId: story._id.toString(),
@@ -424,6 +430,7 @@ export const friendStoryService = {
       if (pollChange !== undefined && (await friendStoryRepository.findById(id))) throw pollErrors.locked();
       throw Errors.notFound(POST_NOT_FOUND);
     }
+    await invalidateStory(updated);
     // A replaced deadline will be announced again; the old "đã kết thúc" row would be wrong now.
     if (pollChange !== undefined && current.poll?.closedNotifiedAt && !pollChange?.closedNotifiedAt) {
       await notificationService.forgetEntity(updated._id, 'poll_closed');
@@ -448,6 +455,7 @@ export const friendStoryService = {
     await requireOwn(me, id);
     const deleted = await friendStoryRepository.softDelete(id, me._id);
     if (!deleted) throw Errors.notFound(POST_NOT_FOUND);
+    await invalidateStory(deleted);
     await notificationService.forgetEntity(deleted._id);
     logger.warn('Friend story deleted (soft)', { userId: me._id.toString(), storyId: id });
   },
@@ -457,6 +465,7 @@ export const friendStoryService = {
     const userId = me._id.toString();
     const story = await friendStoryRepository.setReaction(id, userId, type);
     if (!story) throw Errors.notFound(POST_NOT_FOUND);
+    await invalidateStory(story);
     // Removing a reaction keeps the notification (like Facebook); only new reactions notify.
     if (type) await notificationService.emit({ space: 'friends', to: story.authorId, type: 'story_reaction', actorId: me._id, entityId: story._id });
     return viewOne(me, story);
@@ -477,6 +486,7 @@ export const friendStoryService = {
       checkVote(await requireVisible(me, id), ids);
       throw pollErrors.badOption();
     }
+    await invalidateStory(updated);
     return viewOne(me, updated);
   },
 
@@ -492,6 +502,7 @@ export const friendStoryService = {
       if (!again.poll) throw pollErrors.notFound();
       throw pollErrors.closed();
     }
+    await invalidateStory(updated);
     return viewOne(me, updated);
   },
 
@@ -564,7 +575,9 @@ export const friendStoryService = {
       body: text,
       mentions,
     });
+    await invalidateStory(story);
     await friendStoryRepository.incCommentCount(story._id, 1);
+    await invalidateStory(story);
     await notifyComment(me, story, comment, root);
     return toCommentView(comment, me._id.toString(), story.authorId.toString(), await profileService.load([me._id]), blocked);
   },
@@ -582,6 +595,7 @@ export const friendStoryService = {
     }
     const deleted = await friendStoryCommentRepository.softDelete(story._id, comment._id);
     if (!deleted) throw Errors.notFound(COMMENT_NOT_FOUND);
+    await invalidateStory(story);
     let removed = 1;
     const gone = [deleted._id];
     if (!deleted.parentId) {
@@ -590,6 +604,7 @@ export const friendStoryService = {
       gone.push(...replies.ids);
     }
     await friendStoryRepository.decCommentCount(story._id, removed);
+    await invalidateStory(story);
     // Replies to these comments and mentions in them are no longer useful.
     await notificationService.forgetEntities(gone);
     logger.info('Friend story comment deleted', { userId: me._id.toString(), storyId, commentId, removed });

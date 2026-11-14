@@ -75,7 +75,7 @@ export function CreateOutingSheet({ onClose, onSaved, event }: { onClose: () => 
 
 export function InviteOutingSheet({ outing, onClose }: { outing: OutingLedger; onClose: () => void }) {
   const [picked, setPicked] = useState<string[]>([]);
-  const op = useOutingOperation(outing.id);
+  const op = useOutingOperation(outing.id, outing.revision);
   return <FormShell title="Mời vào buổi chia tiền" operation={op} dirty={!!picked.length} onClose={onClose} onSubmit={() => void op.run(outing.revision, meta => outingsApi.invite(outing.id, picked, meta)).then(result => { if (result && op.isCurrentSession()) onClose(); })} submitLabel="Gửi lời mời" valid={!!picked.length && !outingLimits(outing).editsClosed && picked.length <= outingLimits(outing).rosterRemaining}>
     <CapacityMessage outing={outing} />
     <FriendPicker picked={picked} onChange={setPicked} excluded={outing.participants.map(p => p.userId)} maxInvitees={outingLimits(outing).rosterRemaining} />
@@ -101,7 +101,7 @@ export function ExpenseSheet({ outing, expense, myId, onClose }: { outing: Outin
   const originalIds = expense ? expenseParticipantIds(expense) : [];
   const [picked, setPicked] = useState<string[]>(expense ? originalIds : accepted.map(p => p.userId));
   const [custom, setCustom] = useState<Record<string, string>>(Object.fromEntries(expense ? originalIds.map(id => [id, String(expense.allocations.find(a => a.userId === id)?.amount ?? 0)]) : []));
-  const op = useOutingOperation(outing.id);
+  const op = useOutingOperation(outing.id, outing.revision);
   const amount = money(amountText);
   const allocations = mode === 'equal' ? equalAllocations(amount, picked) : picked.map(userId => ({ userId, amount: money(custom[userId] || '0') }));
   const sum = allocations.reduce((total, row) => total + row.amount, 0);
@@ -136,7 +136,7 @@ export function SettlementSheet({ outing, myId, recipient, onClose }: { outing: 
   const maximum = Math.min(available, Math.max(0, (receiver?.balance ?? 0) - (receiver?.reservedIncoming ?? 0)));
   const [text, setText] = useState(String(maximum || ''));
   const amount = money(text);
-  const op = useOutingOperation(outing.id);
+  const op = useOutingOperation(outing.id, outing.revision);
   return <FormShell title="Báo đã chuyển tiền" operation={op} dirty={!!text} onClose={onClose} onSubmit={() => void op.run(outing.revision, meta => outingsApi.settlement(outing.id, to, amount, meta)).then(result => { if (result && op.isCurrentSession()) onClose(); })} submitLabel="Tôi đã chuyển khoản này" valid={canReportSettlement(outing, myId, to, amount)}>
     <CapacityMessage outing={outing} />
     <div className="outing-notice"><Icon name="alert" size={18} /><p>Ứng dụng không chuyển tiền. Chỉ báo sau khi bạn đã gửi tiền ngoài ứng dụng. Số dư chỉ đổi khi người nhận xác nhận.</p></div>

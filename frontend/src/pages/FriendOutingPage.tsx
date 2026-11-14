@@ -14,7 +14,7 @@ import { isLedger, type MutationMeta, type OutingExpense, type OutingResult } fr
 import { useOutingOperation } from '../features/friends/outings/useOutingOperation';
 import '../features/friends/outings/outings.css';
 
-type Action = { kind: 'accept' | 'decline' | 'review' | 'approve' | 'object' | 'void' | 'confirm' | 'reject' | 'cancel' | 'complete'; id?: string };
+type Action = { kind: 'accept' | 'decline' | 'review' | 'approve' | 'object' | 'void' | 'confirm' | 'reject' | 'cancel' | 'complete'; id?: string; revision?: number; financeRevision?: number };
 const actionTitles: Record<Action['kind'], string> = { accept: 'Nhận lời tham gia?', decline: 'Từ chối lời mời?', review: 'Mời mọi người kiểm tra sổ?', approve: 'Đồng ý chốt phiên bản này?', object: 'Chưa đồng ý với sổ này?', void: 'Hủy khoản bạn đã ghi?', confirm: 'Bạn đã thực sự nhận được tiền?', reject: 'Từ chối lời báo chuyển?', cancel: 'Hủy lời báo chuyển của bạn?', complete: 'Hoàn tất buổi chia tiền?' };
 const actionButtons: Record<Action['kind'], string> = { accept: 'Nhận lời tham gia', decline: 'Từ chối lời mời', review: 'Bắt đầu chốt sổ', approve: 'Đồng ý chốt sổ', object: 'Tôi chưa đồng ý', void: 'Hủy khoản chi', confirm: 'Tôi đã nhận đủ khoản này', reject: 'Từ chối xác nhận', cancel: 'Hủy lời báo chuyển', complete: 'Đánh dấu hoàn tất' };
 const sections = [{ id: 'expenses', label: 'Chi phí' }, { id: 'people', label: 'Thành viên' }, { id: 'settle', label: 'Thanh toán' }, { id: 'history', label: 'Lịch sử' }] as const;
@@ -48,27 +48,27 @@ export function FriendOutingPage() {
   const pending = ledger?.settlements.filter(s => s.status === 'pending') ?? [];
   const canComplete = ledger?.phase === 'settling' && ledger.balances.every(b => b.balance === 0) && !pending.length;
   const name = (userId: string) => memberName(ledger?.participants ?? [], userId, myId);
-  const requestAction = (next: Action) => { op.reset(); setAction(next); };
+  const requestAction = (next: Action) => { op.reset(); setAction({ ...next, revision: view?.revision, financeRevision: view?.financeRevision }); };
   const submitAction = async () => {
     if (!view || !action || op.stale) return;
     const send = (meta: MutationMeta): Promise<OutingResult> => {
       switch (action.kind) {
         case 'accept': case 'decline': return outingsApi.membership(id, action.kind, meta);
         case 'review': return outingsApi.review(id, meta);
-        case 'approve': case 'object': return outingsApi.consent(id, action.kind, view.financeRevision, meta);
+        case 'approve': case 'object': return outingsApi.consent(id, action.kind, action.financeRevision!, meta);
         case 'void': return outingsApi.voidExpense(id, action.id!, meta);
         case 'confirm': case 'reject': case 'cancel': return outingsApi.resolve(id, action.id!, action.kind, meta);
         case 'complete': return outingsApi.complete(id, meta);
       }
     };
-    const result = await op.run(view.revision, send); if (result && op.isCurrentSession()) setAction(null);
+    const result = await op.run(action.revision!, send); if (result && op.isCurrentSession()) setAction(null);
   };
   const targetPayment = ledger?.settlements.find(s => s.id === action?.id);
   const targetExpense = ledger?.expenses.find(e => e.id === action?.id);
   const actionDescription = action?.kind === 'accept' ? 'Bạn sẽ xem được sổ và được chọn vào các khoản chia sau khi nhận lời. Đây không phải là đồng ý chốt nợ; bạn sẽ kiểm tra từng phần trước khi chốt.'
     : action?.kind === 'decline' ? 'Bạn không tham gia chia tiền và không được tính phần cho các khoản chi.'
     : action?.kind === 'review' ? 'Tất cả thành viên cần kiểm tra và đồng ý trên cùng phiên bản tiền. Một người chưa đồng ý có thể khiến sổ chờ vô thời hạn; người tạo không thể chốt thay.'
-    : action?.kind === 'approve' ? `Bạn đồng ý các phần chia ở phiên bản tiền ${view?.financeRevision}. Khi người cuối cùng đồng ý, chi phí và thành viên sẽ bị khóa; không tự mở lại được.`
+    : action?.kind === 'approve' ? `Bạn đồng ý các phần chia ở phiên bản tiền ${action?.financeRevision}. Khi người cuối cùng đồng ý, chi phí và thành viên sẽ bị khóa; không tự mở lại được.`
     : action?.kind === 'object' ? 'Sổ sẽ thể hiện rõ bạn chưa đồng ý. Không ai có thể chốt thay bạn. Hãy đối chiếu các khoản trước khi đồng ý lại.'
     : action?.kind === 'void' ? 'Khoản này vẫn được giữ trong lịch sử nhưng không còn tính vào số dư. Các đồng ý chốt trước đó sẽ mất hiệu lực.'
     : action?.kind === 'confirm' ? 'Chỉ xác nhận khi bạn đã kiểm tra và nhận đúng số tiền bên dưới ở ngoài ứng dụng. Xác nhận làm đổi số dư và chưa thể đảo ngược trong phiên bản này.'
@@ -109,7 +109,7 @@ export function FriendOutingPage() {
       </>}
     </div>
     <BottomSheet open={!!action} onClose={() => { if (!op.busy && !op.uncertain) { setAction(null); op.reset(); } }} title={action ? actionTitles[action.kind] : ''}>
-      {action && <div className="outing-form"><p>{actionDescription}</p>{targetPayment && <div className="outing-preview"><p>{name(targetPayment.fromUserId)} → {name(targetPayment.toUserId)}</p><strong>{formatVnd(targetPayment.amount)}</strong></div>}{targetExpense && <div className="outing-preview"><p>{targetExpense.title ?? 'Khoản chi đã lưu'}</p><strong>{formatVnd(targetExpense.amount)}</strong></div>}<OperationMessage operation={op} /><button className="btn btn-primary btn-block" disabled={op.busy || op.stale || query.isFetching} onClick={() => void submitAction()}>{op.busy ? 'Đang lưu…' : op.uncertain ? 'Thử lại cùng yêu cầu' : actionButtons[action.kind]}</button><button className="btn btn-ghost btn-block" disabled={op.busy || op.uncertain} onClick={() => { setAction(null); op.reset(); }}>Quay lại kiểm tra</button></div>}
+      {action && <div className="outing-form"><p>{actionDescription}</p>{targetPayment && <div className="outing-preview"><p>{name(targetPayment.fromUserId)} → {name(targetPayment.toUserId)}</p><strong>{formatVnd(targetPayment.amount)}</strong></div>}{targetExpense && <div className="outing-preview"><p>{targetExpense.title ?? 'Khoản chi đã lưu'}</p><strong>{formatVnd(targetExpense.amount)}</strong></div>}<OperationMessage operation={{ ...op, reset: () => { op.reset(); setAction(current => current && view ? { ...current, revision: view.revision, financeRevision: view.financeRevision } : current); } }} /><button className="btn btn-primary btn-block" disabled={op.busy || op.stale || query.isFetching} onClick={() => void submitAction()}>{op.busy ? 'Đang lưu…' : op.uncertain ? 'Thử lại cùng yêu cầu' : actionButtons[action.kind]}</button><button className="btn btn-ghost btn-block" disabled={op.busy || op.uncertain} onClick={() => { setAction(null); op.reset(); }}>Quay lại kiểm tra</button></div>}
     </BottomSheet>
   </Page>;
 }

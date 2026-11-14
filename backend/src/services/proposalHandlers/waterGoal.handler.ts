@@ -1,3 +1,4 @@
+import { realtimeAudience } from '../realtimeAudience.service.js';
 import { z } from 'zod';
 import type { ProposalHandler } from '../proposal.service.js';
 import { coupleSettingsRepository } from '../../repositories/coupleSettings.repository.js';
@@ -14,6 +15,7 @@ export const waterGoalHandler: ProposalHandler = {
   async apply(couple, payload) {
     const { goalMl } = waterGoalPayloadSchema.parse(payload);
     await coupleSettingsRepository.setWaterGoal(couple._id, goalMl);
+    await realtimeAudience.couple(couple._id, ['water', 'couple']);
   },
   summary(payload) {
     return `mục tiêu nước thành ${numberVi.format(waterGoalPayloadSchema.parse(payload).goalMl)} ml mỗi ngày`;

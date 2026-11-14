@@ -1,3 +1,4 @@
+import { realtimeAudience } from './realtimeAudience.service.js';
 import { randomUUID } from 'node:crypto';
 import { Types } from 'mongoose';
 import { env } from '../config/env.js';
@@ -236,6 +237,7 @@ export const storyService = {
     const content = normalize(couple, input);
     await validatePhotos(couple, userId, content.photos, new Set(), opts.sharedPhotos);
     const story = await storyRepository.create({ ...content, coupleId: couple._id, authorId: new Types.ObjectId(userId) });
+    await realtimeAudience.couple(couple._id, ['stories']);
     logger.info('Story created', { coupleId: couple._id.toString(), userId, storyId: story._id.toString(), photos: content.photos.length });
     // Never the post's words or photos on the lock screen.
     if (opts.notify !== false) {
@@ -259,6 +261,7 @@ export const storyService = {
     const updated = await storyRepository.updateContent(couple._id, id, new Types.ObjectId(userId), content);
     if (!updated) throw Errors.notFound('Bài viết không tồn tại hoặc đã bị xóa');
 
+    await realtimeAudience.couple(couple._id, ['stories']);
     const kept = new Set(content.photos.map((p) => p.key));
     // Only the story's own photos are deleted; shared ones (a moment's photos) belong to their feature.
     const own = storyPrefix(couple._id);
@@ -279,12 +282,14 @@ export const storyService = {
     await requireOwnStory(couple, userId, id);
     const deleted = await storyRepository.softDelete(couple._id, id, new Types.ObjectId(userId));
     if (!deleted) throw Errors.notFound('Bài viết không tồn tại hoặc đã bị xóa');
+    await realtimeAudience.couple(couple._id, ['stories', 'moments', 'bucket']);
     logger.warn('Story deleted (soft)', { coupleId: couple._id.toString(), userId, storyId: id });
   },
 
   async react(couple: CoupleDoc, userId: string, id: string, type: ReactionType | null): Promise<StoryView> {
     const story = await storyRepository.setReaction(couple._id, id, userId, type);
     if (!story) throw Errors.notFound('Bài viết không tồn tại hoặc đã bị xóa');
+    await realtimeAudience.couple(couple._id, ['stories']);
     return toView(story, userId, await memberNames(couple));
   },
 
@@ -304,7 +309,9 @@ export const storyService = {
       authorId: new Types.ObjectId(userId),
       body: text,
     });
+    await realtimeAudience.couple(couple._id, ['stories']);
     await storyRepository.incCommentCount(couple._id, story._id, 1);
+    await realtimeAudience.couple(couple._id, ['stories']);
     // Never the comment's words. "your post" when the partner is the author, else a comment under the commenter's own post.
     const partnerIsAuthor = story.authorId.toString() !== userId;
     await notificationService.toPartner(couple, userId, {
@@ -327,7 +334,9 @@ export const storyService = {
     if (comment.authorId.toString() !== userId) throw Errors.forbidden('Bạn chỉ xóa được bình luận của mình');
     const deleted = await storyCommentRepository.softDelete(couple._id, comment._id, new Types.ObjectId(userId));
     if (!deleted) throw Errors.notFound('Bình luận không tồn tại');
+    await realtimeAudience.couple(couple._id, ['stories']);
     await storyRepository.incCommentCount(couple._id, story._id, -1);
+    await realtimeAudience.couple(couple._id, ['stories']);
     logger.info('Story comment deleted', { coupleId: couple._id.toString(), userId, storyId, commentId });
   },
 
@@ -351,6 +360,7 @@ export const storyService = {
   async markSeen(userId: string): Promise<{ previousSeenAt: string | null }> {
     const me = await userRepository.findById(userId);
     await userRepository.setStoriesSeenAt(userId, new Date());
+    await realtimeAudience.own(userId, 'couple', ['stories']);
     return { previousSeenAt: me?.storiesSeenAt ? me.storiesSeenAt.toISOString() : null };
   },
 

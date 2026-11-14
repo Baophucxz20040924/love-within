@@ -65,9 +65,10 @@ export function FriendProfilePage() {
   const profile = useQuery({
     queryKey: friendProfileKey(userId),
     queryFn: () => friendsApi.profile(userId),
-    retry: (count, err) => !(err instanceof ApiRequestError && err.status === 404) && count < 1,
+    retry: (count, err) => !(err instanceof ApiRequestError && [403, 404].includes(err.status)) && count < 1,
   });
-  const p = profile.data;
+  const inaccessible = profile.error instanceof ApiRequestError && [403, 404].includes(profile.error.status);
+  const p = inaccessible ? undefined : profile.data;
   const canSee = Boolean(p?.canSeePosts);
 
   const stories = useInfiniteQuery({
@@ -140,7 +141,7 @@ export function FriendProfilePage() {
     );
   }
   if (!p) {
-    const notFound = profile.error instanceof ApiRequestError && profile.error.status === 404;
+    const notFound = inaccessible;
     return (
       <Page title="Trang cá nhân" onBack={goBack}>
         {notFound ? (

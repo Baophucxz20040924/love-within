@@ -1,3 +1,4 @@
+import { realtimeAudience } from '../realtimeAudience.service.js';
 import { Types } from 'mongoose';
 import type { CoupleDoc } from '../../models/Couple.js';
 import type { EventRepeat } from '../../models/CoupleEvent.js';
@@ -181,6 +182,7 @@ export const coupleEventsRemindJob: SchedulerJob = {
         const done = await alreadySent(due.map((r) => r.key));
         for (const r of due) {
           if (done.has(r.key) || !(await claimSend(r.key))) continue;
+          await realtimeAudience.couple(r.coupleId, ['events']);
           await deliverEventReminder(r);
           sent += 1;
         }

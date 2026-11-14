@@ -25,6 +25,18 @@ const inertBefore = new Map<HTMLElement, boolean>();
 let overflowBefore = '';
 let overflowPriority = '';
 let observer: MutationObserver | undefined;
+let privacyPaused = false;
+/** Pause the modal focus trap while private content is being reauthorized. */
+export function setModalPrivacyPause(paused: boolean): void {
+  if (privacyPaused === paused) return;
+  privacyPaused = paused;
+  if (paused) restoreInert();
+  else {
+    syncStack();
+    const top = stack[stack.length - 1];
+    if (top) focusInside(top);
+  }
+}
 const focusableSelector = 'a[href], area[href], button, input, select, textarea, summary, iframe, [contenteditable="true"], [tabindex]';
 
 function visible(element: HTMLElement): boolean {
@@ -59,7 +71,7 @@ function restoreInert() {
 function syncInert() {
   restoreInert();
   const top = stack[stack.length - 1];
-  if (!top) return;
+  if (!top || privacyPaused) return;
   // Walk the active portal's ancestor path: never inert its own portal host,
   // even when another modal's portal or app root contains that host.
   let branch: HTMLElement = top.overlay;
@@ -89,7 +101,7 @@ function syncStack() {
 
 function onKeyDown(event: KeyboardEvent) {
   const top = stack[stack.length - 1];
-  if (!top || event.isComposing) return;
+  if (!top || privacyPaused || event.isComposing) return;
   if (event.key === 'Escape') {
     event.preventDefault();
     event.stopImmediatePropagation();
@@ -108,7 +120,7 @@ function onKeyDown(event: KeyboardEvent) {
 
 function onFocusIn(event: FocusEvent) {
   const top = stack[stack.length - 1];
-  if (top && event.target instanceof Node && !top.dialog.contains(event.target)) focusInside(top);
+  if (!privacyPaused && top && event.target instanceof Node && !top.dialog.contains(event.target)) focusInside(top);
 }
 
 function register(entry: ModalEntry) {
@@ -130,7 +142,7 @@ function register(entry: ModalEntry) {
   }
   stack.push(entry);
   syncStack();
-  if (entry === stack[stack.length - 1]) focusInside(entry, true);
+  if (!privacyPaused && entry === stack[stack.length - 1]) focusInside(entry, true);
   return () => {
     const index = stack.indexOf(entry);
     if (index < 0) return;
@@ -151,7 +163,7 @@ function register(entry: ModalEntry) {
       if (overflowBefore) document.body.style.setProperty('overflow', overflowBefore, overflowPriority);
       else document.body.style.removeProperty('overflow');
     }
-    if (wasTop) {
+    if (wasTop && !privacyPaused) {
       const top = stack[stack.length - 1];
       const previous = entry.previous;
       if (previous?.isConnected && visible(previous) && !previous.matches(':disabled') && (!top || top.dialog.contains(previous))) {

@@ -22,6 +22,11 @@ import { AppError, Errors } from '../utils/errors.js';
 import { logger } from '../utils/logger.js';
 import type { FriendCommentThreadView, FriendCommentView } from './friendStory.service.js';
 import { notificationService } from './notification.service.js';
+import { realtimeAudience } from './realtimeAudience.service.js';
+
+const invalidateEvent = (event: FriendEventDoc) => (event.hiddenByReportsAt
+  ? realtimeAudience.own(event.creatorId.toString(), 'friends', ['friend-events'])
+  : realtimeAudience.event(event, ['friend-events'])).catch(() => {});
 import { profileOf, profileService, type PublicProfile } from './profile.service.js';
 import { STORY_IMAGE_TYPES } from './story.service.js';
 
@@ -421,6 +426,7 @@ export const friendEventService = {
       cover,
       inviteeIds,
     });
+    await invalidateEvent(ev);
     logger.info('Friend event created', { userId: me._id.toString(), eventId: ev._id.toString(), invitees: inviteeIds.length, cover: Boolean(cover) });
     await notifyMany(inviteeIds, 'event_invite', me._id, ev._id);
     return detailView(me, ev);
@@ -459,6 +465,7 @@ export const friendEventService = {
 
     const updated = await friendEventRepository.update(id, me._id, set, now);
     if (!updated) return explainMiss(me, id);
+    await invalidateEvent(updated);
     if (droppedCover) {
       await getStorage()
         .deleteObject(droppedCover)
@@ -486,6 +493,7 @@ export const friendEventService = {
       requireOpen(again, new Date());
       throw eventErrors.tooMany();
     }
+    await invalidateEvent(updated);
     const fresh = added.filter((a) => !ev.inviteeIds.some((b) => b.equals(a)));
     logger.info('Friend event invitees added', { userId: me._id.toString(), eventId: id, added: fresh.length, total: updated.inviteeIds.length });
     await notifyMany(fresh, 'event_invite', me._id, updated._id);
@@ -503,6 +511,7 @@ export const friendEventService = {
     const before = ev.rsvps?.get(me._id.toString()) ?? null;
     const updated = await friendEventRepository.setRsvp(id, me._id, status, new Date());
     if (!updated) return explainMiss(me, id);
+    await invalidateEvent(updated);
     if (status === 'going' && before !== 'going') {
       await notificationService.emit({ space: 'friends', to: ev.creatorId, type: 'event_rsvp', actorId: me._id, entityId: ev._id });
     } else if (before === 'going' && status !== 'going') {
@@ -517,6 +526,7 @@ export const friendEventService = {
     requireOpen(ev, new Date());
     const updated = await friendEventRepository.cancel(id, me._id, new Date());
     if (!updated) return explainMiss(me, id);
+    await invalidateEvent(updated);
     const told = seeingInvitees(updated, await eventFriends(updated));
     logger.info('Friend event cancelled', { userId: me._id.toString(), eventId: id, told: told.length });
     await notifyMany(told, 'event_cancelled', me._id, updated._id);
@@ -532,6 +542,7 @@ export const friendEventService = {
     if (ev.status === 'active' && !isPast(ev, new Date())) throw eventErrors.notCancelled();
     const deleted = await friendEventRepository.softDelete(id, me._id);
     if (!deleted) throw eventErrors.notFound();
+    await invalidateEvent(ev);
     await notificationService.forgetEntity(deleted._id);
     logger.warn('Friend event deleted (soft)', { userId: me._id.toString(), eventId: id });
   },
@@ -573,7 +584,9 @@ export const friendEventService = {
       if (!root || !commentVisibleTo(me, root, blocked)) throw Errors.notFound('Bình luận bạn trả lời không còn nữa');
     }
     const comment = await friendEventCommentRepository.create({ eventId: ev._id, authorId: me._id, parentId: root?._id ?? null, body: text });
+    await invalidateEvent(ev);
     await friendEventRepository.incCommentCount(ev._id);
+    await invalidateEvent(ev);
     const going = seeingInvitees(ev, await eventFriends(ev)).filter((u) => ev.rsvps?.get(u.toString()) === 'going');
     await notifyMany([ev.creatorId, ...going], 'event_comment', me._id, ev._id);
     return toCommentView(comment, me._id.toString(), ev.creatorId.toString(), await profileService.load([me._id]));
@@ -589,9 +602,11 @@ export const friendEventService = {
     }
     const deleted = await friendEventCommentRepository.softDelete(ev._id, comment._id);
     if (!deleted) throw Errors.notFound(COMMENT_NOT_FOUND);
+    await invalidateEvent(ev);
     let removed = 1;
     if (!deleted.parentId) removed += await friendEventCommentRepository.softDeleteReplies(ev._id, deleted._id);
     await friendEventRepository.decCommentCount(ev._id, removed);
+    await invalidateEvent(ev);
     logger.info('Friend event comment deleted', { userId: me._id.toString(), eventId: id, commentId, removed });
     return { removed };
   },
