@@ -1,6 +1,6 @@
 import { Schema, model, type Document, type Types } from 'mongoose';
 
-/** Invite links into the friends space (plan/FRIENDS_V2_PLAN.md, BB4). */
+/** Invite links into the friends space (plan/ENGINEERING_WORKFLOW.md, BB4). */
 
 export const INVITE_DAYS = [1, 7, 30] as const;
 export const INVITE_USES = [1, 5, 20] as const;

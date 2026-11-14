@@ -8,7 +8,7 @@ import { addDays, daysUntil, formatDayVi, getLocalDate, nextYearlyDate, yearlyDa
 import { Errors } from '../utils/errors.js';
 import { logger } from '../utils/logger.js';
 
-// "Đếm ngược sự kiện" (plan/COUPLE_V2_PLAN.md, CP4). Owner decision 10/11/2026: either member creates, edits or deletes
+// "Đếm ngược sự kiện" (plan/ENGINEERING_WORKFLOW.md, CP4). Owner decision 10/11/2026: either member creates, edits or deletes
 // an event without the partner's approval (the anniversary date itself still goes through a proposal).
 // Titles and notes are never logged.
 

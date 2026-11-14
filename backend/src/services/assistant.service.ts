@@ -26,7 +26,7 @@ import { AppError, Errors } from '../utils/errors.js';
 import { logger } from '../utils/logger.js';
 
 /**
- * Finance assistant (plan/FINANCE_ASSISTANT_PLAN.md): insights + chat over the owner's own cash flow
+ * Finance assistant (plan/PROJECT_SUMMARY.md): insights + chat over the owner's own cash flow
  * (last month + this month). Prompts and replies are never logged, only sizes, tokens and latency.
  */
 

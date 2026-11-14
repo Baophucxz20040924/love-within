@@ -95,7 +95,7 @@ function friendsPush(n: FriendsNotifyInput): PushContent {
 }
 
 /**
- * Single entry point for notifications (plan/PLATFORM_PLAN.md, N3 + N4).
+ * Single entry point for notifications (plan/OPERATIONS.md, N3 + N4).
  * - friends: stored for the notifications page (reactions and comments grouped per post), then pushed to the
  *   recipient's friends-space devices only.
  * - couple: nothing is stored; pushed to the recipient's couple-app devices only.

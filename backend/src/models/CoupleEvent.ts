@@ -1,6 +1,6 @@
 import { Schema, model, type Document, type Types } from 'mongoose';
 
-/** "Đếm ngược sự kiện" (plan/COUPLE_V2_PLAN.md, CP4). Either member creates, edits or deletes; no dual approval. */
+/** "Đếm ngược sự kiện" (plan/ENGINEERING_WORKFLOW.md, CP4). Either member creates, edits or deletes; no dual approval. */
 
 export const EVENT_KINDS = ['birthday', 'trip', 'meet', 'anniversary', 'other'] as const;
 export type EventKind = (typeof EVENT_KINDS)[number];

@@ -1,6 +1,6 @@
 import { Schema, model, type Document, type Types } from 'mongoose';
 
-/** "Nhớ bạn" một chạm (plan/COUPLE_V2_PLAN.md, CP5): one tap on the heart in the Home Hero. */
+/** "Nhớ bạn" một chạm (plan/ENGINEERING_WORKFLOW.md, CP5): one tap on the heart in the Home Hero. */
 
 export const NUDGE_KINDS = ['miss', 'hug', 'kiss', 'thinking'] as const;
 export type NudgeKind = (typeof NUDGE_KINDS)[number];

@@ -1,7 +1,7 @@
 import { Schema, model, type Document, type Types } from 'mongoose';
 import { MAX_COMMENT_BODY } from './StoryComment.js';
 
-/** People named with "@" in one comment (plan/FRIENDS_V2_PLAN.md, BB8). */
+/** People named with "@" in one comment (plan/ENGINEERING_WORKFLOW.md, BB8). */
 export const MAX_MENTIONS = 10;
 
 /**

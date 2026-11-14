@@ -6,7 +6,7 @@ import { lettersReadyJob } from './lettersReady.job.js';
 import { pollsClosedJob } from './pollsClosed.job.js';
 
 /**
- * Register every background job (plan/PLATFORM_PLAN.md, N2). Called once at app startup (createApp), so the loop and the
+ * Register every background job (plan/OPERATIONS.md, N2). Called once at app startup (createApp), so the loop and the
  * dev endpoint see the same jobs. A new feature adds its job here.
  */
 export function registerAllJobs(): void {

@@ -1,6 +1,6 @@
 import { Schema, model, type Document, type Types } from 'mongoose';
 
-/** Spending groups the AI assigns to outgoing-transaction notes (from plan/EXPENSE_PLAN.md). */
+/** Spending groups the AI assigns to outgoing-transaction notes (from plan/PROJECT_SUMMARY.md). */
 export const SPEND_CATEGORIES = ['food', 'transport', 'shopping', 'bills', 'fun', 'health', 'gift', 'travel', 'home', 'other'] as const;
 export type SpendCategory = (typeof SPEND_CATEGORIES)[number];
 
@@ -61,7 +61,7 @@ export interface AssistantInsights {
 }
 
 /**
- * One finance-assistant conversation per user (plan/FINANCE_ASSISTANT_PLAN.md §8).
+ * One finance-assistant conversation per user (plan/PROJECT_SUMMARY.md).
  * Scoped by userId like bank data: the assistant only ever reads the owner's own cash flow.
  */
 export interface AssistantThreadDoc extends Document {

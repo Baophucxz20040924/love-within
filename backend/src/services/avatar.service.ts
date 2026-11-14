@@ -22,7 +22,7 @@ async function deleteQuietly(key: string): Promise<void> {
     .catch((err: Error) => logger.warn('Could not delete old avatar', { key, message: err.message }));
 }
 
-/** Profile photos (plan/PLATFORM_PLAN.md, N1). */
+/** Profile photos (plan/OPERATIONS.md, N1). */
 export const avatarService = {
   async createUploadUrl(userId: string, mimeType: string, sizeBytes: number) {
     const ext = AVATAR_IMAGE_TYPES[mimeType];

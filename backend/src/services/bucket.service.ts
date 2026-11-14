@@ -19,7 +19,7 @@ import { addDays, formatDayVi, getLocalDate } from '../utils/date.js';
 import { AppError, Errors } from '../utils/errors.js';
 import { logger } from '../utils/logger.js';
 
-// "Bucket list chung" (plan/COUPLE_V2_PLAN.md, CP3). Either member adds, edits, pins, deletes, completes or reopens any item.
+// "Bucket list chung" (plan/ENGINEERING_WORKFLOW.md, CP3). Either member adds, edits, pins, deletes, completes or reopens any item.
 // Reward (owner decision 4, 10/11/2026): ECONOMY.bucket, once per item ever, item created ≥ 24 h before completion,
 // at most 2 rewarded items per couple-timezone day. Titles, notes and feelings are never logged.
 

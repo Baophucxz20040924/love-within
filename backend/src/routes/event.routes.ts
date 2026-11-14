@@ -18,7 +18,7 @@ import { eventService } from '../services/event.service.js';
 import { isRealDate } from '../utils/date.js';
 import { ok } from '../utils/response.js';
 
-/** "Đếm ngược sự kiện" (plan/COUPLE_V2_PLAN.md, CP4). No dual approval: either member creates, edits or deletes. */
+/** "Đếm ngược sự kiện" (plan/ENGINEERING_WORKFLOW.md, CP4). No dual approval: either member creates, edits or deletes. */
 export const eventRouter = Router();
 eventRouter.use(requireAuth, requireCouple);
 

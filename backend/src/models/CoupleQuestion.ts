@@ -1,6 +1,6 @@
 import { Schema, model, type Document, type Types } from 'mongoose';
 
-/** "Câu hỏi mỗi ngày" (plan/COUPLE_V2_PLAN.md, CP1). */
+/** "Câu hỏi mỗi ngày" (plan/ENGINEERING_WORKFLOW.md, CP1). */
 
 export const MAX_ANSWER_BODY = 1000;
 export const MAX_ASK_TEXT = 200;

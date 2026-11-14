@@ -1,7 +1,7 @@
 /**
  * Bản nháp, chủ dự án sẽ duyệt.
  *
- * Question bank of "Câu hỏi mỗi ngày" (plan/COUPLE_V2_PLAN.md, CP1). Drafted by Kiro on 10/11/2026.
+ * Question bank of "Câu hỏi mỗi ngày" (plan/ENGINEERING_WORKFLOW.md, CP1). Drafted by Kiro on 10/11/2026.
  * Rules for editing:
  * - Never change or delete an id that has been used: history keeps the id plus a copy of the text.
  * - Rewording a question is fine. New questions go at the end with the next id (q151, q152, …).

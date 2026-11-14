@@ -1,0 +1,98 @@
+/* Stationery-inspired line art: ink at the edges, quiet space behind the form. */
+.auth-backdrop {
+  --art-ink: #bc7388;
+  --art-wash: #efced8;
+  --art-highlight: #e5b89b;
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  overflow: hidden;
+  pointer-events: none;
+  user-select: none;
+}
+.auth-backdrop--friends {
+  --art-ink: #7897c2;
+  --art-wash: #cadcf1;
+  --art-highlight: #a4b4dd;
+}
+.auth-backdrop svg { position: absolute; stroke: var(--art-ink); stroke-width: 1.2; stroke-linecap: round; stroke-linejoin: round; }
+.auth-backdrop__grain {
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(var(--art-ink) .7px, transparent .9px);
+  background-size: 22px 22px;
+  opacity: .14;
+  mask-image: linear-gradient(90deg, #000, transparent 36%, transparent 64%, #000);
+}
+.auth-backdrop__halo {
+  position: absolute;
+  top: -180px;
+  left: calc(50% - 270px);
+  width: 540px;
+  height: 540px;
+  border: 1px solid color-mix(in srgb, var(--art-ink) 18%, transparent);
+  border-radius: 50%;
+  box-shadow: 0 0 0 36px color-mix(in srgb, var(--art-wash) 15%, transparent), 0 0 0 74px color-mix(in srgb, var(--art-wash) 10%, transparent);
+}
+.auth-backdrop .auth-backdrop__orbits {
+  width: min(780px, 92%);
+  height: auto;
+  top: -52px;
+  left: 50%;
+  transform: translateX(-50%);
+  opacity: .42;
+}
+.auth-backdrop__dashed { stroke-dasharray: 2 8; }
+.auth-backdrop__planet { fill: var(--art-highlight); stroke: var(--bg); stroke-width: 4; }
+.auth-backdrop__planet--small { fill: var(--art-ink); }
+.auth-backdrop__spark { stroke-width: 1.8; }
+.auth-backdrop .auth-backdrop__ribbon {
+  width: clamp(220px, 29vw, 430px);
+  height: 780px;
+  top: 8%;
+  opacity: .48;
+}
+.auth-backdrop__ribbon--left { left: -65px; }
+.auth-backdrop__ribbon--right { right: -65px; }
+.auth-backdrop__wash { fill: var(--art-wash); fill-opacity: .27; stroke: none; }
+.auth-backdrop .auth-backdrop__keepsake {
+  width: 110px;
+  height: 110px;
+  stroke-width: 1.5;
+  opacity: .62;
+}
+.auth-backdrop__keepsake--left { left: max(4%, calc(50% - 440px)); top: 31%; transform: rotate(-12deg); }
+.auth-backdrop__keepsake--right { right: max(4%, calc(50% - 440px)); top: 61%; transform: rotate(12deg); }
+.auth-backdrop__solid { fill: var(--art-ink); stroke: none; opacity: .6; }
+.auth-backdrop .auth-backdrop__tides {
+  left: 0;
+  bottom: -24px;
+  width: 100%;
+  height: 180px;
+  opacity: .48;
+}
+
+.auth--entry {
+  position: relative;
+  isolation: isolate;
+}
+/* Decorative canvas is intentionally exempt from the auth content column. */
+.auth--entry > .auth-backdrop { width: auto; }
+.auth--entry > .card {
+  box-shadow: 0 16px 48px color-mix(in srgb, var(--art-ink, var(--brand-700)) 7%, transparent), 0 2px 8px rgba(48, 38, 42, .035);
+}
+
+@media (max-width: 699px) {
+  .auth-backdrop .auth-backdrop__orbits { top: -40px; width: 520px; max-width: none; opacity: .3; }
+  .auth-backdrop__halo { top: -225px; }
+  .auth-backdrop .auth-backdrop__ribbon { width: 220px; top: 15%; opacity: .28; }
+  .auth-backdrop__ribbon--left { left: -165px; }
+  .auth-backdrop__ribbon--right { right: -165px; }
+  .auth-backdrop .auth-backdrop__keepsake { width: 66px; height: 66px; opacity: .42; }
+  .auth-backdrop__keepsake--left { left: -17px; top: 20%; }
+  .auth-backdrop__keepsake--right { right: -15px; top: 79%; }
+  .auth-backdrop .auth-backdrop__tides { height: 120px; bottom: -18px; }
+}
+@media (forced-colors: active) {
+  .auth-backdrop { display: none; }
+}

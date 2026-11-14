@@ -73,7 +73,7 @@ function toView(inv: FriendInviteDoc): InviteView {
   };
 }
 
-/** Invite links into the friends space (plan/FRIENDS_V2_PLAN.md, BB4). */
+/** Invite links into the friends space (plan/ENGINEERING_WORKFLOW.md, BB4). */
 export const friendInviteService = {
   async create(me: UserDoc, days: number, maxUses: number): Promise<InviteView> {
     const expiresAt = new Date(Date.now() + days * 86_400_000);

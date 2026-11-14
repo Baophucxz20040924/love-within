@@ -5,7 +5,7 @@ import { moodRepository } from '../repositories/nudge.repository.js';
 import { addDays, getLocalDate } from '../utils/date.js';
 import { logger } from '../utils/logger.js';
 
-// "Cảm xúc hôm nay" (plan/COUPLE_V2_PLAN.md, CP5): one mood per member per day (couple timezone), last write wins.
+// "Cảm xúc hôm nay" (plan/ENGINEERING_WORKFLOW.md, CP5): one mood per member per day (couple timezone), last write wins.
 // Both members see each other's mood and note; the note is never logged. Changing a mood does not push.
 
 export interface MoodView {

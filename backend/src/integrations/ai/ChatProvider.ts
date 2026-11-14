@@ -1,4 +1,4 @@
-/** Text chat completion behind an interface (plan/FINANCE_ASSISTANT_PLAN.md §4.1). */
+/** Text chat completion behind an interface (plan/PROJECT_SUMMARY.md). */
 
 export type ChatRole = 'system' | 'user' | 'assistant';
 

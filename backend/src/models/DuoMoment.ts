@@ -1,7 +1,7 @@
 import { Schema, model, type Document, type Types } from 'mongoose';
 
 /**
- * "Khoảnh khắc đôi" (plan/COUPLE_V2_PLAN.md, CP6): once a day, at a random time, both members take one photo.
+ * "Khoảnh khắc đôi" (plan/ENGINEERING_WORKFLOW.md, CP6): once a day, at a random time, both members take one photo.
  * Owner decision 7 (10/11/2026): the prompt time is random in 09:00–21:00 couple time; "on time" = posted within 10 minutes
  * of it; posting is possible until 23:59 the same day, after that the day is "Bỏ lỡ" for whoever did not post.
  * The partner's photo is never returned to a member who has not posted that day (moment.service.ts).

@@ -11,7 +11,7 @@ import { STORY_IMAGE_TYPES } from '../services/story.service.js';
 import { isRealDate } from '../utils/date.js';
 import { ok } from '../utils/response.js';
 
-/** "Khoảnh khắc đôi" (plan/COUPLE_V2_PLAN.md, CP6). What is hidden before the prompt or before my own post: moment.service.ts. */
+/** "Khoảnh khắc đôi" (plan/ENGINEERING_WORKFLOW.md, CP6). What is hidden before the prompt or before my own post: moment.service.ts. */
 export const momentRouter = Router();
 momentRouter.use(requireAuth, requireCouple);
 

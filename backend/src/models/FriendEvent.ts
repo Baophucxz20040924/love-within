@@ -1,7 +1,7 @@
 import { Schema, model, type Document, type Types } from 'mongoose';
 import { MAX_COMMENT_BODY } from './StoryComment.js';
 
-/** "Lên kèo" in the friends space (BB5, plan/FRIENDS_V2_PLAN.md). Limits from the plan. */
+/** "Lên kèo" in the friends space (BB5, plan/ENGINEERING_WORKFLOW.md). Limits from the plan. */
 export const MAX_EVENT_TITLE = 100;
 export const MAX_EVENT_PLACE = 200;
 export const MAX_EVENT_DESCRIPTION = 2000;

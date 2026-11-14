@@ -74,7 +74,7 @@ self.addEventListener('fetch', (event) => {
   );
 });
 
-/* ── Web Push (plan/PLATFORM_PLAN.md, N4) ──
+/* ── Web Push (plan/OPERATIONS.md, N4) ──
    Payload from backend/src/services/push.service.ts: { title, body, url, tag, badge? }. The url is always a same-origin
    path; anything else opens the home page. The server never puts post, comment, answer or letter text in a push. */
 

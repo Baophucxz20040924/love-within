@@ -12,7 +12,7 @@ import { nudgeService } from '../services/nudge.service.js';
 import { ok } from '../utils/response.js';
 
 /**
- * "Nhớ bạn" một chạm + cảm xúc hôm nay (plan/COUPLE_V2_PLAN.md, CP5). Home reads both through GET /api/couple/pulse.
+ * "Nhớ bạn" một chạm + cảm xúc hôm nay (plan/ENGINEERING_WORKFLOW.md, CP5). Home reads both through GET /api/couple/pulse.
  * No ids in these routes: everything is the caller's couple (req.couple).
  */
 export const nudgeRouter = Router();

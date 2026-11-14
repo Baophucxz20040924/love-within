@@ -9,7 +9,7 @@ import { pushService } from '../services/push.service.js';
 import { ok } from '../utils/response.js';
 
 /**
- * Web Push (plan/PLATFORM_PLAN.md, N4). Login needed, no couple: mounted before the '/api' routers that require one.
+ * Web Push (plan/OPERATIONS.md, N4). Login needed, no couple: mounted before the '/api' routers that require one.
  * `space` is the session's space; 'friends' needs a member of the friends space (403 FRIENDS_NOT_JOINED).
  */
 export const pushRouter = Router();

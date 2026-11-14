@@ -4,7 +4,7 @@ import { bankTransactionRepository, type TxnRangeRow } from '../repositories/ban
 import { addDays, getLocalDate } from '../utils/date.js';
 
 /**
- * Builds what the finance assistant is allowed to see (plan/FINANCE_ASSISTANT_PLAN.md §5):
+ * Builds what the finance assistant is allowed to see (plan/PROJECT_SUMMARY.md):
  * the owner's own transactions from the 1st of last month to today, in their timezone.
  * Every number in the data block is computed here, so the model never has to add up long lists.
  * Sent to the model: local date/time, direction, amount, note. Never ids, provider refs or account digits.

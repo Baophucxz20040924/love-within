@@ -1,7 +1,7 @@
 import { Schema, model, type Document, type Types } from 'mongoose';
 import { MAX_STORY_BODY, REACTION_TYPES, type ReactionType, type StoryPhoto } from './Story.js';
 
-/** Poll in a post (BB6, plan/FRIENDS_V2_PLAN.md): 2–4 options of ≤ 80 characters; the post body is the question. */
+/** Poll in a post (BB6, plan/ENGINEERING_WORKFLOW.md): 2–4 options of ≤ 80 characters; the post body is the question. */
 export const POLL_MIN_OPTIONS = 2;
 export const POLL_MAX_OPTIONS = 4;
 export const MAX_POLL_OPTION = 80;

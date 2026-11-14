@@ -9,7 +9,7 @@ import { formatDayVi, getLocalDate } from '../utils/date.js';
 import { AppError, Errors } from '../utils/errors.js';
 import { logger } from '../utils/logger.js';
 
-// Privacy (plan/COUPLE_V2_PLAN.md, CP1): the partner's answer body is only ever returned to a member who has answered
+// Privacy (plan/ENGINEERING_WORKFLOW.md, CP1): the partner's answer body is only ever returned to a member who has answered
 // the same day. Answers and "Hỏi người ấy" texts are never logged and never sent to the AI.
 
 const BANK_BY_ID = new Map(DAILY_QUESTIONS.map((q) => [q.id, q]));

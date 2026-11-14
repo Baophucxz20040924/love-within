@@ -1,7 +1,7 @@
 import { apiRequest } from '../../lib/apiClient';
 import type { PushConfig, PushSettings, PushSettingsPatch, PushSpace } from '../../lib/types';
 
-/** Web Push (plan/PLATFORM_PLAN.md, N4). The browser side (permission, subscription) is in ./device.ts. */
+/** Web Push (plan/OPERATIONS.md, N4). The browser side (permission, subscription) is in ./device.ts. */
 export interface PushSubscriptionBody {
   endpoint: string;
   keys: { p256dh: string; auth: string };

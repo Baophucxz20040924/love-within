@@ -1,6 +1,6 @@
 import { Schema, model, type Document, type Types } from 'mongoose';
 
-/** "Xóa" on a friend suggestion (plan/FRIENDS_V2_PLAN.md, BB7): that person is not suggested again until `until`. */
+/** "Xóa" on a friend suggestion (plan/ENGINEERING_WORKFLOW.md, BB7): that person is not suggested again until `until`. */
 export const SUGGESTION_DISMISS_DAYS = 90;
 
 export interface FriendSuggestionDismissalDoc extends Document {

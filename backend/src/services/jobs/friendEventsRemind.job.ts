@@ -6,7 +6,7 @@ import { logger } from '../../utils/logger.js';
 import { notificationService } from '../notification.service.js';
 import { alreadySent, claimSend, type SchedulerJob } from '../scheduler.service.js';
 
-// Job friend-events.remind (plan/FRIENDS_V2_PLAN.md BB5, plan/PLATFORM_PLAN.md N2), every 5 minutes: 2 hours before an
+// Job friend-events.remind (plan/ENGINEERING_WORKFLOW.md BB5, plan/OPERATIONS.md N2), every 5 minutes: 2 hours before an
 // active event starts, remind the creator and the invitees who answered Đi or Có thể (not "Không đi", not people who did
 // not answer, not people who are no longer friends of the creator; only the creator for an event hidden after reports).
 // Notification event_reminder (no actor) + push, group friends.events, TTL 4 h.

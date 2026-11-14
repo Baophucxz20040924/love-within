@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { pathToFileURL } from 'node:url';
+import { classify } from './v12-content-states.mjs';
 
 const at = '2026-11-13T02:00:00.000Z';
 const id = n => n.toString(16).padStart(24, '0');
@@ -34,7 +35,7 @@ export function validate(f) {
 async function main() {
   process.env.LW_EVIDENCE_DIR ||= path.join(os.tmpdir(), 'lw_pw', 'shots', `v12-family-states-${Date.now()}`);
   const h = await import('./harness.mjs');
-  const checks = [], inventory = [], errors = [], blocked = [];
+  const checks = [], inventory = [], errors = [], blocked = [], faults = [];
   const limitations = ['Synthetic GET DTO display only, not API, authorization, persistence or mutation proof', 'Pairing unpaired identity is synthesized from baseline /me, not real unpairing', 'Screenshots require manual visual review; no visual acceptance implied', 'Only create failure is simulated; no real mutation is sent'];
   let browser;
   try {
@@ -60,12 +61,29 @@ async function main() {
             Object.defineProperty(navigator, 'clipboard', { value: { writeText: async () => { throw new Error('synthetic clipboard failure'); } }, configurable: true });
           });
           let getCount = 0, createFaults = 0;
+          let mutation = null;
+          const heldFailure = async (method, urlPath, trigger, control, shot) => {
+            let release, arrived; const gate = new Promise(r => release = r), arrival = new Promise(r => arrived = r);
+            mutation = { method, path: urlPath, gate, arrived, count: 0 };
+            try {
+              await trigger(); let timer;
+              try { await Promise.race([arrival,new Promise((_,reject)=>timer=setTimeout(()=>reject(Error('Expected family mutation not observed')),12000))]); } finally { clearTimeout(timer); }
+              await page.waitForFunction(el=>el.matches(':disabled'),await control.elementHandle());
+              assert.equal(mutation.count,1);await control.scrollIntoViewIfNeeded();await shot('pending-disabled');
+              release();await page.getByText('Lỗi family kiểm thử',{exact:true}).waitFor();assert.equal(mutation.count,1);
+              faults.push({label,path:urlPath,status:503,count:1});await shot('mutation-error');
+            } finally { release(); mutation = null; }
+          };
           await context.route('**/api/**', async route => {
             const request = route.request(), pathname = new URL(request.url()).pathname;
             if (request.method() === 'POST' && pathname === '/api/market/seen' && scenario.startsWith('market-')) {
               return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { ok: true } }) });
             }
             if (request.method() !== 'GET') {
+              if (mutation && request.method() === mutation.method && pathname === mutation.path) {
+                mutation.count++;mutation.arrived();await mutation.gate;
+                return route.fulfill({status:503,contentType:'application/json',body:JSON.stringify({error:{code:'TEST_FAILURE',message:'Lỗi family kiểm thử'}})});
+              }
               if (scenario === 'invites' && pathname === '/api/friends/invites' && request.method() === 'POST') {
                 createFaults++; return route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: { code: 'SYNTHETIC_UNAVAILABLE', message: 'Tạm thời không thể tạo link' } }) });
               }
@@ -104,6 +122,11 @@ async function main() {
             await page.getByRole('heading', { name: 'Đã gửi' }).waitFor();
             assert(await page.getByRole('button', { name: /Chấp nhận/ }).isEnabled());
             await shot('pending');
+            const input=page.getByLabel('Email người ấy');await input.fill('synthetic@example.test');
+            const submit=page.getByRole('button',{name:'Gửi lời mời',exact:true});
+            await heldFailure('POST','/api/pairing/invite',()=>submit.click(),submit,shot);
+            assert.equal(await input.inputValue(),'synthetic@example.test');
+            const feedback=page.getByRole('alert');await feedback.scrollIntoViewIfNeeded();await shot('send-error-retained');
           } else {
             await page.goto(`${h.baseURL}/friends/me/invites`);
             await page.getByText('/j/syntheticActive123', { exact: true }).waitFor();
@@ -117,22 +140,17 @@ async function main() {
             await page.getByRole('button', { name: 'Tạo link mời' }).click();
             await page.getByText('Tạm thời không thể tạo link', { exact: true }).waitFor();
             assert.equal(createFaults, 1); await shot('create-503');
+            faults.push({label,path:'/api/friends/invites',status:503,count:1});
+            const revoke=page.getByRole('button',{name:'Thu hồi',exact:true});
+            await revoke.scrollIntoViewIfNeeded();await heldFailure('DELETE',`/api/friends/invites/${f.invites[0].id}`,()=>revoke.click(),revoke,shot);
+            await page.getByText('/j/syntheticActive123',{exact:true}).waitFor();
           }
           assert(getCount > 0, 'Synthetic GET must be observed');
           checks.push(`${label}: synthetic GET states and assertions completed`);
         } finally { await context.close(); }
       }
     }
-    // The harness records expected synthetic 503 and browser console noise from deliberately aborted seen calls.
-    const expected = new Map([360,390,1280].flatMap(width => [[`invites-${width}|http`, 1], [`invites-${width}|console`, 1]]));
-    const unexpected = errors.filter(e => {
-      const controlled = e.path === '/api/friends/invites' && (e.type === 'http' ? e.status === 503 : e.type === 'console' && /^Failed to load resource: the server responded with a status of 503 \(Service Unavailable\)$/.test(e.message));
-      const key = `${e.label}|${e.type}`, remaining = expected.get(key) ?? 0;
-      if (!controlled || !remaining) return true;
-      expected.set(key, remaining - 1); return false;
-    });
-    assert.deepEqual([...expected].filter(([, count]) => count), [], 'Each declared invite-create fault must occur exactly once');
-    assert.deepEqual(unexpected, [], 'Unexpected browser faults');
+    classify(errors,faults);
     assert(blocked.every(b => b.method === 'POST' && b.path === '/api/market/seen'), `Unexpected blocked mutations: ${JSON.stringify(blocked)}`);
     await h.writeResult({ ok: true, checks, inventory, errors, blocked, limitations });
   } catch (error) {

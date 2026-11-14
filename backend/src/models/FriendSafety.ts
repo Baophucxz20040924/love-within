@@ -1,6 +1,6 @@
 import { Schema, model, type Document, type Types } from 'mongoose';
 
-/** Friends space: blocks, reports and per-user hidden posts (plan/FRIENDS_V2_PLAN.md, BB2). */
+/** Friends space: blocks, reports and per-user hidden posts (plan/ENGINEERING_WORKFLOW.md, BB2). */
 
 // ── Blocks ───────────────────────────────────────────────
 

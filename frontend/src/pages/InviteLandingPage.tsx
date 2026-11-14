@@ -3,7 +3,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Avatar } from '../components/Avatar';
 import { Icon } from '../components/Icon';
-import { Loading } from '../components/StatusViews';
+import { ErrorState, Loading } from '../components/StatusViews';
 import { useToast } from '../components/Toast';
 import { useAuth } from '../features/auth/AuthContext';
 import { friendsApi } from '../features/friends/api';
@@ -54,6 +54,16 @@ export function InviteLandingPage() {
   }, [autoJoin, join]);
 
   if (loading || preview.isLoading || autoJoin) return <Loading />;
+
+  if (preview.isError) {
+    return (
+      <main className="auth">
+        <div className="card stack invite-card">
+          <ErrorState title="Chưa kiểm tra được link" message="Kết nối đang gián đoạn. Thử lại để kiểm tra lời mời." onRetry={() => void preview.refetch()} />
+        </div>
+      </main>
+    );
+  }
 
   if (!valid) {
     return (

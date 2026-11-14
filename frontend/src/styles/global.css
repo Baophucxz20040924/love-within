@@ -33,6 +33,9 @@
 
   /* Neutrals (warm) */
   --bg: #faf8f6;
+  --canvas-glow: #f7dce4;
+  --canvas-accent: #fae9d8;
+  --canvas-soft: #f0eaf5;
   --surface: #ffffff;
   --surface-2: #f3eeeb;
   --border: #e9e1dd;
@@ -86,7 +89,12 @@ body {
   font-size: 16px;
   line-height: 1.55;
   color: var(--text);
-  background: var(--bg);
+  background-color: var(--bg);
+  background-image:
+    radial-gradient(ellipse 80% 480px at 0% 0%, color-mix(in srgb, var(--canvas-glow) 64%, transparent), transparent 74%),
+    radial-gradient(ellipse 70% 580px at 100% 30%, color-mix(in srgb, var(--canvas-soft) 50%, transparent), transparent 78%),
+    linear-gradient(160deg, transparent 45%, color-mix(in srgb, var(--canvas-accent) 32%, var(--bg)));
+  background-repeat: no-repeat;
   -webkit-font-smoothing: antialiased;
   -webkit-tap-highlight-color: transparent;
   /* Smooth pink ↔ blue switch when entering or leaving the friends space. */
@@ -1215,6 +1223,23 @@ textarea.input {
   justify-content: center;
   gap: 22px;
   padding: calc(28px + env(safe-area-inset-top, 0px)) 20px calc(28px + env(safe-area-inset-bottom, 0px));
+}
+
+.auth--entry {
+  max-width: none;
+  align-items: center;
+  background-image:
+    radial-gradient(ellipse 600px 380px at 50% 8%, color-mix(in srgb, var(--canvas-glow) 50%, transparent), transparent 80%);
+}
+
+.auth--entry > * {
+  width: min(100%, 400px);
+}
+
+.auth--entry > .auth__boat-lane {
+  width: 100%;
+  max-width: 1100px;
+  margin: -18px auto;
 }
 
 .auth__brand {
@@ -3130,6 +3155,9 @@ html[data-theme='friends'] {
   --brand-800: #1e40af;
 
   --bg: #f4f7fb;
+  --canvas-glow: #dbe9fb;
+  --canvas-accent: #e3e5fa;
+  --canvas-soft: #e1f1f2;
   --surface-2: #edf2f8;
   --border: #dfe6ef;
   --control-border: #7e8ca2;

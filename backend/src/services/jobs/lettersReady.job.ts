@@ -5,7 +5,7 @@ import { logger } from '../../utils/logger.js';
 import { notificationService } from '../notification.service.js';
 import type { SchedulerJob } from '../scheduler.service.js';
 
-// Job letters.ready (plan/COUPLE_V2_PLAN.md CP2, plan/PLATFORM_PLAN.md N2): a timed letter whose open time has come is
+// Job letters.ready (plan/ENGINEERING_WORKFLOW.md CP2, plan/OPERATIONS.md N2): a timed letter whose open time has come is
 // announced to its recipient once. Guard: the atomic flag readyNotifiedAt on the letter (pattern a in scheduler.service.ts).
 // The author moving the open date resets the flag (letter.repository.ts updateContent), so the new date is announced again.
 // Letters that are opened or deleted before the job sees them are never announced. Always catches up after downtime.

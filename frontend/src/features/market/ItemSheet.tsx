@@ -58,7 +58,6 @@ export function ItemSheet({ item, onClose, onEdit, onRequested }: Props) {
       await refresh();
       onRequested();
     },
-    onError: (err) => toast.error(errorText(err)),
   });
   const archive = useMutation({
     mutationFn: (id: string) => marketApi.archive(id),
@@ -67,8 +66,13 @@ export function ItemSheet({ item, onClose, onEdit, onRequested }: Props) {
       onClose();
       await refresh();
     },
-    onError: (err) => toast.error(errorText(err)),
   });
+
+  useEffect(() => {
+    if (!item) return;
+    if (request.isError) request.reset();
+    if (archive.isError) archive.reset();
+  }, [item, request.reset, archive.reset]);
 
   const balance = wallet.data?.coinBalance ?? 0;
   const missing = item ? Math.max(0, item.priceCoin - balance) : 0;
@@ -86,6 +90,7 @@ export function ItemSheet({ item, onClose, onEdit, onRequested }: Props) {
             <span className="text-sm text-muted">Ví chung: {formatNumber(balance)} Xu</span>
           </div>
 
+          {(request.isError || archive.isError) && <p className="form-feedback" role="alert">{errorText(request.isError ? request.error : archive.error)}</p>}
           {item.isMine ? (
             <>
               <div className="callout">

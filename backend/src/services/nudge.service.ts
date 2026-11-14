@@ -7,7 +7,7 @@ import { addDays, getLocalDate, zonedTimeToUtc } from '../utils/date.js';
 import { AppError } from '../utils/errors.js';
 import { logger } from '../utils/logger.js';
 
-// "Nhớ bạn" một chạm (plan/COUPLE_V2_PLAN.md, CP5). The server enforces the wait between two nudges of one person
+// "Nhớ bạn" một chạm (plan/ENGINEERING_WORKFLOW.md, CP5). The server enforces the wait between two nudges of one person
 // (30 s) and the daily cap (50, couple timezone); the client only mirrors them. A nudge is pushed to the partner
 // (group couple.nudges, urgency high, tag "nudge": the day's nudges collapse into one notification on the phone).
 

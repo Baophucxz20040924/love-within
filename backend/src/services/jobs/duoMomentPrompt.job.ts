@@ -8,7 +8,7 @@ import { newMomentDay } from '../moment.service.js';
 import { notificationService } from '../notification.service.js';
 import type { SchedulerJob } from '../scheduler.service.js';
 
-// Job duo-moment.prompt (plan/COUPLE_V2_PLAN.md CP6, plan/PLATFORM_PLAN.md N2), every minute:
+// Job duo-moment.prompt (plan/ENGINEERING_WORKFLOW.md CP6, plan/OPERATIONS.md N2), every minute:
 // 1. Create today's moment (couple timezone) for every active couple that has none yet, with a random prompt time in
 //    09:00–21:00 (moment.service.ts newMomentDay; crypto RNG). Upserts on the unique (coupleId, localDate) index, so a
 //    second run, or a member opening the app at the same moment (lazy "today"), never makes a second moment or a second

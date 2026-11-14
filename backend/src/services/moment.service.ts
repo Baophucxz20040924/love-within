@@ -20,7 +20,7 @@ import { addDays, formatDayVi, getLocalDate, zonedTimeToUtc } from '../utils/dat
 import { AppError, Errors } from '../utils/errors.js';
 import { logger } from '../utils/logger.js';
 
-// "Khoảnh khắc đôi" (plan/COUPLE_V2_PLAN.md, CP6; owner decision 7). Privacy rules, enforced here and nowhere else:
+// "Khoảnh khắc đôi" (plan/ENGINEERING_WORKFLOW.md, CP6; owner decision 7). Privacy rules, enforced here and nowhere else:
 // - promptAt (and windowEndsAt) are never returned before the prompt time has passed (server clock);
 // - the partner's photo (presigned URL) and caption are only returned to a member who has posted that day;
 // - object keys are never returned (the uploader gets its own key from upload-url only).

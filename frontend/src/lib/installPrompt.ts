@@ -1,7 +1,7 @@
 import { useSyncExternalStore } from 'react';
 
 /**
- * "Cài app lên điện thoại" (plan/PLATFORM_PLAN.md, N5). Chrome / Edge on Android and desktop fire `beforeinstallprompt`
+ * "Cài app lên điện thoại" (plan/OPERATIONS.md, N5). Chrome / Edge on Android and desktop fire `beforeinstallprompt`
  * once the app is installable, often right after load, so main.tsx calls captureInstallPrompt() before the first render
  * and the /install page can show its "Cài app" button later. Safari (iPhone/iPad) has no such event: the page shows the
  * Share → "Thêm vào MH chính" steps instead.

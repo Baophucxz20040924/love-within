@@ -1,6 +1,6 @@
 import { Schema, model, type Document, type Types } from 'mongoose';
 
-/** "Bucket list chung" (plan/COUPLE_V2_PLAN.md, CP3). Shared list: either member adds, edits, pins, deletes or completes. */
+/** "Bucket list chung" (plan/ENGINEERING_WORKFLOW.md, CP3). Shared list: either member adds, edits, pins, deletes or completes. */
 
 export const BUCKET_CATEGORIES = ['travel', 'food', 'experience', 'learning', 'other'] as const;
 export type BucketCategory = (typeof BUCKET_CATEGORIES)[number];

@@ -6,6 +6,7 @@ import { SegmentedControl } from '../components/SegmentedControl';
 import { useToast } from '../components/Toast';
 import { useAuth } from '../features/auth/AuthContext';
 import { SecretBoat } from '../features/auth/SecretBoat';
+import { AuthBackdrop } from '../features/auth/AuthBackdrop';
 import { announceInvite } from '../features/friends/inviteResult';
 import { ApiRequestError } from '../lib/apiClient';
 import { isStandalone } from '../lib/installPrompt';
@@ -110,6 +111,12 @@ export function AuthPage({ variant = 'couple', invite, initialMode = 'login' }: 
     if (revealBoat()) e.preventDefault();
   }
 
+  function dismissBoat() {
+    const restoreFocus = document.activeElement instanceof HTMLElement && !!document.activeElement.closest('.secret-boat');
+    resetSecret();
+    if (restoreFocus) markRef.current?.focus({ preventScroll: true });
+  }
+
   function boardBoat() {
     if (secretPhase.current !== 'sailing') return;
     secretPhase.current = 'navigating';
@@ -134,7 +141,8 @@ export function AuthPage({ variant = 'couple', invite, initialMode = 'login' }: 
   }
 
   return (
-    <main className={`auth${variant === 'friends' ? ' auth--friends' : ''}`}>
+    <main className={`auth auth--entry${variant === 'friends' ? ' auth--friends' : ''}`}>
+      <AuthBackdrop friends={variant === 'friends'} />
       <div className="auth__brand">
         {variant === 'couple' ? (
           <button ref={markRef} className="brand-mark auth__heart" type="button" aria-label="Trái tim" onClick={onHeartTap}>
@@ -146,6 +154,12 @@ export function AuthPage({ variant = 'couple', invite, initialMode = 'login' }: 
         <h1 className="auth__title">{copy.title}</h1>
         <p className="auth__tagline">{copy.tagline}</p>
       </div>
+
+      {variant === 'couple' && mode === 'login' && !invite && (
+        <div className="auth__boat-lane">
+          {boatOpen && <SecretBoat onClose={dismissBoat} onBoard={boardBoat} />}
+        </div>
+      )}
 
       {invite && (
         <p className="callout invite-banner" role="note">
@@ -241,7 +255,6 @@ export function AuthPage({ variant = 'couple', invite, initialMode = 'login' }: 
           <Icon name="chevronLeft" size={18} /> Về trang đăng nhập Look Within
         </Link>
       )}
-      {boatOpen && <SecretBoat onClose={resetSecret} onBoard={boardBoat} />}
     </main>
   );
 }

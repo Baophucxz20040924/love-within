@@ -9,7 +9,7 @@ import { MAX_ANSWER_BODY, MAX_ASK_TEXT, QUESTION_REACTIONS } from '../models/Cou
 import { questionService } from '../services/question.service.js';
 import { ok } from '../utils/response.js';
 
-/** "Câu hỏi mỗi ngày" (plan/COUPLE_V2_PLAN.md, CP1). */
+/** "Câu hỏi mỗi ngày" (plan/ENGINEERING_WORKFLOW.md, CP1). */
 export const questionRouter = Router();
 questionRouter.use(requireAuth, requireCouple);
 

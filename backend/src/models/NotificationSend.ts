@@ -1,7 +1,7 @@
 import { Schema, model, type Document, type Types } from 'mongoose';
 
 /**
- * "Send once" keys of the background jobs (plan/PLATFORM_PLAN.md, N2). Used for repeating or time-dependent work whose
+ * "Send once" keys of the background jobs (plan/OPERATIONS.md, N2). Used for repeating or time-dependent work whose
  * record cannot carry a flag: a yearly event is reminded every year, a meetup can change its time. A job inserts the key
  * before it sends; the unique index turns a second insert (another run, a restarted server) into a no-op.
  * Key format: `<feature>:<id>:<occurrence>:<slot>`, e.g. `cp-event:<eventId>:2027-02-14:d1`. Keys hold ids and dates only,

@@ -10,7 +10,7 @@ import { getLocalTime } from '../utils/date.js';
 import { AppError } from '../utils/errors.js';
 import { logger } from '../utils/logger.js';
 
-// Web Push (plan/PLATFORM_PLAN.md, N4). Services never call this directly: notificationService.emit() is the single entry
+// Web Push (plan/OPERATIONS.md, N4). Services never call this directly: notificationService.emit() is the single entry
 // point and passes the push here. Sending runs in the background (not awaited by the request or the job), so a slow or
 // failing push service never slows or fails the action that caused it. Notification text is never logged.
 

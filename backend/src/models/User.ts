@@ -6,7 +6,7 @@ export type FinanceVisibility = (typeof FINANCE_VISIBILITIES)[number];
 export const MAX_FRIENDS_BIO = 160;
 
 /**
- * Web Push settings (plan/PLATFORM_PLAN.md, N4), per account (every device of the user). One switch per group of
+ * Web Push settings (plan/OPERATIONS.md, N4), per account (every device of the user). One switch per group of
  * config/notificationTypes.ts; `preview` off shows only "Bạn có thông báo mới" on the lock screen (the friends space
  * starts hidden). Quiet hours ("HH:mm", users.timezone) hold back pushes only; in-app notifications stay.
  */

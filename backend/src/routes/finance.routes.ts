@@ -15,7 +15,7 @@ import { ok } from '../utils/response.js';
 import { savingsService } from '../services/savings.service.js';
 
 /**
- * Personal cash flow from a linked bank account (plan/CASHFLOW_PLAN.md).
+ * Personal cash flow from a linked bank account (plan/PROJECT_SUMMARY.md).
  * Own data needs only auth; partner data also needs the couple context.
  */
 export const financeRouter = Router();
@@ -140,7 +140,7 @@ financeRouter.get(
   asyncHandler(async (req, res) => ok(res, await financeService.summaryPartner(req.couple!, req.userId!, monthArg(req.query)))),
 );
 
-// ── AI spending assistant (plan/FINANCE_ASSISTANT_PLAN.md): own data only, last month + this month ──
+// ── AI spending assistant (plan/PROJECT_SUMMARY.md): own data only, last month + this month ──
 
 /** GET /api/finance/assistant — consent, data coverage, cached insights (+ stale), conversation. No AI call. */
 financeRouter.get(

@@ -12,7 +12,7 @@ import { savingsService, type PulseSavings } from './savings.service.js';
 
 /**
  * GET /api/couple/pulse: everything the couple Home screen needs in one request (polled every 30 s while the tab is
- * visible). Shape: plan/COUPLE_V2_PLAN.md §0. Each feature adds its own field when it ships:
+ * visible). Shape: plan/ENGINEERING_WORKFLOW.md. Each feature adds its own field when it ships:
  *   recap (CP8).
  *
  * To add a section: add the field to `CouplePulse`, then one builder to `SECTIONS` (TypeScript requires both).

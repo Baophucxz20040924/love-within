@@ -89,7 +89,7 @@ async function rank(me: string, friendIds: Types.ObjectId[]): Promise<Candidate[
   return [...byId.values()].sort((x, y) => y.count - x.count || (x.id < y.id ? -1 : 1)).slice(0, KEEP_CANDIDATES);
 }
 
-/** "Những người bạn có thể biết" (plan/FRIENDS_V2_PLAN.md, BB7). */
+/** "Những người bạn có thể biết" (plan/ENGINEERING_WORKFLOW.md, BB7). */
 export const friendSuggestionService = {
   /**
    * Up to 20 friends of my friends, most mutual friends first. Never me, my friends, pending requests (either way),

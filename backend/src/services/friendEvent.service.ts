@@ -25,7 +25,7 @@ import { notificationService } from './notification.service.js';
 import { profileOf, profileService, type PublicProfile } from './profile.service.js';
 import { STORY_IMAGE_TYPES } from './story.service.js';
 
-// "Lên kèo" (plan/FRIENDS_V2_PLAN.md, BB5). Who sees an event: its creator, and the people invited while they are still
+// "Lên kèo" (plan/ENGINEERING_WORKFLOW.md, BB5). Who sees an event: its creator, and the people invited while they are still
 // friends of the creator (checked on every read, so unfriending or blocking the creator removes access at once: 404, the
 // same answer as an event that does not exist). Only the creator invites (v1), and only their current friends, at most
 // 100. Guests see each other (name + photo) even when they are not friends, except people blocked either way. Times are

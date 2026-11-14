@@ -13,7 +13,7 @@ import type { NewPoll } from '../repositories/friendStory.repository.js';
 import { AppError } from '../utils/errors.js';
 import { profileOf, type PublicProfile } from './profile.service.js';
 
-// Polls in friends posts (BB6, plan/FRIENDS_V2_PLAN.md). Input checks, edit rules and the view; the requests themselves
+// Polls in friends posts (BB6, plan/ENGINEERING_WORKFLOW.md). Input checks, edit rules and the view; the requests themselves
 // (vote, unvote, voters) are in friendStory.service.ts, behind the same visibility check as reactions.
 
 const DAY_MS = 86_400_000;

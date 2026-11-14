@@ -1,7 +1,7 @@
 import type { FriendUser, MentionSpan } from '../../lib/types';
 
 /**
- * "@Tên" in comments (plan/FRIENDS_V2_PLAN.md, BB8). The body is plain text; each mention is a span of it that starts with
+ * "@Tên" in comments (plan/ENGINEERING_WORKFLOW.md, BB8). The body is plain text; each mention is a span of it that starts with
  * "@" followed by the person's name. The server checks the spans again (inside the trimmed body, "@" + name, no overlap,
  * at most 10, the person can see the post). Offsets are JavaScript string indexes on both sides.
  */

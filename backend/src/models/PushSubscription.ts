@@ -4,7 +4,7 @@ export const PUSH_SPACES = ['couple', 'friends'] as const;
 export type PushSpace = (typeof PUSH_SPACES)[number];
 
 /**
- * One browser/device that receives Web Push (plan/PLATFORM_PLAN.md, N4). A device (endpoint) belongs to one user and one
+ * One browser/device that receives Web Push (plan/OPERATIONS.md, N4). A device (endpoint) belongs to one user and one
  * space at a time: the space of the session that turned notifications on. Turning them on in the other space, or as
  * another user, moves the endpoint there. Logging out deletes it.
  */

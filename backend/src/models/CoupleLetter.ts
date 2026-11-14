@@ -1,7 +1,7 @@
 import { Schema, model, type Document, type Types } from 'mongoose';
 
 /**
- * "Thư hẹn giờ" (plan/COUPLE_V2_PLAN.md, CP2): a letter to the partner that opens only from 00:00 of a chosen day
+ * "Thư hẹn giờ" (plan/ENGINEERING_WORKFLOW.md, CP2): a letter to the partner that opens only from 00:00 of a chosen day
  * (couple timezone). Before that the recipient sees the envelope only: never the title, body or photos.
  */
 

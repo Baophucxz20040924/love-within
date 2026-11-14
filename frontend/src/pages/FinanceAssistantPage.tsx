@@ -37,7 +37,6 @@ export function FinanceAssistantPage() {
       toast.info(revoke ? 'Đã tắt trợ lý và xóa dữ liệu phân tích' : 'Đã xóa cuộc trò chuyện');
       await qc.invalidateQueries({ queryKey: ASSISTANT_KEY });
     },
-    onError: (err) => toast.error(errorText(err)),
   });
 
   // First visit after consenting: generate the insights once without a tap. After "Xóa", wait for the user.
@@ -57,7 +56,7 @@ export function FinanceAssistantPage() {
       back="/finance"
       actions={
         s?.consented ? (
-          <button type="button" className="icon-btn" aria-label="Tùy chọn trợ lý" onClick={() => setMenuOpen(true)}>
+          <button type="button" className="icon-btn" aria-label="Tùy chọn trợ lý" onClick={() => { if (clear.isError) clear.reset(); setMenuOpen(true); }}>
             <Icon name="moreHorizontal" />
           </button>
         ) : undefined
@@ -99,6 +98,7 @@ export function FinanceAssistantPage() {
 
       <BottomSheet open={menuOpen} onClose={() => setMenuOpen(false)} title="Tùy chọn trợ lý">
         <div className="stack">
+          {clear.isError && <p className="form-feedback" role="alert">{errorText(clear.error)}</p>}
           <button type="button" className="btn btn-secondary btn-block" disabled={clear.isPending} onClick={() => clear.mutate(false)}>
             <Icon name="trash" size={18} /> Xóa cuộc trò chuyện và phân tích
           </button>

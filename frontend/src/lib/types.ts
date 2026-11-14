@@ -285,7 +285,7 @@ export interface StoryContentInput {
   photos: { key: string; width: number; height: number }[];
 }
 
-// ── Daily question (plan/COUPLE_V2_PLAN.md, CP1) ─────────
+// ── Daily question (plan/ENGINEERING_WORKFLOW.md, CP1) ─────────
 
 export type QuestionReaction = 'heart' | 'laugh' | 'touched' | 'wow' | 'like';
 
@@ -328,7 +328,7 @@ export interface QuestionPage {
 
 export type QuestionState = 'none' | 'partner_answered' | 'mine_answered' | 'both';
 
-// ── Countdown events (plan/COUPLE_V2_PLAN.md, CP4) ───────
+// ── Countdown events (plan/ENGINEERING_WORKFLOW.md, CP4) ───────
 
 export type EventKind = 'birthday' | 'trip' | 'meet' | 'anniversary' | 'other';
 export type EventRepeat = 'none' | 'yearly';
@@ -486,7 +486,7 @@ export interface SavingsSuggestion {
   message: string;
 }
 
-// ── "Khoảnh khắc đôi" (plan/COUPLE_V2_PLAN.md, CP6) ──
+// ── "Khoảnh khắc đôi" (plan/ENGINEERING_WORKFLOW.md, CP6) ──
 
 /** waiting (before the prompt, time unknown) · open (I can post) · posted (me, not the partner) · both · missed (day over, I did not post). */
 export type MomentState = 'waiting' | 'open' | 'posted' | 'both' | 'missed';
@@ -535,7 +535,7 @@ export interface MomentStoryResult {
   story: Story;
 }
 
-// ── "Nhớ bạn" + mood of the day (plan/COUPLE_V2_PLAN.md, CP5) ──
+// ── "Nhớ bạn" + mood of the day (plan/ENGINEERING_WORKFLOW.md, CP5) ──
 
 export type NudgeKind = 'miss' | 'hug' | 'kiss' | 'thinking';
 
@@ -574,7 +574,7 @@ export interface MoodHistory {
   items: MoodView[];
 }
 
-// ── Timed letters (plan/COUPLE_V2_PLAN.md, CP2) ──────────
+// ── Timed letters (plan/ENGINEERING_WORKFLOW.md, CP2) ──────────
 
 export interface LetterPerson {
   id: string;
@@ -629,7 +629,7 @@ export interface PulseLetters {
   nextOpenOn: string | null;
 }
 
-// ── Hidden friends space ("Hội bạn bè", plan/WORKLOG_v6.md) ──
+// ── Hidden friends space ("Hội bạn bè", plan/PROJECT_SUMMARY.md) ──
 
 export interface FriendUser {
   id: string;
@@ -812,7 +812,7 @@ export interface FriendEventInput {
   cover: { key: string; width: number; height: number } | null;
 }
 
-// ── Friends space, wave 1 (plan/FRIENDS_V2_PLAN.md BB1–BB4) ──
+// ── Friends space, wave 1 (plan/ENGINEERING_WORKFLOW.md BB1–BB4) ──
 
 export type FriendNotificationType =
   | 'friend_request'
@@ -918,7 +918,7 @@ export interface JoinResult {
   invite?: { status: 'friended' | 'already_friends' | 'self' | 'invalid'; inviter?: FriendUser };
 }
 
-// ── Cash flow (linked bank account, plan/CASHFLOW_PLAN.md) ──
+// ── Cash flow (linked bank account, plan/PROJECT_SUMMARY.md) ──
 
 export type FinanceVisibility = 'private' | 'partner';
 export type BankConnectionStatus = 'active' | 'error' | 'revoked';
@@ -980,7 +980,7 @@ export interface FinanceDisconnectResult {
   deleted: number;
 }
 
-// ── AI spending assistant (plan/FINANCE_ASSISTANT_PLAN.md): own data only, last month + this month ──
+// ── AI spending assistant (plan/PROJECT_SUMMARY.md): own data only, last month + this month ──
 
 export type SpendCategory = 'food' | 'transport' | 'shopping' | 'bills' | 'fun' | 'health' | 'gift' | 'travel' | 'home' | 'other';
 

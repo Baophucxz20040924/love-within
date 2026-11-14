@@ -9,7 +9,7 @@ import { autoMilestones } from '../event.service.js';
 import { notificationService } from '../notification.service.js';
 import { alreadySent, claimSend, type SchedulerJob } from '../scheduler.service.js';
 
-// Job couple-events.remind (plan/COUPLE_V2_PLAN.md CP4, plan/PLATFORM_PLAN.md N2), every 10 minutes:
+// Job couple-events.remind (plan/ENGINEERING_WORKFLOW.md CP4, plan/OPERATIONS.md N2), every 10 minutes:
 // - events with `remind: true`: 7 days before (d7), the day before (d1) and on the day (d0), each from 08:00 couple time
 //   of that day; timed events also 1 hour before (h1, any time of day);
 // - auto milestones (anniversary years, "Tròn N ngày"): the day before (d1) and on the day (d0), from 08:00.

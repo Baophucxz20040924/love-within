@@ -11,7 +11,7 @@ import { STORY_IMAGE_TYPES } from '../services/story.service.js';
 import { isRealDate } from '../utils/date.js';
 import { ok } from '../utils/response.js';
 
-/** "Thư hẹn giờ" (plan/COUPLE_V2_PLAN.md, CP2). The sealing rules live in letter.service.ts. */
+/** "Thư hẹn giờ" (plan/ENGINEERING_WORKFLOW.md, CP2). The sealing rules live in letter.service.ts. */
 export const letterRouter = Router();
 letterRouter.use(requireAuth, requireCouple);
 

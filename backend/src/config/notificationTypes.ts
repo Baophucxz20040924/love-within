@@ -1,7 +1,7 @@
 import type { FriendNotificationType } from '../models/FriendNotification.js';
 
 /**
- * Every notification type and how its Web Push behaves (plan/PLATFORM_PLAN.md, N3 + N4).
+ * Every notification type and how its Web Push behaves (plan/OPERATIONS.md, N3 + N4).
  * A type belongs to one space; its push goes only to that space's subscriptions and is switched by one settings group
  * (users.pushSettings.<space>.<group>).
  *

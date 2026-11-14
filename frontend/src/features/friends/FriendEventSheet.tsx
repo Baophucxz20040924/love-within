@@ -12,7 +12,7 @@ import type { FriendEventDetail, FriendEventInput } from '../../lib/types';
 import { FRIEND_EVENTS_KEY, FRIENDS_OVERVIEW_KEY, friendEventKey, friendEventsApi, friendsApi, uploadFriendPhoto } from './api';
 import { fromLocalInputs, plainName, toLocalInputs } from './eventFormat';
 
-/** Limits of plan/FRIENDS_V2_PLAN.md BB5 (the server checks them again). */
+/** Limits of plan/ENGINEERING_WORKFLOW.md BB5 (the server checks them again). */
 const MAX_TITLE = 100;
 const MAX_PLACE = 200;
 const MAX_DESCRIPTION = 2000;

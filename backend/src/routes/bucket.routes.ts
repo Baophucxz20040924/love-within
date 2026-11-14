@@ -19,7 +19,7 @@ import { bucketService } from '../services/bucket.service.js';
 import { isRealDate } from '../utils/date.js';
 import { ok } from '../utils/response.js';
 
-/** "Bucket list chung" (plan/COUPLE_V2_PLAN.md, CP3). Either member edits, deletes or completes any item. */
+/** "Bucket list chung" (plan/ENGINEERING_WORKFLOW.md, CP3). Either member edits, deletes or completes any item. */
 export const bucketRouter = Router();
 bucketRouter.use(requireAuth, requireCouple);
 

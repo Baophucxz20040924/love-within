@@ -5,7 +5,7 @@ import type { PushSpace } from '../../lib/types';
 import { pushApi } from './api';
 
 /**
- * Web Push on this browser (plan/PLATFORM_PLAN.md, N4): permission, the browser's PushSubscription and which user and
+ * Web Push on this browser (plan/OPERATIONS.md, N4): permission, the browser's PushSubscription and which user and
  * space it was turned on for. Permission is only ever asked from a tap (enableOnThisDevice), never at app start.
  *
  * A device belongs to one user and one space at a time. That owner is kept in localStorage next to the endpoint, so

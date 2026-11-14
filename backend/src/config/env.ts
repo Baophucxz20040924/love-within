@@ -58,7 +58,7 @@ export const env = {
     /** Must be a vision-capable model on beeknoee. */
     model: optional('BEEKNOEE_MODEL', 'openai/gpt-4o-mini'),
     timeoutMs: asInt(optional('BEEKNOEE_TIMEOUT_MS', '20000'), 'BEEKNOEE_TIMEOUT_MS'),
-    /** Text chat model for the finance assistant (plan/FINANCE_ASSISTANT_PLAN.md). Must be a chat model, not an embedding model. */
+    /** Text chat model for the finance assistant (plan/PROJECT_SUMMARY.md). Must be a chat model, not an embedding model. */
     chatModel: optional('BEEKNOEE_CHAT_MODEL', 'openai/gpt-5.4-mini'),
     chatTimeoutMs: asInt(optional('BEEKNOEE_CHAT_TIMEOUT_MS', '45000'), 'BEEKNOEE_CHAT_TIMEOUT_MS'),
   },
@@ -84,13 +84,13 @@ export const env = {
     memWarnMb: asInt(optional('MEM_WARN_MB', '1500'), 'MEM_WARN_MB'),
   },
 
-  /** Background jobs (plan/PLATFORM_PLAN.md, N2). PM2 instance 0 only; false = no timed jobs in this process. */
+  /** Background jobs (plan/OPERATIONS.md, N2). PM2 instance 0 only; false = no timed jobs in this process. */
   scheduler: {
     enabled: asBool(optional('SCHEDULER_ENABLED', 'true'), 'SCHEDULER_ENABLED'),
   },
 
   /**
-   * Web Push (plan/PLATFORM_PLAN.md, N4). 'webpush' (default) or 'mock' (dev only: records sends in RAM, /api/dev-push).
+   * Web Push (plan/OPERATIONS.md, N4). 'webpush' (default) or 'mock' (dev only: records sends in RAM, /api/dev-push).
    * Keys: `npx web-push generate-vapid-keys`. Missing keys in webpush mode = push off (the app still runs, one WARN).
    */
   push: {
@@ -101,7 +101,7 @@ export const env = {
     vapidSubject: optional('VAPID_SUBJECT', ''),
   },
 
-  /** Personal cash flow from linked bank accounts (plan/CASHFLOW_PLAN.md). Poll only, no webhook. */
+  /** Personal cash flow from linked bank accounts (plan/PROJECT_SUMMARY.md). Poll only, no webhook. */
   bank: {
     /** 'thueapibank' (default) or 'mock' (dev only: deterministic fake transactions). */
     provider: asEnum(optional('BANK_PROVIDER', 'thueapibank'), 'BANK_PROVIDER', ['thueapibank', 'mock']),

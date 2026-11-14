@@ -176,7 +176,7 @@ function FinanceCard({ timezone }: { timezone: string }) {
 export function HomePage() {
   const { me } = useAuth();
   const couple = useQuery({ queryKey: COUPLE_KEY, queryFn: coupleApi.get });
-  // One combined poll for the Home cards (plan/COUPLE_V2_PLAN.md §0): every 30 s, only while the tab is visible.
+  // One combined poll for the Home cards (plan/ENGINEERING_WORKFLOW.md): every 30 s, only while the tab is visible.
   const pulse = useQuery({
     queryKey: PULSE_KEY,
     queryFn: coupleApi.pulse,

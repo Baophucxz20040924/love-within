@@ -1,6 +1,6 @@
 // Bản nháp, chủ dự án sẽ duyệt.
 //
-// Gợi ý cho "Bucket list chung" (plan/COUPLE_V2_PLAN.md, CP3): chạm một gợi ý để thêm vào danh sách của hai bạn.
+// Gợi ý cho "Bucket list chung" (plan/ENGINEERING_WORKFLOW.md, CP3): chạm một gợi ý để thêm vào danh sách của hai bạn.
 // Quy tắc khi sửa:
 // - Không đổi hay xóa `id` đã dùng: mục đã thêm lưu `ideaId` để trang Gợi ý đánh dấu "Đã thêm". Sửa câu chữ, emoji thì được.
 // - Gợi ý mới thêm vào cuối, id kế tiếp (b061, b062…).

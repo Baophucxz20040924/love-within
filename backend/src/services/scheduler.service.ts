@@ -4,7 +4,7 @@ import { Errors } from '../utils/errors.js';
 import { logger } from '../utils/logger.js';
 
 /**
- * Background scheduler (plan/PLATFORM_PLAN.md, N2): timed work without a queue or an outside service.
+ * Background scheduler (plan/OPERATIONS.md, N2): timed work without a queue or an outside service.
  * One 60 s loop on PM2 instance 0 (or a non-cluster process), same pattern as bankSync.service.ts. Each tick runs, one
  * after the other, every registered job whose interval has elapsed. A tick never overlaps the previous one.
  *

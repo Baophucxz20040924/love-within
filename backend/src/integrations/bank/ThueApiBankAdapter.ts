@@ -6,7 +6,7 @@ import { BankFeedError, parseVnDateTime, type BankFeedProvider, type BankFeedTxn
 /**
  * thueapibank.vn MBBank API V2: GET {base}/historyapimbv2/{token}
  *   → { status: "success", message, transactions: [{ transactionID, amount, description, transactionDate, type }] }
- * Verified with a real account on 06/11/2026 (plan/CASHFLOW_PLAN.md, C0):
+ * Verified with a real account on 06/11/2026 (plan/PROJECT_SUMMARY.md, C0):
  *   - roughly the last 7 days, newest first; transactionID = MB "FT…" reference, stable across calls;
  *   - amount is a string of digits; transactionDate is "dd/MM/yyyy HH:mm:ss" (Vietnam time); type is IN/OUT.
  *   - an invalid token answers HTTP 403 { status: "error", msg: "Token không hợp lệ" }.

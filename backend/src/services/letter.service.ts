@@ -12,7 +12,7 @@ import { addDays, daysUntil, getLocalDate, yearlyDateIn, zonedTimeToUtc } from '
 import { AppError, Errors } from '../utils/errors.js';
 import { logger } from '../utils/logger.js';
 
-// "Thư hẹn giờ" (plan/COUPLE_V2_PLAN.md, CP2). Privacy rules, enforced here and nowhere else:
+// "Thư hẹn giờ" (plan/ENGINEERING_WORKFLOW.md, CP2). Privacy rules, enforced here and nowhere else:
 // - The recipient gets no title, body or photo before openAt (server clock): GET → 403 LETTER_SEALED, the list has no title.
 // - Content (and presigned photo URLs) reach the recipient only from the first open on (POST /open writes openedAt once).
 // - The author always reads the letter, and edits or deletes it until it is opened (then 409 LETTER_OPENED).

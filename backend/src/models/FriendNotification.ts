@@ -1,7 +1,7 @@
 import { Schema, model, type Document, type Types } from 'mongoose';
 
 /**
- * Friends-space notification types (plan/FRIENDS_V2_PLAN.md, BB1; comment_reply and mention: BB8; poll_closed: BB6;
+ * Friends-space notification types (plan/ENGINEERING_WORKFLOW.md, BB1; comment_reply and mention: BB8; poll_closed: BB6;
  * event_*: BB5 "Lên kèo", entityId = the event).
  */
 export const FRIEND_NOTIFICATION_TYPES = [

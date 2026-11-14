@@ -83,7 +83,7 @@ function hideByReports(type: Exclude<ReportTarget, 'user'>, id: Types.ObjectId):
   }
 }
 
-/** Blocks, reports and hidden posts in the friends space (plan/FRIENDS_V2_PLAN.md, BB2). */
+/** Blocks, reports and hidden posts in the friends space (plan/ENGINEERING_WORKFLOW.md, BB2). */
 export const friendSafetyService = {
   /**
    * Block someone. Works both ways at once: the friendship or pending request is removed, the two stop

@@ -17,7 +17,7 @@ export type PushResult =
   | { status: 'error'; statusCode: number | null; message: string };
 
 /**
- * Web Push sender (plan/PLATFORM_PLAN.md, N4). The payload is encrypted for the browser (RFC 8291), so the push service
+ * Web Push sender (plan/OPERATIONS.md, N4). The payload is encrypted for the browser (RFC 8291), so the push service
  * (Google, Apple, Mozilla, Microsoft) cannot read it. Never throws for a failed send: the result says what happened.
  */
 export interface PushProvider {

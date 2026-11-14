@@ -5,7 +5,6 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Icon } from '../../components/Icon';
 import { ProgressBar } from '../../components/ProgressBar';
 import { Skeleton } from '../../components/StatusViews';
-import { useToast } from '../../components/Toast';
 import { ApiRequestError } from '../../lib/apiClient';
 import { formatDay, formatVnd, timeAgo } from '../../lib/format';
 import type { AssistantCoverage, AssistantInsights, AssistantMessage, AssistantState } from '../../lib/types';
@@ -207,7 +206,6 @@ function Bubble({ role, children }: { role: AssistantMessage['role']; children: 
 
 export function AssistantChat({ messages }: { messages: AssistantMessage[] }) {
   const qc = useQueryClient();
-  const toast = useToast();
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const endRef = useRef<HTMLDivElement>(null);
   const [text, setText] = useState('');
@@ -223,10 +221,9 @@ export function AssistantChat({ messages }: { messages: AssistantMessage[] }) {
     onSuccess: (r) => {
       qc.setQueryData<AssistantState>(ASSISTANT_KEY, (s) => (s ? { ...s, messages: [...s.messages, r.question, r.reply] } : s));
     },
-    onError: (err, message) => {
+    onError: (_err, message) => {
       // Keep the question so it can be sent again.
       setText((t) => t || message);
-      toast.error(errorText(err));
     },
     onSettled: () => setPendingQuestion(null),
   });
@@ -294,6 +291,7 @@ export function AssistantChat({ messages }: { messages: AssistantMessage[] }) {
       )}
       <div ref={endRef} />
 
+      {send.isError && <p className="form-feedback" role="alert">{errorText(send.error)}</p>}
       <form className="comment-bar" onSubmit={onSubmit}>
         <textarea
           ref={inputRef}

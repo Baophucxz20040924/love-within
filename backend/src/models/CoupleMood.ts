@@ -2,7 +2,7 @@ import { Schema, model, type Document, type Types } from 'mongoose';
 import { MOODS, type Mood } from './Story.js';
 
 /**
- * "Cảm xúc hôm nay" (plan/COUPLE_V2_PLAN.md, CP5): one mood per member per day (couple timezone); setting it again
+ * "Cảm xúc hôm nay" (plan/ENGINEERING_WORKFLOW.md, CP5): one mood per member per day (couple timezone); setting it again
  * overwrites (last write wins). Same keys as the story mood (`MOODS` in models/Story.ts); the frontend owns emoji + label.
  */
 
