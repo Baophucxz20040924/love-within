@@ -121,6 +121,7 @@ export function FriendsMePage() {
         <Row to="/friends/outings" icon="coins" label="Chia tiền buổi đi chơi" meta="Ghi chi phí, chốt sổ và xác nhận thanh toán" />
         <Row to="/friends/me/invites" icon="userPlus" label="Mời bạn vào hội" meta="Gửi link để bạn bè vào và kết bạn với bạn" />
         <Row to="/friends/me/blocked" icon="shield" label="Đã chặn" />
+        <Row to="/friends/me/app-lock" icon="shield" label="Mã khóa ứng dụng" meta="Mã 6 số khi mở lại ứng dụng" />
         <Row to="/friends/me/notifications" icon="bell" label="Cài đặt thông báo" meta="Báo ra màn hình khóa, ẩn nội dung" />
       </div>
 

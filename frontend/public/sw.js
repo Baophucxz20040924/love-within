@@ -1,11 +1,11 @@
 /* Minimal service worker: enables "Add to Home Screen", caches the app shell and shows Web Push notifications (N4).
    API calls are never cached (network only) so data is always fresh. */
-const CACHE = 'look-within-shell-v5';
+const CACHE = 'look-within-shell-v6';
 const SHELL = [
   '/',
   '/index.html',
-  '/privacy-bootstrap.js',
-  '/privacy-bootstrap.css',
+  '/app-lock-bootstrap.js',
+  '/app-lock-bootstrap.css',
   '/manifest.webmanifest',
   '/icon.svg',
   '/icons/icon-192.png',

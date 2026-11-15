@@ -27,16 +27,17 @@ const output = ts.transpileModule(fs.readFileSync(filename, 'utf8'), {
 }).outputText;
 
 function deferred() {
-  let resolve;
-  const promise = new Promise((done) => { resolve = done; });
-  return { promise, resolve };
+  let resolve, reject;
+  const promise = new Promise((done, fail) => { resolve = done; reject = fail; });
+  return { promise, resolve, reject };
 }
 
 async function main() {
   const values = new Map([
     ['lw.sessionGeneration', 'old'], ['lw.accessToken', 'old-access'], ['lw.refreshToken', 'old-refresh'],
   ]);
-  const calls = { get: 0, clear: 0, cancel: 0, cacheClear: 0, requests: [] };
+  const calls = { get: 0, clear: 0, cancel: 0, cacheClear: 0, requests: [], logins: 0 };
+  let epoch = 0, visible = true;
   const tokenStore = {
     generation: () => values.get('lw.sessionGeneration') ?? 'legacy',
     isCurrent: (generation) => generation === tokenStore.generation(),
@@ -48,7 +49,8 @@ async function main() {
     },
     isSessionKey: (key) => key === 'lw.sessionGeneration',
     isTokenKey: (key) => key === 'lw.accessToken' || key === 'lw.refreshToken',
-    clear() { calls.clear++; },
+    set(tokens) { values.set('lw.sessionGeneration', `login-${++calls.logins}`); values.set('lw.accessToken', tokens.accessToken); values.set('lw.refreshToken', tokens.refreshToken); },
+    clear() { calls.clear++; values.delete('lw.accessToken'); values.delete('lw.refreshToken'); },
   };
   const cells = [];
   const effects = [];
@@ -85,22 +87,23 @@ async function main() {
     '../../lib/apiClient': {
       SESSION_EXPIRED_EVENT: 'session-expired',
       apiRequest: (url) => {
-        assert.equal(url, '/me');
         const request = deferred();
+        request.url = url;
         calls.requests.push(request);
         return request.promise;
       },
-      assertCurrentSession: () => { throw new Error('unexpected session operation'); },
+      assertCurrentSession: (generation) => { if (!tokenStore.isCurrent(generation)) throw new DOMException('session changed', 'AbortError'); },
+      advanceAccessEpoch: () => {},
     },
     '../../lib/spaceStore': { spaceStore: { get: () => 'couple', set: () => {}, isSpaceKey: () => false } },
     '../../lib/tokenStore': { tokenStore },
     '../push/device': { forgetThisDevice: () => { throw new Error('unexpected device operation'); } },
-    '../privacy/store': { bindPrivacySession() {}, privacyEpoch: () => 0, reconcilePrivacySession() {} },
+    '../appLock/store': { appLockEpoch: () => epoch, appLockState: () => ({ discard: false }), bindPasswordLogin() {}, isAuthAttemptCurrent: expected => expected === epoch && visible, refreshLockSettings: async () => {}, resetAppLock() {}, subscribeAppLock: () => () => {} },
     '../../components/StatusViews': { ErrorState: 'error', Loading: 'loading' },
   };
   const module = { exports: {} };
   vm.runInNewContext(output, {
-    module, exports: module.exports,
+    module, exports: module.exports, DOMException,
     require(name) { assert.ok(Object.hasOwn(mocks, name), `Unmocked import: ${name}`); return mocks[name]; },
     window: {
       addEventListener: (name, handler) => listeners.set(name, handler),
@@ -142,6 +145,11 @@ async function main() {
   await new Promise(setImmediate);
   assert.equal(render().me, current, 'late previous-generation /me is ignored');
 
+  // A new atomic session record for the same generation is just a rotation.
+  storage({ key: 'lw.sessionGeneration', newValue: 'new' });
+  assert.equal(render().me, current);
+  assert.equal(calls.cacheClear, 1, 'same-generation session event must not clear the view');
+
   // Rotation stays in the same generation and must not clear the current view or credentials.
   values.set('lw.accessToken', 'rotated-access');
   storage({ key: 'lw.accessToken', newValue: 'rotated-access' });
@@ -165,6 +173,29 @@ async function main() {
   assert.equal(calls.cancel, 2);
   assert.equal(calls.clear, 0, 'storage events do not write credential clears');
   assert.equal(calls.requests.length, 3, 'token removal does not fetch without both credentials');
+  // A join rejected after conceal must not log out the newly acquired session.
+  let attempt = render().login('a', 'password', 'friends', { inviteCode: 'invite' });
+  let result = attempt.then(() => null, error => error);
+  assert.equal(calls.requests.at(-1).url, '/auth/login');
+  calls.requests.at(-1).resolve({ accessToken: 'login-access', refreshToken: 'login-refresh' });
+  await new Promise(setImmediate);
+  assert.equal(calls.requests.at(-1).url, '/friends/join');
+  epoch++; visible = false;
+  calls.requests.at(-1).reject(new Error('join failed'));
+  assert.ok(await result); assert.equal(calls.clear, 0, 'stale join failure must not clear credentials');
+  assert.equal(values.get('lw.accessToken'), 'login-access');
+
+  // A late successful join after conceal must not refresh data or return an invite.
+  visible = true;
+  attempt = render().login('a', 'password', 'friends', { inviteCode: 'invite' });
+  result = attempt.then(() => null, error => error);
+  calls.requests.at(-1).resolve({ accessToken: 'new-access', refreshToken: 'new-refresh' });
+  await new Promise(setImmediate);
+  assert.equal(calls.requests.at(-1).url, '/friends/join');
+  epoch++; calls.requests.at(-1).resolve({ joined: true });
+  const requestCount = calls.requests.length;
+  assert.equal((await result).name, 'AbortError');
+  assert.equal(calls.requests.length, requestCount, 'stale join cannot start /me');
   cleanups.forEach((cleanup) => cleanup());
   assert.equal(listeners.has('storage'), false);
   console.log('PASS: isolated AuthContext storage events, stale response, rotation and removal');

@@ -13,7 +13,7 @@ function typescript() {
   }
 }
 const ts = typescript();
-const root = path.resolve(__dirname, '../../src');
+const root = process.env.REALTIME_SOURCE_ROOT ? path.resolve(process.env.REALTIME_SOURCE_ROOT) : path.resolve(__dirname, '../../src');
 function load(relative, mocks = {}, globals = {}) {
   const filename = path.join(root, relative);
   const output = ts.transpileModule(fs.readFileSync(filename, 'utf8'), {
@@ -105,21 +105,16 @@ const tick = () => new Promise(resolve => setTimeout(resolve, 0));
     setAttribute(key, value) { this.attrs.set(key, value); } getAttribute(key) { return this.attrs.get(key) ?? null; } removeAttribute(key) { this.attrs.delete(key); }
     blur() {} remove() { this.isConnected = false; }
   }
-  let observerCallback; const root = new Element(); const portal = new Element(); portal.setAttribute('aria-hidden', 'false');
+  const root = new Element(); const portal = new Element();
   const body = { children: [root, portal], appendChild: node => body.children.push(node) };
-  const pauseCalls = [];
-  const maskGlobals = {
-    HTMLElement: Element, document: { body, documentElement: new Element(), activeElement: null, querySelectorAll: () => [], addEventListener() {}, createElement: tag => new Element(tag.toUpperCase()) },
-    MutationObserver: class { constructor(cb) { observerCallback = cb; } observe() {} disconnect() {} },
-  };
-  const mask = load('features/privacy/mask.ts', { '../../hooks/useModal': { setModalPrivacyPause: value => pauseCalls.push(value) } }, maskGlobals);
-  const verification = load('features/realtime/verification.tsx', { react: {}, 'react/jsx-runtime': {}, 'react-dom': {}, '../privacy/mask': mask, './VerificationScreen': {} }, maskGlobals);
+  const maskCalls = []; let host;
+  const verification = load('features/realtime/verification.tsx', { react: {}, 'react/jsx-runtime': {}, 'react-dom': {}, '../appLock/mask': {
+    setAppMask: (reason, enabled) => maskCalls.push([reason, enabled]), setVerificationHost: node => { host = node; },
+  } }, { document: { body, createElement: tag => new Element(tag.toUpperCase()) } });
   verification.setVerification('checking');
-  assert.equal(root.style.getPropertyValue('display'), 'none'); assert.equal(portal.inert, true); assert.equal(portal.getAttribute('aria-hidden'), 'true');
-  const newPortal = new Element(); body.children.push(newPortal); observerCallback(); assert.equal(newPortal.style.getPropertyValue('display'), 'none');
+  assert.ok(host); assert.equal(body.children.includes(host), true);
   verification.setVerification('clear');
-  assert.equal(root.style.getPropertyValue('display'), ''); assert.equal(portal.inert, false); assert.equal(portal.getAttribute('aria-hidden'), 'false');
-  assert.deepEqual(pauseCalls, [true, false]);
+  assert.deepEqual(maskCalls, [['verification', true], ['verification', false]]);
   const batches = [];
   const batch = new invalidation.DomainBatch(domains => batches.push(plain(domains)), 5);
   batch.add(['stories']); batch.add(['stories', 'wallet']);
@@ -184,13 +179,15 @@ const tick = () => new Promise(resolve => setTimeout(resolve, 0));
 
   const listeners = new Map(); let eligible = true; const transitions = [];
   const react = {
-    useState: () => [eligible, value => { transitions.push(['eligible', value]); eligible = value; }],
+    useState: initial => typeof initial === 'number' ? [initial, () => {}] : [eligible, value => { transitions.push(['eligible', value]); eligible = value; }],
+    useSyncExternalStore: (_subscribe, snapshot) => snapshot(),
     useLayoutEffect: effect => { effect(); },
   };
   const fakeDoc = { visibilityState: 'visible', addEventListener: (name, fn) => listeners.set(name, fn), removeEventListener() {} };
   const fakeWindow = { addEventListener: (name, fn) => listeners.set(name, fn), removeEventListener() {} };
   const sync = load('features/realtime/RealtimeSync.tsx', {
     react, '@tanstack/react-query': { useQueryClient: () => ({}) },
+    '../appLock/store': { subscribeAppLock: () => () => {}, isAppLocked: () => true },
     '../auth/AuthContext': { useAuth: () => ({ isAuthenticated: true, me: { user: { id: 'a' } }, space: 'friends', refreshMe() {}, revokeMe() {}, verifyMe() {} }) },
     '../../lib/tokenStore': { tokenStore: { generation: () => 'a', isCurrent: () => true, get: () => ({}) } },
     '../../lib/apiClient': { advanceAccessEpoch() {} }, './invalidation': { ...invalidation, verifyScope: async () => true },

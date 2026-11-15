@@ -1,9 +1,9 @@
-import { cloneElement, Suspense } from 'react';
+import { Suspense } from 'react';
 import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { AuthProvider, useAuth } from '../features/auth/AuthContext';
 import { ToastProvider } from '../components/Toast';
-import { ErrorState, Loading } from '../components/StatusViews';
+import { Loading } from '../components/StatusViews';
 import { ProtectedRoute } from './ProtectedRoute';
 import { RequireCouple } from './RequireCouple';
 import { RequireSpace } from './RequireSpace';
@@ -16,8 +16,8 @@ import { useFriendsTheme } from '../features/friends/useFriendsTheme';
 import { PushSync } from '../features/push/PushSync';
 import { RealtimeSync } from '../features/realtime/RealtimeSync';
 import { RealtimeBoundary } from '../features/realtime/verification';
-import { PrivacyCover, PrivacyRoutes } from '../features/privacy/PrivacyBoundary';
-import { canEnterHidden } from '../features/privacy/store';
+import { AppLockBoundary, AppLockCover } from '../features/appLock/AppLockBoundary';
+import { AppLockSettingsPage } from '../pages/AppLockSettingsPage';
 import {
   ApprovalsPage,
   BucketPage,
@@ -75,21 +75,25 @@ function LoginRoute() {
   return <AuthPage />;
 }
 
-/** Hidden login requires a live document gesture; old history state never grants entry. */
+/**
+ * Hidden login of the friends space. Only reachable from /login (4 taps on the heart, then
+ * "Đăng nhập", then the sailing boat) or from an invite link (/j/<code>), which pass `unlocked` in the history state;
+ * typing the URL leads back to /login.
+ */
 function FriendsLoginRoute() {
   const { isAuthenticated, space } = useAuth();
   const location = useLocation();
   const state = location.state as { unlocked?: boolean; mode?: 'login' | 'register'; invite?: { code: string; inviterName: string } } | null;
   if (isAuthenticated) return <Navigate to={homeOf(space)} replace />;
-  if (!canEnterHidden()) return <Navigate to="/login" replace />;
-  return <AuthPage variant="friends" invite={state?.invite} initialMode={state?.mode} />;
+  if (!state?.unlocked) return <Navigate to="/login" replace />;
+  return <AuthPage variant="friends" invite={state.invite} initialMode={state.mode} />;
 }
 
 /** Blue theme while the session is in the friends space or on its hidden login page. */
 function SpaceTheme() {
   const { space } = useAuth();
-  const { pathname } = useLocation();
-  const onHiddenLogin = pathname === FRIENDS_LOGIN && canEnterHidden();
+  const { pathname, state } = useLocation();
+  const onHiddenLogin = pathname === FRIENDS_LOGIN && Boolean((state as { unlocked?: boolean } | null)?.unlocked);
   useFriendsTheme(space === 'friends' || onHiddenLogin);
   return null;
 }
@@ -104,26 +108,22 @@ function PairingRoute() {
   );
 }
 
-function AuthBootstrapBoundary({ children, location }: { children: import('react').ReactElement<{ location?: ReturnType<typeof useLocation> }>; location?: ReturnType<typeof useLocation> }) {
-  const { bootstrapError, loading, retryBootstrap } = useAuth();
-  if (bootstrapError) return <main className="app-content"><ErrorState title="Chưa kiểm tra được phiên đăng nhập" message="Phiên của bạn vẫn được giữ. Thử tải lại thay vì đăng nhập lại." onRetry={retryBootstrap} />{loading && <Loading />}</main>;
-  return cloneElement(children, { location });
-}
-
 export function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <ToastProvider>
         <BrowserRouter>
-          <PrivacyCover />
           <AuthProvider>
+            <AppLockCover />
             <SpaceTheme />
             <RouteNavigation />
             <PushSync />
             <RealtimeSync />
-            <RealtimeBoundary><PrivacyRoutes><AuthBootstrapBoundary><Routes>
+            <RealtimeBoundary><AppLockBoundary><Routes>
               <Route path="/login" element={<LoginRoute />} />
               <Route path={FRIENDS_LOGIN} element={<FriendsLoginRoute />} />
+              <Route path="/profile/app-lock" element={<ProtectedRoute><RequireSpace space="couple"><AppLockSettingsPage space="couple" /></RequireSpace></ProtectedRoute>} />
+              <Route path="/friends/me/app-lock" element={<ProtectedRoute><RequireSpace space="friends"><AppLockSettingsPage space="friends" /></RequireSpace></ProtectedRoute>} />
               <Route
                 path="/pairing"
                 element={
@@ -224,7 +224,7 @@ export function App() {
                 }
               />
               <Route path="*" element={<Navigate to="/" replace />} />
-            </Routes></AuthBootstrapBoundary></PrivacyRoutes></RealtimeBoundary>
+            </Routes></AppLockBoundary></RealtimeBoundary>
           </AuthProvider>
         </BrowserRouter>
       </ToastProvider>

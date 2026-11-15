@@ -218,6 +218,11 @@ export function ProfilePage() {
             </span>
             <Icon name="chevronRight" className="text-muted" />
           </button>
+          <Link to="/profile/app-lock" className="list__item">
+            <span className="icon-tile icon-tile--neutral" aria-hidden="true"><Icon name="shield" size={20} /></span>
+            <span className="list__body"><span className="list__label">Mã khóa ứng dụng</span><span className="list__meta" style={{ display: 'block' }}>Mã 6 số khi mở lại ứng dụng</span></span>
+            <Icon name="chevronRight" className="text-muted" />
+          </Link>
           <Link to="/profile/notifications" className="list__item">
             <span className="icon-tile icon-tile--neutral" aria-hidden="true">
               <Icon name="bell" size={20} />

@@ -47,6 +47,10 @@ export function errorHandler(
     if (err.status >= 500) {
       logger.error('Application error', { code: err.code, status: err.status, method: req.method, routeTemplate: routeTemplate(req) });
     }
+    if (err.status === 429 && typeof err.details === 'object' && err.details !== null &&
+        'retryAfterSeconds' in err.details && typeof err.details.retryAfterSeconds === 'number') {
+      res.setHeader('Retry-After', String(Math.max(1, Math.ceil(err.details.retryAfterSeconds))));
+    }
     fail(res, err.status, err.code, err.message, err.details);
     return;
   }

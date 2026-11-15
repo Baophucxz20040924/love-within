@@ -1,4 +1,5 @@
-import { useLayoutEffect, useState } from 'react';
+import { useLayoutEffect, useState, useSyncExternalStore } from 'react';
+import { isAppLocked, subscribeAppLock } from '../appLock/store';
 import { useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '../auth/AuthContext';
 import { tokenStore } from '../../lib/tokenStore';
@@ -11,8 +12,9 @@ import { RealtimeStream } from './stream';
 export function RealtimeSync() {
   const { isAuthenticated, me, space, refreshMe, revokeMe, verifyMe } = useAuth();
   const qc = useQueryClient();
-  const [eligible, setEligible] = useState(() => document.visibilityState === 'visible' && navigator.onLine);
+  const locked = useSyncExternalStore(subscribeAppLock, isAppLocked);
   const [resumeVersion, setResumeVersion] = useState(0);
+  const [eligible, setEligible] = useState(() => document.visibilityState === 'visible' && navigator.onLine);
   const generation = tokenStore.generation();
   const userId = me?.user.id;
 
@@ -24,7 +26,6 @@ export function RealtimeSync() {
       previous = next;
       if (isAuthenticated && userId && tokenStore.isCurrent(generation) && tokenStore.get()) setVerification('checking');
       setEligible(next);
-      // Fast hidden/visible pairs may batch back to the original Boolean.
       if (next) setResumeVersion(value => value + 1);
     };
     update();
@@ -40,13 +41,13 @@ export function RealtimeSync() {
 
   useLayoutEffect(() => {
     if (!isAuthenticated || !userId || !tokenStore.get()) { setVerification('clear'); return; }
-    if (!eligible) { setVerification('checking'); return; }
+    if (locked || !eligible) { setVerification('checking'); return; }
     let active = true;
     let verificationId = 0;
     let verifying = false;
     let pendingDirty = false;
     let retryTimer: ReturnType<typeof setTimeout> | undefined;
-    const valid = () => active && tokenStore.isCurrent(generation) && document.visibilityState === 'visible' && navigator.onLine;
+    const valid = () => active && !isAppLocked() && tokenStore.isCurrent(generation) && document.visibilityState === 'visible' && navigator.onLine;
     const batch = new DomainBatch((domains) => {
       if (!valid()) return;
       if (verifying) { pendingDirty = true; return; }
@@ -94,6 +95,6 @@ export function RealtimeSync() {
     reconcileAccess();
     stream.start();
     return () => { active = false; verificationId++; if (retryTimer !== undefined) clearTimeout(retryTimer); batch.clear(); stream.stop(); };
-  }, [eligible, resumeVersion, generation, isAuthenticated, qc, refreshMe, revokeMe, verifyMe, space, userId]);
+  }, [eligible, locked, resumeVersion, generation, isAuthenticated, qc, refreshMe, revokeMe, verifyMe, space, userId]);
   return null;
 }

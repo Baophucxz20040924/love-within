@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { FormEvent, MouseEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Icon } from '../components/Icon';
@@ -10,11 +10,12 @@ import { AuthBackdrop } from '../features/auth/AuthBackdrop';
 import { announceInvite } from '../features/friends/inviteResult';
 import { ApiRequestError } from '../lib/apiClient';
 import { isStandalone } from '../lib/installPrompt';
-
-import { useSecretEntry } from '../features/auth/useSecretEntry';
-import { enterHidden, isPrivacyCurrent, privacyEpoch } from '../features/privacy/store';
+import { appLockEpoch, isAuthAttemptCurrent } from '../features/appLock/store';
 
 type Mode = 'login' | 'register';
+
+/** Taps on the heart that unlock the hidden friends login (then press "Đăng nhập"). */
+const SECRET_TAPS = 4;
 
 /** Turn an API/network error into a clear Vietnamese message for the auth form. */
 function messageForError(err: unknown, mode: Mode): string {
@@ -69,31 +70,78 @@ export function AuthPage({ variant = 'couple', invite, initialMode = 'login' }: 
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const heartTaps = useRef(0);
+  const secretPhase = useRef<'idle' | 'armed' | 'sailing' | 'navigating'>('idle');
+  const [boatOpen, setBoatOpen] = useState(false);
+  const markRef = useRef<HTMLButtonElement>(null);
+  const mounted = useRef(false);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   const copy = COPY[variant];
-  const { boatOpen, markRef, onHeartTap, revealBoat, dismissBoat, boardBoat } = useSecretEntry(
-    variant === 'couple' && mode === 'login' && !invite && !busy,
-    () => { if (enterHidden()) navigate('/friends/login'); },
-    `${mode}:${variant}:${invite?.code ?? ''}`,
-  );
+
+  function resetSecret() {
+    heartTaps.current = 0;
+    secretPhase.current = 'idle';
+    setBoatOpen(false);
+  }
+
+  useEffect(() => { resetSecret(); }, [mode, variant, invite?.code]);
+
+  /** Easter egg: the heart just beats on each tap; nothing on screen says it counts. */
+  function onHeartTap() {
+    if (variant !== 'couple' || mode !== 'login' || invite || busy || secretPhase.current === 'sailing' || secretPhase.current === 'navigating') return;
+    heartTaps.current = Math.min(SECRET_TAPS, heartTaps.current + 1);
+    if (heartTaps.current === SECRET_TAPS) secretPhase.current = 'armed';
+    if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      markRef.current?.animate([{ transform: 'scale(1)' }, { transform: 'scale(0.9)' }, { transform: 'scale(1)' }], {
+        duration: 220,
+        easing: 'ease-out',
+      });
+    }
+    if (heartTaps.current === SECRET_TAPS) navigator.vibrate?.(12);
+  }
+
+  /** Intercept before native validation; the boat never submits credentials. */
+  function revealBoat() {
+    if (variant !== 'couple' || mode !== 'login' || invite || busy) return false;
+    if (secretPhase.current === 'sailing' || secretPhase.current === 'navigating') return true;
+    if (secretPhase.current !== 'armed') return false;
+    secretPhase.current = 'sailing';
+    setBoatOpen(true);
+    return true;
+  }
+
   function onSubmitClick(e: MouseEvent<HTMLButtonElement>) {
     if (revealBoat()) e.preventDefault();
+  }
+
+  function dismissBoat() {
+    const restoreFocus = document.activeElement instanceof HTMLElement && !!document.activeElement.closest('.secret-boat');
+    resetSecret();
+    if (restoreFocus) markRef.current?.focus({ preventScroll: true });
+  }
+
+  function boardBoat() {
+    if (secretPhase.current !== 'sailing') return;
+    secretPhase.current = 'navigating';
+    navigate('/friends/login', { state: { unlocked: true } });
   }
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     if (busy || revealBoat()) return;
-    const epoch = privacyEpoch();
+    const expectedEpoch = appLockEpoch();
+    const current = () => mounted.current && isAuthAttemptCurrent(expectedEpoch);
     setError(null);
     setBusy(true);
     try {
       const opts = invite ? { inviteCode: invite.code } : undefined;
       const joined =
         mode === 'login' ? await login(email, password, variant, opts) : await register(email, password, displayName, variant, opts);
-      if (isPrivacyCurrent(epoch)) announceInvite(joined, toast);
+      if (current()) announceInvite(joined, toast);
     } catch (err) {
-      if (isPrivacyCurrent(epoch)) setError(messageForError(err, mode));
+      if (current() && !(err instanceof DOMException && err.name === 'AbortError')) setError(messageForError(err, mode));
     } finally {
-      setBusy(false);
+      if (mounted.current) setBusy(false);
     }
   }
 

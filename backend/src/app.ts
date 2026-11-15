@@ -7,6 +7,7 @@ import { errorHandler, notFoundHandler } from './middleware/errorHandler.js';
 import { healthRouter } from './routes/health.routes.js';
 import { authRouter } from './routes/auth.routes.js';
 import { meRouter } from './routes/me.routes.js';
+import { privacyLockRouter } from './routes/privacyLock.routes.js';
 import { pairingRouter } from './routes/pairing.routes.js';
 import { coupleRouter } from './routes/couple.routes.js';
 import { proposalRouter } from './routes/proposal.routes.js';
@@ -58,7 +59,7 @@ export function createApp(): Express {
   // Correlation and metrics precede CORS, limiters and parsers, including preflight/error responses.
   app.use(requestCorrelation, requestMetrics);
   app.use(helmet());
-  app.use(cors({ origin: env.corsOrigin, credentials: true, exposedHeaders: ['X-Request-ID'] }));
+  app.use(cors({ origin: env.corsOrigin, credentials: true, exposedHeaders: ['X-Request-ID', 'Retry-After'] }));
   app.use('/api', apiNoStore, edgeLimiter);
 
   // Dev-only fake "S3" endpoint (raw bodies) — mounted before the JSON parser.
@@ -72,6 +73,7 @@ export function createApp(): Express {
   app.use('/api', healthRouter);
   app.use('/api/auth', authRouter);
   app.use('/api/realtime', realtimeRouter);
+  app.use('/api/privacy-lock', privacyLockRouter);
   app.use('/api', meRouter);
   app.use('/api/pairing', pairingRouter);
   app.use('/api/couple', coupleRouter);

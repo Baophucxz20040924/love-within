@@ -1,8 +1,8 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
+import { isAppLocked, subscribeAppLock } from '../features/appLock/store';
 import { Icon, type IconName } from './Icon';
 import './interactions.css';
-import { isPrivacyLocked, subscribePrivacy } from '../features/privacy/store';
 
 type Kind = 'success' | 'error' | 'info';
 interface ToastAction {
@@ -90,13 +90,13 @@ function Toast({ item, dismiss }: { item: ToastItem; dismiss: (id: number) => vo
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [items, setItems] = useState<ToastItem[]>([]);
   const seq = useRef(0);
-  useEffect(() => subscribePrivacy(() => { if (isPrivacyLocked()) setItems([]); }), []);
+  useEffect(() => subscribeAppLock(() => { if (isAppLocked()) setItems([]); }), []);
 
   const dismiss = useCallback((id: number) => setItems((xs) => xs.filter((x) => x.id !== id)), []);
 
   const show = useCallback(
     (kind: Kind, message: string, action?: ToastAction, durationMs?: number) => {
-      if (isPrivacyLocked()) return;
+      if (isAppLocked()) return;
       const id = ++seq.current;
       const duration = durationMs ?? (kind === 'error' || action ? 5000 : 3500);
       setItems((xs) => {
