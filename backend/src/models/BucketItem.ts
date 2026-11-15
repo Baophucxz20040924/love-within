@@ -1,5 +1,14 @@
 import { Schema, model, type Document, type Types } from 'mongoose';
 
+import type { RewardIntent } from './WalletOperation.js';
+import type { StoryPhoto } from './Story.js';
+
+export interface BucketCompletion {
+  version: 1;
+  ready: boolean;
+  story: { id: string; actorUserId: string; body: string; happenedOn: string; photos: StoryPhoto[] } | null;
+}
+
 /** "Bucket list chung" (plan/ENGINEERING_WORKFLOW.md, CP3). Shared list: either member adds, edits, pins, deletes or completes. */
 
 export const BUCKET_CATEGORIES = ['travel', 'food', 'experience', 'learning', 'other'] as const;
@@ -47,6 +56,10 @@ export interface BucketItemDoc extends Document {
   storyId: Types.ObjectId | null;
   /** Set once, when the reward is paid; never cleared (reopening keeps it, so an item is rewarded at most once). */
   rewardedAt: Date | null;
+  rewardIntent: RewardIntent | null;
+  rewardCompletedAt: Date | null;
+  rewardDenied: boolean;
+  completion: BucketCompletion | null;
   createdBy: Types.ObjectId;
   updatedBy: Types.ObjectId;
   /** Soft delete ("Hoàn tác" restores it). */
@@ -72,6 +85,10 @@ const bucketItemSchema = new Schema<BucketItemDoc>(
     doneNote: { type: String, default: '', maxlength: MAX_BUCKET_NOTE },
     storyId: { type: Schema.Types.ObjectId, ref: 'Story', default: null },
     rewardedAt: { type: Date, default: null },
+    rewardIntent: { type: Schema.Types.Mixed, default: null },
+    rewardCompletedAt: { type: Date, default: null },
+    rewardDenied: { type: Boolean, default: false },
+    completion: { type: Schema.Types.Mixed, default: null },
     createdBy: { type: Schema.Types.ObjectId, ref: 'User', required: true },
     updatedBy: { type: Schema.Types.ObjectId, ref: 'User', required: true },
     deletedAt: { type: Date, default: null },
@@ -93,6 +110,7 @@ export interface BucketRewardDayDoc extends Document {
   coupleId: Types.ObjectId;
   localDate: string;
   count: number;
+  operationIds: string[];
   createdAt: Date;
 }
 
@@ -101,12 +119,12 @@ const rewardDaySchema = new Schema<BucketRewardDayDoc>(
     coupleId: { type: Schema.Types.ObjectId, ref: 'Couple', required: true },
     localDate: { type: String, required: true },
     count: { type: Number, default: 0, min: 0 },
+    operationIds: { type: [String], default: [] },
   },
   { timestamps: { createdAt: true, updatedAt: false } },
 );
 
 rewardDaySchema.index({ coupleId: 1, localDate: 1 }, { unique: true });
-// Only today's counter matters; a day ends at most ~26 h after its first reward (timezones), so 3 days is plenty.
-rewardDaySchema.index({ createdAt: 1 }, { expireAfterSeconds: 3 * 86_400 });
+// No TTL: pending source intents can be recovered after their original day. Each day's keys are bounded by the cap.
 
 export const BucketRewardDay = model<BucketRewardDayDoc>('BucketRewardDay', rewardDaySchema);

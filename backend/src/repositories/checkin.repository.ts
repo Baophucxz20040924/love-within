@@ -18,6 +18,7 @@ export const checkinRepository = {
     streak: number;
     coinAwarded: number;
     expAwarded: number;
+    rewardIntent: import('../models/WalletOperation.js').RewardIntent;
   }): Promise<CheckinDoc> {
     return Checkin.create(input);
   },

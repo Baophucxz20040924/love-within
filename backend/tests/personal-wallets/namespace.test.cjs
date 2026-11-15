@@ -1,0 +1,28 @@
+'use strict';
+// Pure Mongoose compilation only: no DB, server, provider, dotenv or application bootstrap.
+const assert = require('node:assert/strict');
+const mongoose = require('mongoose');
+const { install } = require('./namespace.cjs');
+const ns = install(mongoose);
+const { Schema } = mongoose;
+const A = mongoose.model('WalletFixture', new Schema({ value: Number }, { collection: 'existing_wallets' }));
+assert.equal(A.collection.name, `${ns.prefix}walletfixture`, 'schema collection option cannot escape mapping');
+assert.notEqual(A.collection.name, 'existing_wallets');
+assert.equal(A.schema.options.autoIndex, false);
+assert.equal(A.schema.options.autoCreate, false);
+assert.equal(mongoose.model('WalletFixture'), A);
+assert.equal(mongoose.connection.model('WalletFixture'), A);
+const B = mongoose.connection.model('OtherFixture', new Schema({ value: String }));
+assert.equal(B.collection.name, `${ns.prefix}otherfixture`, 'connection.model compiles without recursion');
+assert.equal(mongoose.model('OtherFixture'), B);
+assert.throws(() => mongoose.connection.collection('wallets'), /Unmapped collection forbidden/);
+assert.throws(() => mongoose.model('BadFixture', new Schema({}), 'wallets'), /Explicit collection override forbidden/);
+assert.throws(() => mongoose.createConnection(), /Additional connections forbidden/);
+assert.throws(() => mongoose.connection.useDb('other'), /Database switching forbidden/);
+assert.equal(ns.verify().length, 2);
+ns.seal();
+assert.throws(() => mongoose.model('LateFixture', new Schema({})), /Late model registration forbidden/);
+assert.throws(() => mongoose.connection.model('LateConnectionFixture', new Schema({})), /Late model registration forbidden/);
+assert.equal(ns.verify().length, 2);
+assert.equal(mongoose.connection.readyState, 0);
+console.log('PASS wallet namespace model mapping and guards without connecting');

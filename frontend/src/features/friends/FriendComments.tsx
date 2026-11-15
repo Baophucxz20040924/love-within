@@ -23,7 +23,7 @@ const errorText = (err: unknown) => (err instanceof ApiRequestError ? err.messag
 const SHOWN_REPLIES = 2;
 
 /**
- * Where the comments live: a post (with "@" names) or an event discussion (BB5, no names). The plan's "bộ hàm API":
+ * Where the comments live: a post or an event discussion, each with its own mention eligibility. The "bộ hàm API":
  * the same component for both.
  */
 export interface CommentApi {
@@ -56,6 +56,7 @@ export function eventCommentApi(eventId: string): CommentApi {
     list: () => friendEventsApi.comments(eventId),
     add: (input) => friendEventsApi.addComment(eventId, input),
     remove: (commentId) => friendEventsApi.deleteComment(eventId, commentId),
+    mention: { id: eventId, resource: 'event', fn: (q) => friendEventsApi.mentionable(eventId, q) },
     reportType: 'event_comment',
     onCount: (qc, delta) =>
       qc.setQueryData<FriendEventDetail>(friendEventKey(eventId), (e) => (e ? { ...e, commentCount: Math.max(0, e.commentCount + delta) } : e)),
@@ -239,7 +240,10 @@ export function FriendComments({ api, focusKey, focusCommentId }: Props) {
     const rootId = c.parentId ?? c.id;
     expand(rootId);
     setReplyTo({ rootId, name: c.author.displayName });
-    const next = c.author.id === me?.user.id || !api.mention ? { text, mentions } : prefillMention(text, mentions, c.author);
+    const next = c.author.id === me?.user.id || !api.mention ? { text, mentions }
+      : api.reportType === 'event_comment' && !c.canMentionAuthor
+        ? { text: `${text}${text && !/\s$/.test(text) ? ' ' : ''}@${c.author.displayName} `, mentions }
+        : prefillMention(text, mentions, c.author);
     setText(next.text);
     setMentions(next.mentions);
     requestAnimationFrame(() => {

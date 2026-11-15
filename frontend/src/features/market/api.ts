@@ -8,6 +8,26 @@ export interface MarketItemInput {
   priceCoin: number;
 }
 
+const pendingRequests = new Map<string, string>();
+/** Keep an uncertain request identity across reload; scope prevents account/couple reuse. Contains no balances or tokens. */
+export function marketRequestKey(scope: string): string {
+  const storageKey = `market-request:${scope}`;
+  let key = pendingRequests.get(scope);
+  try { key ??= sessionStorage.getItem(storageKey) ?? undefined; } catch { /* storage unavailable */ }
+  if (!key) key = crypto.randomUUID();
+  pendingRequests.set(scope, key);
+  try { sessionStorage.setItem(storageKey, key); } catch { /* in-memory fallback */ }
+  return key;
+}
+export function clearMarketRequestKey(scope: string): void {
+  pendingRequests.delete(scope);
+  try { sessionStorage.removeItem(`market-request:${scope}`); } catch { /* storage unavailable */ }
+}
+
+export function isRecoveredRedemption(status: Redemption['status']): boolean {
+  return status !== 'requested';
+}
+
 export const marketApi = {
   // Items: every available item in the couple, flagged isMine.
   list: () => apiRequest<MarketItem[]>('/market/items'),
@@ -18,8 +38,8 @@ export const marketApi = {
 
   // Redemption flow.
   /** Ask the partner for one of their rewards; coins are held until they answer. */
-  request: (itemId: string) =>
-    apiRequest<{ redemption: Redemption; balance: number }>(`/market/items/${itemId}/redeem`, { method: 'POST' }),
+  request: (itemId: string, requestKey: string) =>
+    apiRequest<{ redemption: Redemption; balance: number }>(`/market/items/${itemId}/redeem`, { method: 'POST', body: { requestKey } }),
   history: () => apiRequest<Redemption[]>('/market/redemptions'),
   pending: () => apiRequest<Redemption[]>('/market/redemptions/pending'),
   accept: (id: string) => apiRequest<Redemption>(`/market/redemptions/${id}/accept`, { method: 'POST' }),

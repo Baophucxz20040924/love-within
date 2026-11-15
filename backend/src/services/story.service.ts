@@ -244,16 +244,25 @@ export const storyService = {
    * `sharedPhotos`: internal callers only (never from the request body): also accept photos of these features of the
    * same couple (CP6: the two moment photos).
    */
+  /** Internal callers validate all media before reserving a durable source completion. */
+  async validateCreate(couple: CoupleDoc, userId: string, input: StoryInput): Promise<void> {
+    const content = normalize(couple, input);
+    await validatePhotos(couple, userId, content.photos, new Set());
+    await validateStoryVideos(storyVideoPrefix('couples', couple._id.toString()), content.videos);
+  },
+
   async create(
     couple: CoupleDoc,
     userId: string,
     input: StoryInput,
-    opts: { notify?: boolean; sharedPhotos?: SharedPhotoFeature[] } = {},
+    opts: { notify?: boolean; sharedPhotos?: SharedPhotoFeature[]; reservedId?: Types.ObjectId } = {},
   ): Promise<StoryView> {
     const content = normalize(couple, input);
     await validatePhotos(couple, userId, content.photos, new Set(), opts.sharedPhotos);
     await validateStoryVideos(storyVideoPrefix('couples', couple._id.toString()), content.videos);
-    const story = await storyRepository.create({ ...content, coupleId: couple._id, authorId: new Types.ObjectId(userId) });
+    const story = opts.reservedId
+      ? await storyRepository.createReserved(opts.reservedId, { ...content, coupleId: couple._id, authorId: new Types.ObjectId(userId) })
+      : await storyRepository.create({ ...content, coupleId: couple._id, authorId: new Types.ObjectId(userId) });
     await realtimeAudience.couple(couple._id, ['stories']);
     logger.info('Story created', { coupleId: couple._id.toString(), userId, storyId: story._id.toString(), photos: content.photos.length });
     // Never the post's words or photos on the lock screen.

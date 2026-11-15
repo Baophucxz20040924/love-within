@@ -1,5 +1,6 @@
 import { Schema, model, type Document, type Types } from 'mongoose';
 import { MAX_COMMENT_BODY } from './StoryComment.js';
+import { mentionSchema, type CommentMention } from './FriendStoryComment.js';
 
 /** "Lên kèo" in the friends space (BB5, plan/ENGINEERING_WORKFLOW.md). Limits from the plan. */
 export const MAX_EVENT_TITLE = 100;
@@ -100,7 +101,7 @@ friendEventSchema.index({ status: 1, startAt: 1 });
 
 export const FriendEvent = model<FriendEventDoc>('FriendEvent', friendEventSchema);
 
-/** Discussion under an event: same shape as FriendStoryComment (one level of replies), without mentions. */
+/** Discussion under an event: one level of replies with event-scoped mentions. */
 export interface FriendEventCommentDoc extends Document {
   _id: Types.ObjectId;
   eventId: Types.ObjectId;
@@ -108,6 +109,7 @@ export interface FriendEventCommentDoc extends Document {
   /** Root comment this one answers; null for a root comment. */
   parentId: Types.ObjectId | null;
   body: string;
+  mentions: CommentMention[];
   hiddenByReportsAt: Date | null;
   deletedAt: Date | null;
   createdAt: Date;
@@ -119,6 +121,7 @@ const commentSchema = new Schema<FriendEventCommentDoc>(
     authorId: { type: Schema.Types.ObjectId, ref: 'User', required: true },
     parentId: { type: Schema.Types.ObjectId, ref: 'FriendEventComment', default: null },
     body: { type: String, required: true, maxlength: MAX_COMMENT_BODY },
+    mentions: { type: [mentionSchema], default: [] },
     hiddenByReportsAt: { type: Date, default: null },
     deletedAt: { type: Date, default: null },
   },

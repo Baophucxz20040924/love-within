@@ -8,7 +8,7 @@ import { WALLET_KEY, walletApi } from '../quests/api';
 import { ApiRequestError } from '../../lib/apiClient';
 import { formatNumber, shortName } from '../../lib/format';
 import type { MarketItem } from '../../lib/types';
-import { MARKET_KEY, MARKET_PENDING_KEY, REDEMPTIONS_KEY, marketApi } from './api';
+import { MARKET_KEY, MARKET_PENDING_KEY, REDEMPTIONS_KEY, marketApi, marketRequestKey, clearMarketRequestKey, isRecoveredRedemption } from './api';
 
 function errorText(err: unknown): string {
   if (err instanceof ApiRequestError) {
@@ -51,12 +51,23 @@ export function ItemSheet({ item, onClose, onEdit, onRequested }: Props) {
     await refreshMe();
   };
   const request = useMutation({
-    mutationFn: (id: string) => marketApi.request(id),
-    onSuccess: async (r) => {
-      toast.success(`Đã gửi yêu cầu cho ${partnerName}. Ví còn ${formatNumber(r.balance)} Xu.`);
+    mutationFn: (id: string) => {
+      const scope = `${me?.user.id}:${me?.couple?.id}:${id}`;
+      return marketApi.request(id, marketRequestKey(scope));
+    },
+    onSuccess: async (r, id) => {
+      clearMarketRequestKey(`${me?.user.id}:${me?.couple?.id}:${id}`);
+      if (isRecoveredRedemption(r.redemption.status)) {
+        toast.info('Đã tìm lại yêu cầu trước đã được xử lý. Không tạo yêu cầu mới hoặc trừ thêm Xu. Bạn có thể mở món để đổi lại.');
+      } else {
+        toast.success(`Đã gửi yêu cầu cho ${partnerName}. Ví còn ${formatNumber(r.balance)} Xu.`);
+      }
       onClose();
       await refresh();
       onRequested();
+    },
+    onError: (error, id) => {
+      if (error instanceof ApiRequestError && error.status === 422) clearMarketRequestKey(`${me?.user.id}:${me?.couple?.id}:${id}`);
     },
   });
   const archive = useMutation({
@@ -87,7 +98,7 @@ export function ItemSheet({ item, onClose, onEdit, onRequested }: Props) {
           {item.description && <p className="text-muted">{item.description}</p>}
           <div className="row row--between">
             <span className="coin-chip">🪙 {formatNumber(item.priceCoin)} Xu</span>
-            <span className="text-sm text-muted">Ví chung: {formatNumber(balance)} Xu</span>
+            <span className="text-sm text-muted">Ví Xu của bạn: {formatNumber(balance)} Xu</span>
           </div>
 
           {(request.isError || archive.isError) && <p className="form-feedback" role="alert">{errorText(request.isError ? request.error : archive.error)}</p>}
@@ -114,7 +125,7 @@ export function ItemSheet({ item, onClose, onEdit, onRequested }: Props) {
             <div className="card card--tint-brand stack">
               <p>
                 Gửi yêu cầu đổi <strong>{item.title}</strong>? <strong>{formatNumber(item.priceCoin)} Xu</strong> sẽ được giữ lại cho tới
-                khi {partnerName} nhận lời; nếu từ chối, Xu hoàn về ví.
+                khi {partnerName} nhận lời; nếu từ chối, Xu hoàn về ví của bạn. Xu dùng để đổi quà, không chuyển cho người bán.
               </p>
               <div className="btn-row">
                 <button type="button" className="btn btn-secondary" onClick={() => setConfirming(false)}>

@@ -136,7 +136,8 @@ export const friendEventsApi = {
   remove: (id: string) => apiRequest<{ ok: true }>(`/friends/events/${enc(id)}`, { method: 'DELETE' }),
   comments: (id: string) => apiRequest<FriendCommentThread[]>(`/friends/events/${enc(id)}/comments`),
   addComment: (id: string, input: FriendCommentInput) =>
-    apiRequest<FriendComment>(`/friends/events/${enc(id)}/comments`, { method: 'POST', body: { body: input.body, parentId: input.parentId } }),
+    apiRequest<FriendComment>(`/friends/events/${enc(id)}/comments`, { method: 'POST', body: input }),
+  mentionable: (id: string, q: string) => apiRequest<FriendUser[]>(`/friends/events/${enc(id)}/mentionable?q=${enc(q)}`),
   deleteComment: (id: string, commentId: string) =>
     apiRequest<{ ok: true; removed: number }>(`/friends/events/${enc(id)}/comments/${enc(commentId)}`, { method: 'DELETE' }),
   uploadUrl: (mimeType: string, sizeBytes: number) =>
@@ -174,7 +175,8 @@ export const friendUserFriendsKey = (id: string) => ['friends', 'user-friends', 
 export const FRIEND_BLOCKS_KEY = ['friends', 'blocks'] as const;
 export const FRIEND_INVITES_KEY = ['friends', 'invites'] as const;
 export const FRIEND_SUGGESTIONS_KEY = ['friends', 'suggestions'] as const;
-export const friendMentionableKey = (storyId: string, q: string) => ['friends', 'mentionable', storyId, q] as const;
+export const friendMentionableKey = (id: string, q: string, resource: 'story' | 'event' = 'story') =>
+  ['friends', resource === 'event' ? 'event-mentionable' : 'mentionable', id, q] as const;
 export const pollVotersKey = (storyId: string, optionId: string) => ['friends', 'poll-voters', storyId, optionId] as const;
 export const FRIEND_EVENTS_KEY = ['friends', 'events'] as const;
 export const friendEventsKey = (scope: 'upcoming' | 'past') => [...FRIEND_EVENTS_KEY, scope] as const;

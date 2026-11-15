@@ -106,6 +106,7 @@ const common = {
 };
 const friendService = load('services/friendStory.service.ts', {
   ...common,
+  './mentionSpans.js': load('services/mentionSpans.ts', { '../models/FriendStoryComment.js': { MAX_MENTIONS: 10 }, '../utils/errors.js': errors }),
   '../models/FriendStoryComment.js': { MAX_MENTIONS: 10 },
   '../repositories/friendStory.repository.js': { friendStoryRepository: repo, friendStoryCommentRepository: {} },
   '../repositories/friendship.repository.js': { friendshipRepository: {

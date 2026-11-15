@@ -20,7 +20,10 @@ import { friendBlockRepository } from '../repositories/friendSafety.repository.j
 import { getLocalDate } from '../utils/date.js';
 import { AppError, Errors } from '../utils/errors.js';
 import { logger } from '../utils/logger.js';
-import type { FriendCommentThreadView, FriendCommentView } from './friendStory.service.js';
+import type { FriendCommentThreadView, FriendCommentView, FriendCommentInput } from './friendStory.service.js';
+import { badMention, checkedSpans } from './mentionSpans.js';
+import { searchNameOf } from './friends.service.js';
+import { userRepository } from '../repositories/user.repository.js';
 import { notificationService } from './notification.service.js';
 import { realtimeAudience } from './realtimeAudience.service.js';
 
@@ -339,7 +342,13 @@ function goingOrMaybe(ev: FriendEventDoc, creatorFriends: ReadonlySet<string>): 
   });
 }
 
-function toCommentView(c: FriendEventCommentDoc, userId: string, creatorId: string, profiles: Map<string, PublicProfile>): FriendCommentView {
+/** Event guests need not be friends with one another. Block filtering is viewer-specific. */
+async function mentionAudience(ev: FriendEventDoc, blocked: ReadonlySet<string>): Promise<Set<string>> {
+  const ids = ev.hiddenByReportsAt ? [ev.creatorId] : [ev.creatorId, ...seeingInvitees(ev, await eventFriends(ev))];
+  return new Set(ids.map(id => id.toString()).filter(id => !blocked.has(id)));
+}
+
+function toCommentView(c: FriendEventCommentDoc, userId: string, creatorId: string, profiles: Map<string, PublicProfile>, audience: ReadonlySet<string>): FriendCommentView {
   const authorId = c.authorId.toString();
   return {
     id: c._id.toString(),
@@ -349,8 +358,9 @@ function toCommentView(c: FriendEventCommentDoc, userId: string, creatorId: stri
     body: c.body,
     createdAt: c.createdAt.toISOString(),
     parentId: c.parentId ? c.parentId.toString() : null,
-    // No "@" names in event discussions (v1): same shape as post comments.
-    mentions: [],
+    canMentionAuthor: authorId !== userId && audience.has(authorId) && profiles.has(authorId),
+    mentions: (c.mentions ?? []).filter(m => audience.has(m.userId.toString()) && profiles.has(m.userId.toString()))
+      .map(m => ({ userId: m.userId.toString(), offset: m.offset, length: m.length })),
   };
 }
 
@@ -552,13 +562,14 @@ export const friendEventService = {
     const ev = await requireVisible(me, id);
     const blocked = await friendBlockRepository.blockedIdsFor(me._id);
     const comments = await friendEventCommentRepository.list(ev._id, me._id, toObjectIds(blocked));
-    const profiles = await profileService.load(comments.map((c) => c.authorId));
+    const audience = await mentionAudience(ev, blocked);
+    const profiles = await profileService.load(comments.flatMap(c => [c.authorId, ...(c.mentions ?? []).map(m => m.userId)]), { skipMissing: true });
     const userId = me._id.toString();
     const creator = ev.creatorId.toString();
     const roots: FriendCommentThreadView[] = [];
     const byId = new Map<string, FriendCommentThreadView>();
     for (const c of comments) {
-      const view = toCommentView(c, userId, creator, profiles);
+      const view = toCommentView(c, userId, creator, profiles, audience);
       if (!c.parentId) {
         const thread = { ...view, replies: [] };
         roots.push(thread);
@@ -570,12 +581,33 @@ export const friendEventService = {
     return roots;
   },
 
-  /** A comment or a reply (one level). Tells the creator and the people going (event_comment, one row per event). */
-  async addComment(me: UserDoc, id: string, input: { body: string; parentId?: string }): Promise<FriendCommentView> {
+  /** Bounded, event-scoped picker across all RSVP states, not the writer's friend network. */
+  async mentionable(me: UserDoc, id: string, q: string): Promise<PublicProfile[]> {
+    const ev = await requireVisible(me, id);
+    const audience = await mentionAudience(ev, await friendBlockRepository.blockedIdsFor(me._id));
+    audience.delete(me._id.toString());
+    const pattern = searchNameOf(q).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const people = await userRepository.findMembersByName(toObjectIds(audience), pattern, 10);
+    return Promise.all(people.map(u => profileService.of(u)));
+  },
+
+  /** A comment or a reply. Recipient union is deduplicated by notifyMany. */
+  async addComment(me: UserDoc, id: string, input: FriendCommentInput): Promise<FriendCommentView> {
     const ev = await requireVisible(me, id);
     const text = input.body.trim();
     if (!text) throw Errors.badRequest('Bình luận không được để trống');
     const blocked = await friendBlockRepository.blockedIdsFor(me._id);
+    const audience = await mentionAudience(ev, blocked);
+    const spans = checkedSpans(text, (input.mentions ?? []).map(m => ({ ...m, userId: m.userId.toLowerCase() })));
+    const profiles = await profileService.load([me._id, ...toObjectIds(spans.map(m => m.userId))], { skipMissing: true });
+    for (const m of spans) {
+      const person = profiles.get(m.userId);
+      if (m.userId === me._id.toString() || !audience.has(m.userId) || !person) {
+        throw new AppError(400, 'MENTION_NOT_ALLOWED', 'Không nhắc được tên người này trong kèo này');
+      }
+      if (text.slice(m.offset + 1, m.offset + m.length) !== person.displayName) throw badMention();
+    }
+    const mentions = spans.map(m => ({ ...m, userId: new Types.ObjectId(m.userId) }));
     let root: FriendEventCommentDoc | null = null;
     if (input.parentId) {
       const parent = await friendEventCommentRepository.findById(ev._id, input.parentId);
@@ -583,13 +615,13 @@ export const friendEventService = {
       root = parent.parentId ? await friendEventCommentRepository.findById(ev._id, parent.parentId) : parent;
       if (!root || !commentVisibleTo(me, root, blocked)) throw Errors.notFound('Bình luận bạn trả lời không còn nữa');
     }
-    const comment = await friendEventCommentRepository.create({ eventId: ev._id, authorId: me._id, parentId: root?._id ?? null, body: text });
+    const comment = await friendEventCommentRepository.create({ eventId: ev._id, authorId: me._id, parentId: root?._id ?? null, body: text, mentions });
     await invalidateEvent(ev);
     await friendEventRepository.incCommentCount(ev._id);
     await invalidateEvent(ev);
     const going = seeingInvitees(ev, await eventFriends(ev)).filter((u) => ev.rsvps?.get(u.toString()) === 'going');
-    await notifyMany([ev.creatorId, ...going], 'event_comment', me._id, ev._id);
-    return toCommentView(comment, me._id.toString(), ev.creatorId.toString(), await profileService.load([me._id]));
+    await notifyMany([ev.creatorId, ...going, ...mentions.map(m => m.userId)], 'event_comment', me._id, ev._id);
+    return toCommentView(comment, me._id.toString(), ev.creatorId.toString(), profiles, audience);
   },
 
   /** Comment author or the event creator; a root takes its replies along → removed. */

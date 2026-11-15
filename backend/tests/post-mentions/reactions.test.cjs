@@ -36,7 +36,9 @@ const profile = load('services/profile.service.ts', {
 });
 const service = load('services/friendStory.service.ts', {
   'node:crypto': {}, mongoose: { Types }, '../config/env.js': {}, '../models/FriendStoryComment.js': {},
-  '../models/Story.js': {}, './storyMedia.service.js': {}, '../integrations/index.js': {},
+  '../models/Story.js': {}, './storyMedia.service.js': {}, './mentionSpans.js': load('services/mentionSpans.ts', {
+    mongoose: { Types }, '../models/FriendStoryComment.js': { MAX_MENTIONS: 10 }, '../utils/errors.js': { AppError: Error },
+  }), '../integrations/index.js': {},
   '../repositories/friendship.repository.js': { friendshipRepository: { areFriends: async () => { calls.push(['friends']); return friends; } } },
   '../repositories/friendSafety.repository.js': { friendBlockRepository: {
     isBlockedBetween: async () => { calls.push(['author-block']); return authorBlocked; },

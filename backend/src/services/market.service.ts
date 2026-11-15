@@ -98,16 +98,43 @@ async function requireRedemption(couple: CoupleDoc, id: string): Promise<MarketR
   return r;
 }
 
-/** Return the held coins to the shared wallet (decline / cancel). */
-async function refund(couple: CoupleDoc, actorUserId: string, r: MarketRedemptionDoc): Promise<number> {
-  const { balance } = await walletService.applyCoin({
-    coupleId: couple._id,
-    actorUserId,
-    delta: r.priceCoin,
-    reason: 'market_refund',
-    refId: r._id,
-  });
-  return balance;
+/** Only a new durable refund intent authorizes a refund. Historical terminal rows never do. */
+async function finishRefund(couple: CoupleDoc, r: MarketRedemptionDoc): Promise<MarketRedemptionDoc> {
+  if (r.status !== 'refunding' || !r.refundIntent) return r;
+  await walletService.applyCoin({ coupleId: couple._id, operationId: `market:${r._id}:refund`,
+    actorUserId: r.refundIntent.actorUserId, ownerUserId: r.buyerUserId.toString(),
+    delta: r.priceCoin, reason: 'market_refund', refId: r._id });
+  return (await marketRepository.transition(couple._id, r._id, 'refunding', r.refundIntent.target)) ??
+    await requireRedemption(couple, r._id.toString());
+}
+
+async function finishRequest(couple: CoupleDoc, userId: string, r: MarketRedemptionDoc) {
+  if (r.status === 'reserving') {
+    try {
+      await walletService.applyCoin({ coupleId: couple._id, operationId: `market:${r._id}:debit`,
+        actorUserId: r.buyerUserId.toString(), ownerUserId: r.buyerUserId.toString(),
+        delta: -r.priceCoin, reason: 'market_purchase', refId: r._id });
+    } catch (error) {
+      // Only a durable rejected debit can close the reservation. Unknown outcomes stay recoverable.
+      if ((error as { status?: number }).status === 422) await marketRepository.transition(couple._id, r._id, 'reserving', 'rejected');
+      throw error;
+    }
+    r = (await marketRepository.transition(couple._id, r._id, 'reserving', 'requested')) ?? await requireRedemption(couple, r._id.toString());
+  }
+  if (r.status === 'rejected') throw Errors.unprocessable('Yêu cầu trước không đủ Xu. Hãy tạo yêu cầu mới.');
+  const wallet = await walletService.getView(couple._id, userId);
+  await realtimeAudience.couple(couple._id, ['market', 'wallet']);
+  return { redemption: redemptionView(r, userId, await memberNames(couple)), balance: wallet.coinBalance };
+}
+
+async function recoverUnsettled(couple: CoupleDoc): Promise<void> {
+  for (const row of await marketRepository.listUnsettled(couple._id)) {
+    if (row.status === 'refunding') await finishRefund(couple, row);
+    else {
+      try { await finishRequest(couple, row.buyerUserId.toString(), row); }
+      catch (error) { if ((error as { status?: number }).status !== 422) throw error; }
+    }
+  }
 }
 
 /** The seller answered: tell the buyer (never the response note). */
@@ -172,57 +199,44 @@ export const marketService = {
   },
 
   /**
-   * Partner asks to redeem an item. Coins are held immediately (atomic conditional $inc, so the
-   * couple can never overspend — Requirement 9.5); they come back if the seller declines.
+   * Reserve a stable redemption first, then debit only the buyer's balance through the fenced journal.
+   * Coins are consumed, never paid to the seller; decline/cancel refunds the same buyer.
    */
-  async request(couple: CoupleDoc, userId: string, itemId: string) {
+  async request(couple: CoupleDoc, userId: string, itemId: string, requestKey: string) {
+    if (!/^[a-zA-Z0-9_-]{16,100}$/.test(requestKey ?? '')) throw Errors.badRequest('Hãy tải lại ứng dụng để gửi mã yêu cầu đổi quà');
+    const buyer = new Types.ObjectId(userId);
+    const previous = await marketRepository.findRequest(couple._id, buyer, requestKey);
+    if (previous) {
+      if (String(previous.itemId) !== itemId) throw Errors.conflict('Mã yêu cầu đã dùng cho món khác');
+      return finishRequest(couple, userId, previous);
+    }
+    await marketRepository.assertReservationIndexes();
     const item = await marketRepository.findItem(couple._id, itemId);
     if (!item || item.status !== 'available') throw Errors.notFound('Món hàng không tồn tại');
-    if (item.createdBy.toString() === userId) {
-      throw Errors.forbidden('Đây là món bạn đăng để người ấy đổi — bạn không tự đổi được');
+    if (item.createdBy.toString() === userId) throw Errors.forbidden('Bạn không thể đổi món của chính mình');
+    const open = await marketRepository.findOpenRequest(couple._id, item._id, buyer);
+    if (open) {
+      // A concurrent retry can reserve this same key after the first lookup above.
+      if (open.requestKey === requestKey) return finishRequest(couple, userId, open);
+      throw Errors.conflict('Bạn đã có yêu cầu đang xử lý cho món này');
     }
-    const buyer = new Types.ObjectId(userId);
-    if (await marketRepository.findOpenRequest(couple._id, item._id, buyer)) {
-      throw Errors.conflict('Bạn đã gửi yêu cầu cho món này rồi, chờ người ấy trả lời nhé');
+    let red: MarketRedemptionDoc;
+    try {
+      // Reserve the immutable price, buyer, operation identity BEFORE debit. Unique indexes arbitrate races.
+      red = await marketRepository.createRedemption({ _id: new Types.ObjectId(), requestKey, coupleId: couple._id,
+        itemId: item._id, itemTitle: item.title, itemEmoji: item.emoji,
+        buyerUserId: buyer, sellerUserId: item.createdBy, priceCoin: item.priceCoin });
+    } catch (error) {
+      if ((error as { code?: number }).code !== 11000) throw error;
+      const winner = await marketRepository.findRequest(couple._id, buyer, requestKey);
+      if (!winner || String(winner.itemId) !== itemId) throw Errors.conflict('Bạn đã có yêu cầu đang xử lý cho món này');
+      return finishRequest(couple, userId, winner);
     }
-
-    // Throws 422 with { missing } when the shared wallet is short (Requirement 10.3).
-    const { balance } = await walletService.applyCoin({
-      coupleId: couple._id,
-      actorUserId: userId,
-      delta: -item.priceCoin,
-      reason: 'market_purchase',
-      refId: item._id,
-    });
-
-    const red = await marketRepository.createRedemption({
-      coupleId: couple._id,
-      itemId: item._id,
-      itemTitle: item.title,
-      itemEmoji: item.emoji,
-      buyerUserId: buyer,
-      sellerUserId: item.createdBy,
-      priceCoin: item.priceCoin,
-    });
-    await realtimeAudience.couple(couple._id, ['market']);
-    logger.info('Redemption requested', {
-      coupleId: couple._id.toString(),
-      userId,
-      itemId,
-      redemptionId: red._id.toString(),
-      priceCoin: item.priceCoin,
-      balance,
-    });
-    await notificationService.toPartner(couple, buyer, {
-      type: 'redemption_requested',
-      entityId: red._id,
-      push: {
-        body: (name) => `${name} muốn đổi ${item.emoji} ${item.title} (${numberVi.format(item.priceCoin)} Xu), chờ bạn trả lời`,
-        url: '/approvals',
-        tag: `redemption:${red._id.toString()}`,
-      },
-    });
-    return { redemption: redemptionView(red, userId, await memberNames(couple)), balance };
+    const result = await finishRequest(couple, userId, red);
+    await notificationService.toPartner(couple, buyer, { type: 'redemption_requested', entityId: red._id,
+      push: { body: (name) => `${name} muốn đổi ${item.emoji} ${item.title} (${numberVi.format(item.priceCoin)} Xu), chờ bạn trả lời`,
+        url: '/approvals', tag: `redemption:${red._id}` } });
+    return result;
   },
 
   /** Seller agrees to perform the reward → it moves to the buyer's "waiting to be fulfilled" list. */
@@ -238,20 +252,19 @@ export const marketService = {
     return redemptionView(updated, userId, await memberNames(couple));
   },
 
-  /** Seller declines → coins return to the shared wallet. */
+  /** Seller declines → held coins return only to the buyer's personal wallet. */
   async decline(couple: CoupleDoc, userId: string, id: string, note: string | null): Promise<RedemptionView> {
     const r = await requireRedemption(couple, id);
     if (r.sellerUserId.toString() !== userId) throw Errors.forbidden('Chỉ người đăng món mới trả lời được yêu cầu này');
-    if (r.status !== 'requested') throw Errors.conflict('Yêu cầu này đã được xử lý');
-    const updated = await marketRepository.transition(couple._id, r._id, 'requested', 'declined', {
-      respondedAt: new Date(),
-      responseNote: note?.trim() || null,
+    if (r.status === 'declined') return redemptionView(r, userId, await memberNames(couple));
+    if (r.status !== 'requested' && r.status !== 'refunding') throw Errors.conflict('Yêu cầu này đã được xử lý');
+    const intent = r.status === 'refunding' ? r : await marketRepository.transition(couple._id, r._id, 'requested', 'refunding', {
+      respondedAt: new Date(), responseNote: note?.trim() || null, refundIntent: { target: 'declined', actorUserId: userId },
     });
-    if (!updated) throw Errors.conflict('Yêu cầu này đã được xử lý');
-    await realtimeAudience.couple(couple._id, ['market']);
-    const balance = await refund(couple, userId, updated);
-    logger.info('Redemption declined (refunded)', { coupleId: couple._id.toString(), userId, redemptionId: id, balance });
-    await notifyAnswered(updated, (name) => `${name} chưa đồng ý đổi ${updated.itemEmoji} ${updated.itemTitle}. Xu đã được hoàn lại`);
+    if (!intent || intent.refundIntent?.target !== 'declined') throw Errors.conflict('Yêu cầu này đã được xử lý');
+    const updated = await finishRefund(couple, intent);
+    await realtimeAudience.couple(couple._id, ['market', 'wallet']);
+    await notifyAnswered(updated, (name) => `${name} chưa đồng ý đổi ${updated.itemEmoji} ${updated.itemTitle}. Xu đã hoàn về ví người mua`);
     return redemptionView(updated, userId, await memberNames(couple));
   },
 
@@ -259,12 +272,14 @@ export const marketService = {
   async cancel(couple: CoupleDoc, userId: string, id: string): Promise<RedemptionView> {
     const r = await requireRedemption(couple, id);
     if (r.buyerUserId.toString() !== userId) throw Errors.forbidden('Chỉ người gửi yêu cầu mới rút lại được');
-    if (r.status !== 'requested') throw Errors.conflict('Yêu cầu này đã được xử lý');
-    const updated = await marketRepository.transition(couple._id, r._id, 'requested', 'cancelled', { respondedAt: new Date() });
-    if (!updated) throw Errors.conflict('Yêu cầu này đã được xử lý');
-    await realtimeAudience.couple(couple._id, ['market']);
-    const balance = await refund(couple, userId, updated);
-    logger.info('Redemption cancelled (refunded)', { coupleId: couple._id.toString(), userId, redemptionId: id, balance });
+    if (r.status === 'cancelled') return redemptionView(r, userId, await memberNames(couple));
+    if (r.status !== 'requested' && r.status !== 'refunding') throw Errors.conflict('Yêu cầu này đã được xử lý');
+    const intent = r.status === 'refunding' ? r : await marketRepository.transition(couple._id, r._id, 'requested', 'refunding', {
+      respondedAt: new Date(), refundIntent: { target: 'cancelled', actorUserId: userId },
+    });
+    if (!intent || intent.refundIntent?.target !== 'cancelled') throw Errors.conflict('Yêu cầu này đã được xử lý');
+    const updated = await finishRefund(couple, intent);
+    await realtimeAudience.couple(couple._id, ['market', 'wallet']);
     return redemptionView(updated, userId, await memberNames(couple));
   },
 
@@ -281,14 +296,36 @@ export const marketService = {
   },
 
   async history(couple: CoupleDoc, userId: string): Promise<RedemptionView[]> {
+    await recoverUnsettled(couple);
     const [rows, names] = await Promise.all([marketRepository.listRedemptions(couple._id), memberNames(couple)]);
-    return rows.map((r) => redemptionView(r, userId, names));
+    const visible: RedemptionView[] = [];
+    for (let row of rows) {
+      if (row.status === 'reserving') {
+        try { await finishRequest(couple, row.buyerUserId.toString(), row); }
+        catch (error) { if ((error as { status?: number }).status !== 422) throw error; }
+        row = await requireRedemption(couple, row._id.toString());
+      }
+      if (row.status === 'refunding') row = await finishRefund(couple, row);
+      if (row.status !== 'reserving' && row.status !== 'rejected') visible.push(redemptionView(row, userId, names));
+    }
+    return visible;
   },
 
   /** Open requests (both directions); the client splits "I must answer" vs "waiting on partner". */
   async pending(couple: CoupleDoc, userId: string): Promise<RedemptionView[]> {
+    await recoverUnsettled(couple);
     const [rows, names] = await Promise.all([marketRepository.listByStatus(couple._id, 'requested'), memberNames(couple)]);
-    return rows.map((r) => redemptionView(r, userId, names));
+    const visible: RedemptionView[] = [];
+    for (let row of rows) {
+      if (row.status === 'reserving') {
+        try { await finishRequest(couple, row.buyerUserId.toString(), row); }
+        catch (error) { if ((error as { status?: number }).status !== 422) throw error; }
+        row = await requireRedemption(couple, row._id.toString());
+      }
+      if (row.status === 'refunding') row = await finishRefund(couple, row);
+      if (row.status !== 'reserving' && row.status !== 'rejected') visible.push(redemptionView(row, userId, names));
+    }
+    return visible;
   },
 
   /** Market tab badge: my requests the partner answered + items the partner posted since I last looked. */

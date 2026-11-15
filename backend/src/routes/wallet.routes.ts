@@ -15,7 +15,7 @@ walletRouter.use(requireAuth, requireCouple);
 walletRouter.get(
   '/wallet',
   asyncHandler(async (req, res) => {
-    ok(res, await walletService.getView(req.coupleId!));
+    ok(res, await walletService.getView(req.coupleId!, req.userId!));
   }),
 );
 
@@ -26,6 +26,6 @@ walletRouter.get(
   '/ledger',
   validate({ query: ledgerQuery }),
   asyncHandler(async (req, res) => {
-    ok(res, await walletService.listLedger(req.coupleId!, req.query.type as LedgerType | undefined));
+    ok(res, await walletService.listLedger(req.coupleId!, req.userId!, req.query.type as LedgerType | undefined));
   }),
 );

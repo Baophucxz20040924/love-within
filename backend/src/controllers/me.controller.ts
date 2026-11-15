@@ -14,7 +14,7 @@ export const meController = {
 
     const coupleDoc = user.coupleId ? await coupleRepository.findActiveById(user.coupleId) : null;
     const [couple, wallet] = coupleDoc
-      ? await Promise.all([buildCoupleView(coupleDoc), walletService.getView(coupleDoc._id)])
+      ? await Promise.all([buildCoupleView(coupleDoc), walletService.getView(coupleDoc._id, req.userId!)])
       : [null, null];
 
     ok(res, {

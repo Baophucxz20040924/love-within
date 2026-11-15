@@ -1,5 +1,7 @@
 import { Schema, model, type Document, type Types } from 'mongoose';
 
+import type { RewardIntent } from './WalletOperation.js';
+
 export type QuestType = 'water_goal' | 'checkin' | 'custom_boolean' | 'daily_question' | 'duo_moment';
 export const QUEST_TYPES: readonly QuestType[] = ['water_goal', 'checkin', 'custom_boolean', 'daily_question', 'duo_moment'];
 
@@ -39,6 +41,8 @@ export interface QuestProgressDoc extends Document {
   status: QuestProgressStatus;
   rewardedAt: Date | null;
   rewardedBy: Types.ObjectId | null;
+  rewardIntent: RewardIntent | null;
+  rewardCompletedAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -53,6 +57,8 @@ const progressSchema = new Schema<QuestProgressDoc>(
     status: { type: String, enum: ['in_progress', 'completed', 'rewarded'], default: 'in_progress' },
     rewardedAt: { type: Date, default: null },
     rewardedBy: { type: Schema.Types.ObjectId, ref: 'User', default: null },
+    rewardIntent: { type: Schema.Types.Mixed, default: null },
+    rewardCompletedAt: { type: Date, default: null },
   },
   { timestamps: true },
 );

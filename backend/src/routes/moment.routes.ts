@@ -6,7 +6,7 @@ import { requireCouple } from '../middleware/coupleContext.js';
 import { validate } from '../middleware/validate.js';
 import { momentUploadLimiter, storyCreateLimiter } from '../middleware/rateLimit.js';
 import { MAX_MOMENT_CAPTION } from '../models/DuoMoment.js';
-import { momentService } from '../services/moment.service.js';
+import { momentService, requireMomentTarget } from '../services/moment.service.js';
 import { STORY_IMAGE_TYPES } from '../services/story.service.js';
 import { isRealDate } from '../utils/date.js';
 import { ok } from '../utils/response.js';
@@ -15,12 +15,27 @@ import { ok } from '../utils/response.js';
 export const momentRouter = Router();
 momentRouter.use(requireAuth, requireCouple);
 
+const targetFields = {
+  localDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine(isRealDate),
+  sessionId: z.string().uuid(),
+};
+// Return a helpful reload error for old clients before normal shape validation.
+momentRouter.use((req, _res, next) => {
+  if (req.method === 'POST') {
+    try { requireMomentTarget({ localDate: req.params.localDate ?? req.body?.localDate ?? (req.path.endsWith('/story') ? req.path.split('/')[1] : undefined), sessionId: req.body?.sessionId }); }
+    catch (err) { next(err); return; }
+  }
+  next();
+});
+
 const uploadSchema = z.object({
+  ...targetFields,
   mimeType: z.enum(Object.keys(STORY_IMAGE_TYPES) as [string, ...string[]]),
   sizeBytes: z.number().int().positive(),
 });
 
 const postSchema = z.object({
+  ...targetFields,
   key: z.string().min(1).max(300),
   width: z.number().int().min(1).max(20_000),
   height: z.number().int().min(1).max(20_000),
@@ -47,7 +62,7 @@ momentRouter.post(
   momentUploadLimiter,
   validate({ body: uploadSchema }),
   asyncHandler(async (req, res) => {
-    ok(res, await momentService.createUploadUrl(req.couple!, req.userId!, req.body.mimeType, req.body.sizeBytes), 201);
+    ok(res, await momentService.createUploadUrl(req.couple!, req.userId!, req.body, req.body.mimeType, req.body.sizeBytes), 201);
   }),
 );
 
@@ -69,6 +84,6 @@ momentRouter.get(
 momentRouter.post(
   '/:localDate/story',
   storyCreateLimiter,
-  validate({ params: dayParam }),
-  asyncHandler(async (req, res) => ok(res, await momentService.toStory(req.couple!, req.userId!, req.params.localDate), 201)),
+  validate({ params: dayParam, body: z.object({ sessionId: targetFields.sessionId }) }),
+  asyncHandler(async (req, res) => ok(res, await momentService.toStory(req.couple!, req.userId!, { localDate: req.params.localDate, sessionId: req.body.sessionId }), 201)),
 );

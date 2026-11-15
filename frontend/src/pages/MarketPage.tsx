@@ -69,7 +69,7 @@ export function MarketPage() {
   };
 
   return (
-    <Page title="Chợ" subtitle="Đổi Xu lấy những điều dễ thương" actions={<CoinChip />}>
+    <Page title="Chợ" subtitle="Dùng Xu trong ví của bạn để đổi quà" actions={<CoinChip />}>
       <SegmentedControl
         mode="radio"
         ariaLabel="Chợ"

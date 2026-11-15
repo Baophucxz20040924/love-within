@@ -14,6 +14,8 @@ export interface LedgerEntryDoc extends Document {
   reason: LedgerReason;
   refId: Types.ObjectId | null;
   actorUserId: Types.ObjectId;
+  ownerUserId: Types.ObjectId | null;
+  operationKey?: string;
   createdAt: Date;
 }
 
@@ -26,10 +28,14 @@ const ledgerSchema = new Schema<LedgerEntryDoc>(
     reason: { type: String, enum: LEDGER_REASONS, required: true },
     refId: { type: Schema.Types.ObjectId, default: null },
     actorUserId: { type: Schema.Types.ObjectId, ref: 'User', required: true },
+    ownerUserId: { type: Schema.Types.ObjectId, ref: 'User', default: null },
+    operationKey: { type: String, immutable: true },
   },
   { timestamps: { createdAt: true, updatedAt: false } },
 );
 
+ledgerSchema.index({ operationKey: 1 }, { unique: true, partialFilterExpression: { operationKey: { $type: 'string' } } });
+ledgerSchema.index({ coupleId: 1, ownerUserId: 1, createdAt: -1 });
 ledgerSchema.index({ coupleId: 1, createdAt: -1 });
 ledgerSchema.index({ coupleId: 1, type: 1, createdAt: -1 });
 

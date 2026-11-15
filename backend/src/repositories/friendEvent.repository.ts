@@ -161,7 +161,7 @@ export const friendEventRepository = {
 const notHiddenFor = (viewerId: Types.ObjectId) => ({ $or: [{ hiddenByReportsAt: null }, { authorId: viewerId }] });
 
 export const friendEventCommentRepository = {
-  create(input: { eventId: Types.ObjectId; authorId: Types.ObjectId; parentId: Types.ObjectId | null; body: string }): Promise<FriendEventCommentDoc> {
+  create(input: { eventId: Types.ObjectId; authorId: Types.ObjectId; parentId: Types.ObjectId | null; body: string; mentions?: FriendEventCommentDoc['mentions'] }): Promise<FriendEventCommentDoc> {
     return FriendEventComment.create(input);
   },
 

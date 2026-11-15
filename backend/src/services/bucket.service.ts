@@ -4,6 +4,7 @@ import { BUCKET_IDEAS, BUCKET_IDEAS_BY_ID } from '../config/bucketIdeas.js';
 import { ECONOMY } from '../config/economy.js';
 import type { CoupleDoc } from '../models/Couple.js';
 import {
+  BucketItem,
   BUCKET_CATEGORIES,
   BUCKET_CATEGORY_INFO,
   type BucketCategory,
@@ -16,6 +17,7 @@ import { storyRepository } from '../repositories/story.repository.js';
 import { notificationService } from './notification.service.js';
 import { storyService, type StoryView } from './story.service.js';
 import { walletService } from './wallet.service.js';
+import { finishBucketCompletion } from './bucketCompletion.service.js';
 import { addDays, formatDayVi, getLocalDate } from '../utils/date.js';
 import { AppError, Errors } from '../utils/errors.js';
 import { logger } from '../utils/logger.js';
@@ -126,7 +128,7 @@ function viewOf(couple: CoupleDoc, it: BucketItemDoc, storyAlive: boolean): Buck
     doneAt: it.doneAt ? it.doneAt.toISOString() : null,
     doneNote: it.doneNote ?? '',
     storyId: it.storyId && storyAlive ? it.storyId.toString() : null,
-    rewarded: it.rewardedAt !== null && it.rewardedAt !== undefined,
+    rewarded: it.rewardIntent ? Boolean(it.rewardCompletedAt) : Boolean(it.rewardedAt),
     reopenUntil: reopenUntil && reopenUntil.getTime() > Date.now() ? reopenUntil.toISOString() : null,
     doneOnMin: doneOnMinOf(couple, it),
     createdBy: it.createdBy.toString(),
@@ -168,6 +170,9 @@ function storyBody(item: BucketItemDoc, feeling: string): string {
 export const bucketService = {
   async list(couple: CoupleDoc, status: BucketStatus): Promise<BucketList> {
     const [docs, counts] = await Promise.all([bucketRepository.list(couple._id, status), bucketRepository.counts(couple._id)]);
+    for (const doc of docs) {
+      if (doc.completion?.ready === false || (doc.rewardIntent && !doc.rewardCompletedAt)) await tryReward(couple, doc.rewardIntent?.actorUserId ?? doc.doneBy!.toString(), doc);
+    }
     return { status, items: await viewsOf(couple, docs), counts };
   },
 
@@ -250,12 +255,17 @@ export const bucketService = {
 
   /**
    * "Đã làm xong 🎉": mark it done (one request wins), post the story of the person who tapped (optional, with the photos),
-   * then try the reward. If the story cannot be posted (e.g. a photo did not finish uploading), the item goes back to todo.
+   * Freeze reward and optional story intent in that same write. An unknown story outcome stays gated for recovery.
    */
   async complete(couple: CoupleDoc, userId: string, id: string, input: CompleteInput): Promise<CompleteResult> {
     const item = await bucketRepository.findById(couple._id, id);
     if (!item) throw notFound();
-    if (item.status === 'done') throw new AppError(409, 'BUCKET_ALREADY_DONE', 'Mục này đã được đánh dấu làm xong rồi');
+    if (item.status === 'done') {
+      if (!item.rewardIntent && !item.completion) throw new AppError(409, 'BUCKET_ALREADY_DONE', 'Mục này đã được đánh dấu làm xong rồi');
+      const { reward, skipped } = await tryReward(couple, userId, item);
+      return { item: await oneView(couple, item), story: null, reward,
+        rewardSkipped: skipped ? { reason: skipped, message: SKIP_MESSAGES[skipped] } : null };
+    }
 
     const today = todayOf(couple);
     const doneOn = input.doneOn ?? today;
@@ -267,7 +277,14 @@ export const bucketService = {
 
     const uid = new Types.ObjectId(userId);
     const now = new Date();
-    let done = await bucketRepository.markDone(couple._id, item._id, { doneOn, doneBy: uid, doneAt: now, doneNote: feeling });
+    const storyInput = { body: storyBody(item, feeling), mood: null, happenedOn: doneOn, photos: input.photos };
+    if (input.postStory) await storyService.validateCreate(couple, userId, storyInput);
+    const eligible = !item.rewardedAt && !item.rewardIntent && !item.rewardDenied && item.createdAt.getTime() <= now.getTime() - ECONOMY.bucket.minAgeHours * 3_600_000;
+    const rewardIntent = eligible ? { operationId: `bucket:${item._id}`, actorUserId: userId, ownerUserId: null,
+      coin: ECONOMY.bucket.coin, exp: ECONOMY.bucket.exp, localDate: getLocalDate(now, couple.timezone) } : null;
+    const completion = { version: 1 as const, ready: !input.postStory,
+      story: input.postStory ? { id: new Types.ObjectId().toString(), actorUserId: userId, body: storyInput.body, happenedOn: doneOn, photos: input.photos } : null };
+    const done = await bucketRepository.markDone(couple._id, item._id, { doneOn, doneBy: uid, doneAt: now, doneNote: feeling, completion }, rewardIntent);
     if (!done) {
       // The partner completed or deleted it a moment ago.
       if (!(await bucketRepository.findById(couple._id, item._id))) throw notFound();
@@ -276,19 +293,11 @@ export const bucketService = {
 
     await realtimeAudience.couple(couple._id, ['bucket']);
     let story: StoryView | null = null;
-    if (input.postStory) {
-      try {
-        story = await storyService.create(couple, userId, { body: storyBody(done, feeling), mood: null, happenedOn: doneOn, photos: input.photos }, { notify: false });
-      } catch (err) {
-        await bucketRepository.revertDone(couple._id, item._id, now);
-        await realtimeAudience.couple(couple._id, ['bucket']);
-        throw err;
-      }
-      done = (await bucketRepository.setStory(couple._id, item._id, now, new Types.ObjectId(story.id))) ?? done;
-      await realtimeAudience.couple(couple._id, ['bucket']);
+    const { reward, skipped } = await tryReward(couple, userId, done);
+    if (done.storyId) {
+      try { story = await storyService.get(couple, userId, done.storyId.toString()); }
+      catch { /* A deleted memory remains a durable completion; never recreate it. */ }
     }
-
-    const { reward, skipped } = await tryReward(couple, userId, done, now);
     logger.info('Bucket item done', {
       coupleId: couple._id.toString(),
       userId,
@@ -323,6 +332,7 @@ export const bucketService = {
     const item = await bucketRepository.findById(couple._id, id);
     if (!item) throw notFound();
     if (item.status !== 'done') throw new AppError(409, 'BUCKET_NOT_DONE', 'Mục này vẫn đang ở "Chưa làm"');
+    if (item.completion?.ready === false) throw Errors.conflict('Kỷ niệm đang được hoàn tất. Hãy thử lại trước khi mở lại mục này.');
     const doc = await bucketRepository.reopen(couple._id, item._id, new Date(Date.now() - REOPEN_WINDOW_MS), new Types.ObjectId(userId));
     if (!doc) {
       const current = await bucketRepository.findById(couple._id, item._id);
@@ -337,43 +347,37 @@ export const bucketService = {
 };
 
 /**
- * Reward guard, in this order: (1) the item's rewardedAt goes null → now (atomic, only for an item old enough); (2) one of
- * the day's slots is taken (atomic counter); if none is left, (1) is given back. Only then the wallet is paid.
+ * Persist the immutable reward intent with the claim, then reserve an idempotent daily slot before payment.
+ * Neither claim nor slot is reset after an unknown outcome; retries resume the original operation.
  */
 async function tryReward(
   couple: CoupleDoc,
   userId: string,
   item: BucketItemDoc,
-  doneAt: Date,
 ): Promise<{ reward: CompleteResult['reward']; skipped: RewardSkipReason | null }> {
   const cfg = ECONOMY.bucket;
-  if (item.rewardedAt) return { reward: null, skipped: 'already_rewarded' };
-  const now = new Date();
-  const createdBefore = new Date(now.getTime() - cfg.minAgeHours * 3_600_000);
-  if (item.createdAt.getTime() > createdBefore.getTime()) return { reward: null, skipped: 'too_new' };
-
-  const claimed = await bucketRepository.claimReward(couple._id, item._id, doneAt, createdBefore, now);
-  if (!claimed) return { reward: null, skipped: 'already_rewarded' };
-  const day = getLocalDate(now, couple.timezone);
-  if (!(await bucketRewardDayRepository.take(couple._id, day, cfg.maxRewardsPerDay))) {
-    await bucketRepository.releaseReward(couple._id, item._id, now);
+  try { if (!(await finishBucketCompletion(couple, item))) return { reward: null, skipped: 'failed' }; }
+  catch { return { reward: null, skipped: 'failed' }; }
+  if (item.completion && !item.rewardIntent) return { reward: null, skipped: item.rewardedAt ? 'already_rewarded' : 'too_new' };
+  if (item.rewardDenied) return { reward: null, skipped: 'daily_limit' };
+  if (item.rewardedAt && !item.rewardIntent) return { reward: null, skipped: 'already_rewarded' };
+  // Eligibility and amounts were frozen with the completion; no historical done flag can invent a payment.
+  if (!item.rewardIntent) return { reward: null, skipped: 'already_rewarded' };
+  const saved = item.rewardIntent;
+  // Reserve a slot idempotently. Never give it or the source claim back after an unknown outcome.
+  if (!(await bucketRewardDayRepository.take(couple._id, saved.localDate!, cfg.maxRewardsPerDay, saved.operationId))) {
+    await BucketItem.updateOne({ _id: item._id, rewardCompletedAt: null }, { $set: { rewardDenied: true } }).exec();
+    item.rewardDenied = true;
     return { reward: null, skipped: 'daily_limit' };
   }
-  item.rewardedAt = now;
   try {
-    const paid = await walletService.reward({
-      coupleId: couple._id,
-      actorUserId: userId,
-      reason: 'bucket_list',
-      refId: item._id,
-      coin: cfg.coin,
-      exp: cfg.exp,
-    });
-    return { reward: { coin: cfg.coin, exp: cfg.exp, leveledUp: paid.leveledUp ?? false }, skipped: null };
+    const paid = await walletService.reward({ ...saved, coupleId: couple._id, reason: 'bucket_list', refId: item._id });
+    const completedAt = new Date();
+    await BucketItem.updateOne({ _id: item._id, rewardCompletedAt: null }, { $set: { rewardCompletedAt: completedAt } }).exec();
+    item.rewardCompletedAt = completedAt;
+    return { reward: { coin: saved.coin, exp: saved.exp, leveledUp: paid.leveledUp ?? false }, skipped: null };
   } catch (err) {
-    logger.error('Bucket reward failed', { coupleId: couple._id.toString(), userId, itemId: item._id.toString(), message: (err as Error).message });
-    await Promise.all([bucketRepository.releaseReward(couple._id, item._id, now), bucketRewardDayRepository.give(couple._id, day)]);
-    item.rewardedAt = null;
+    logger.error('Bucket reward pending recovery', { coupleId: couple._id.toString(), userId, itemId: item._id.toString(), message: (err as Error).message });
     return { reward: null, skipped: 'failed' };
   }
 }

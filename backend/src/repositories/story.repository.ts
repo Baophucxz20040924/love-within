@@ -1,4 +1,11 @@
 import { Types } from 'mongoose';
+import { createHash } from 'node:crypto';
+
+export function storyCreationFingerprint(input: StoryContent & { coupleId: Types.ObjectId; authorId: Types.ObjectId }): string {
+  return createHash('sha256').update(JSON.stringify({ coupleId: String(input.coupleId), authorId: String(input.authorId),
+    body: input.body, mood: input.mood, happenedOn: input.happenedOn,
+    photos: input.photos.map(p => ({ key: p.key, width: p.width, height: p.height })), videos: input.videos ?? [] })).digest('hex');
+}
 import { Story, type Mood, type ReactionType, type StoryDoc, type StoryPhoto, type StoryVideo } from '../models/Story.js';
 import { StoryComment, type StoryCommentDoc } from '../models/StoryComment.js';
 
@@ -17,6 +24,20 @@ const alive = { deletedAt: null };
 export const storyRepository = {
   create(input: StoryContent & { coupleId: Types.ObjectId; authorId: Types.ObjectId }): Promise<StoryDoc> {
     return Story.create(input);
+  },
+
+  async createReserved(id: Types.ObjectId, input: StoryContent & { coupleId: Types.ObjectId; authorId: Types.ObjectId }): Promise<StoryDoc> {
+    const creationFingerprint = storyCreationFingerprint(input);
+    try { return await Story.create({ ...input, _id: id, creationFingerprint }); }
+    catch (error) {
+      if ((error as { code?: number }).code !== 11000) throw error;
+      return Story.findOne({ _id: id, coupleId: input.coupleId, authorId: input.authorId, creationFingerprint }).orFail().exec();
+    }
+  },
+
+  /** Includes soft-deleted posts: a completed source must never recreate a deleted memory. */
+  findReserved(coupleId: Types.ObjectId, id: string, authorId: Types.ObjectId): Promise<StoryDoc | null> {
+    return Story.findOne({ _id: id, coupleId, authorId }).exec();
   },
 
   findById(coupleId: Types.ObjectId, id: string): Promise<StoryDoc | null> {

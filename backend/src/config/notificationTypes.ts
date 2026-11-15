@@ -66,10 +66,9 @@ export const COUPLE_PUSH_RULES: Record<CoupleNotificationType, PushRule<CouplePu
   nudge: { group: 'nudges', urgent: true, timed: true },
   // CP3: an item of the bucket list was marked done (replaces the "new post" push of its story). New items do not push.
   bucket_done: { group: 'stories' },
-  // CP6 "Khoảnh khắc đôi": the day's prompt to both (job duo-moment.prompt, no actor). Only worth it within minutes:
-  // TTL 4 h like a reminder, and urgency high so a sleeping phone shows it inside the 10-minute "on time" window.
+  // Daily invitations carry expiresAt; push delivery is capped by the remaining 30-minute reward window.
   moment_prompt: { group: 'moments', timed: true, urgent: true },
-  // The partner posted: "Tới lượt bạn!" (or "Xem ảnh của hai bạn" when I had posted first). Same day only.
+  // Invite the partner only within the same session; completion notifications invite viewing instead.
   moment_posted: { group: 'moments', timed: true },
   moment_both: { group: 'moments', timed: true },
 };

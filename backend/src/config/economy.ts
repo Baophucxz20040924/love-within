@@ -15,9 +15,11 @@ export const ECONOMY = {
     daily_checkin: { coin: 10, exp: 5 },
     // Both members answer today's question on the day (CP1). Late answers give nothing.
     daily_question: { coin: 10, exp: 10 },
-    // Both members post today's duo moment (CP6), on time or late, until 23:59.
-    duo_moment: { coin: 10, exp: 5 },
+    // Both members post within the daily 30-minute reward window; split between personal wallets.
+    duo_moment: { coin: 40, exp: 5 },
   } as Record<string, { coin: number; exp: number }>,
+  // Existing flat/v2 days retain their original reward; stored intents always take precedence.
+  legacyDuoMoment: { coin: 10, exp: 5 },
   /**
    * Bucket list (CP3, owner decision 10/11/2026): reward per item, once ever. The item must have been created at least
    * `minAgeHours` before it is marked done, and at most `maxRewardsPerDay` items are rewarded per couple-timezone day.

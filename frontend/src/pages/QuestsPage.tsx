@@ -34,7 +34,7 @@ function StatusChip({ status }: { status: Quest['status'] }) {
 function RewardChips({ q }: { q: Quest }) {
   return (
     <div className="quest-card__rewards">
-      <span className="chip">🪙 +{q.coinReward} Xu</span>
+      <span className="chip">🪙 {q.coinReward} Xu tổng · chia đều</span>
       <span className="chip">✨ +{q.expReward} EXP</span>
     </div>
   );
@@ -47,7 +47,7 @@ function useClaim() {
   return useMutation({
     mutationFn: questsApi.claim,
     onSuccess: async (q) => {
-      toast.success(`Nhận thưởng: +${q.coinReward} Xu, +${q.expReward} EXP 🎉`);
+      toast.success(`Thưởng chung: ${q.coinReward} Xu chia đều hai ví, +${q.expReward} EXP chung 🎉`);
       await Promise.all([qc.invalidateQueries({ queryKey: QUESTS_KEY }), qc.invalidateQueries({ queryKey: WALLET_KEY })]);
       await refreshMe();
     },

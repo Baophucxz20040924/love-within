@@ -88,7 +88,7 @@ function Ledger() {
         <div key={e.id} className="list__item">
           <div className="list__body">
             <p className="list__label">{REASON[e.reason] ?? e.reason}</p>
-            <p className="list__meta">{timeAgo(e.createdAt)}</p>
+            <p className="list__meta">{e.scope === 'legacy_shared' ? 'Ví chung trước chuyển đổi' : e.scope === 'shared_exp' ? 'EXP chung' : 'Ví Xu của bạn'} · {timeAgo(e.createdAt)}</p>
           </div>
           <span className={`strong num${e.delta < 0 ? ' text-danger' : ''}`}>
             {e.delta > 0 ? '+' : '−'}

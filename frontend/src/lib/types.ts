@@ -80,6 +80,7 @@ export interface Proposal {
 // ── Wallet / ledger ──────────────────────────────────────
 
 export interface WalletView {
+  ownerUserId: string;
   coinBalance: number;
   exp: number;
   level: number;
@@ -95,6 +96,8 @@ export interface LedgerEntry {
   reason: 'checkin' | 'quest' | 'market_purchase' | 'market_refund' | 'bucket_list' | 'admin';
   refId: string | null;
   actorUserId: string;
+  ownerUserId: string | null;
+  scope: 'personal' | 'shared_exp' | 'legacy_shared';
   createdAt: string;
 }
 
@@ -204,7 +207,7 @@ export interface MarketItem {
 }
 
 /** requested → accepted → fulfilled · declined / cancelled refund the held coins. */
-export type RedemptionStatus = 'requested' | 'accepted' | 'fulfilled' | 'declined' | 'cancelled';
+export type RedemptionStatus = 'requested' | 'accepted' | 'fulfilled' | 'refunding' | 'declined' | 'cancelled';
 
 export interface Redemption {
   id: string;
@@ -512,10 +515,16 @@ export interface SavingsSuggestion {
 /** waiting (before the prompt, time unknown) · open (I can post) · posted (me, not the partner) · both · missed (day over, I did not post). */
 export type MomentState = 'waiting' | 'open' | 'posted' | 'both' | 'missed';
 
+export interface MomentTarget { localDate: string; sessionId: string }
 export interface PulseMoment {
+  localDate: string;
+  sessionId: string | null;
   state: MomentState;
-  /** Prompt + 10 minutes ("đúng giờ" until then); null before the prompt. */
+  scheduleVersion: number;
+  /** Compatibility field; use the explicit reward/capture deadlines below. */
   windowEndsAt: string | null;
+  rewardEndsAt: string | null;
+  closesAt: string | null;
   partnerPosted: boolean;
 }
 
@@ -525,22 +534,32 @@ export interface MomentPhoto {
   height: number;
   caption: string;
   postedAt: string;
-  /** 0 = on time. */
+  /** Display-only lateness; v3 reward eligibility compares postedAt with rewardEndsAt. */
   lateMin: number;
 }
 
-export interface MomentDay {
-  localDate: string;
+export interface MomentSession extends MomentTarget {
+  legacy: boolean;
+  scheduleVersion: number;
   state: MomentState;
-  promptAt: string | null;
-  windowEndsAt: string | null;
-  /** Posting closes here (00:00 of the next day). */
+  promptAt: string;
+  windowEndsAt: string;
+  /** v3: prompt + 30 minutes; passing this deadline does not close capture. */
+  rewardEndsAt: string;
+  /** v3: next local midnight. */
   closesAt: string;
   closed: boolean;
   mine: MomentPhoto | null;
-  /** `photo` only once I have posted that day (server rule). */
+  /** Photo/caption only once I have posted in THIS session. */
   partner: { posted: boolean; postedAt: string | null; photo: MomentPhoto | null };
   storyId: string | null;
+}
+export interface MomentDay {
+  localDate: string;
+  legacy: boolean;
+  scheduleVersion: number;
+  /** Only started sessions; no future times or IDs. */
+  sessions: MomentSession[];
 }
 
 export interface MomentMonth {
@@ -756,6 +775,8 @@ export interface MentionSpan {
 
 export interface FriendComment {
   id: string;
+  /** Event-scoped eligibility for reply-prefill; omitted by story comments. */
+  canMentionAuthor?: boolean;
   author: FriendUser;
   isMine: boolean;
   /** My comment, or any comment on my post. */

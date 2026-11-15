@@ -1,5 +1,6 @@
 import { realtimeAudience } from './realtimeAudience.service.js';
 import { Types } from 'mongoose';
+import { Checkin, type CheckinDoc } from '../models/Checkin.js';
 import { ECONOMY } from '../config/economy.js';
 import type { CoupleDoc } from '../models/Couple.js';
 import { checkinRepository } from '../repositories/checkin.repository.js';
@@ -30,12 +31,23 @@ function isDuplicateKey(err: unknown): boolean {
   return typeof err === 'object' && err !== null && (err as { code?: number }).code === 11000;
 }
 
+async function finishReward(couple: CoupleDoc, doc: CheckinDoc): Promise<CheckinView> {
+  // Historical rows are not evidence that an old partial payment is safe to replay.
+  if (!doc.rewardIntent) throw Errors.conflict('Bạn đã điểm danh hôm nay');
+  const reward = await walletService.reward({ ...doc.rewardIntent, coupleId: couple._id, reason: 'checkin', refId: doc._id });
+  await Checkin.updateOne({ _id: doc._id, rewardCompletedAt: null }, { $set: { rewardCompletedAt: new Date() } }).exec();
+  await questService.refresh(couple, 'daily_checkin', doc.localDate);
+  return { localDate: doc.localDate, streak: doc.streak, coinAwarded: doc.coinAwarded, expAwarded: doc.expAwarded,
+    balance: reward.coin, level: reward.level, leveledUp: reward.leveledUp ?? false };
+}
+
 export const checkinService = {
   async status(couple: CoupleDoc, userId: string): Promise<CheckinStatus> {
     const localDate = getLocalDate(new Date(), couple.timezone);
     const uid = new Types.ObjectId(userId);
     const rows = await checkinRepository.findForCoupleDate(couple._id, localDate);
     const mine = rows.find((r) => r.userId.equals(uid));
+    if (mine?.rewardIntent && !mine.rewardCompletedAt) await finishReward(couple, mine);
     const latest = mine ?? (await checkinRepository.findLatest(couple._id, uid));
     const streak = latest && (latest.localDate === localDate || latest.localDate === addDays(localDate, -1)) ? latest.streak : 0;
     return {
@@ -51,7 +63,7 @@ export const checkinService = {
     const uid = new Types.ObjectId(userId);
 
     const existing = await checkinRepository.findByDate(couple._id, uid, localDate);
-    if (existing) throw Errors.conflict('Bạn đã điểm danh hôm nay');
+    if (existing) return finishReward(couple, existing);
 
     const latest = await checkinRepository.findLatest(couple._id, uid);
     const streak = latest && latest.localDate === addDays(localDate, -1) ? latest.streak + 1 : 1;
@@ -63,26 +75,19 @@ export const checkinService = {
 
     let doc;
     try {
-      doc = await checkinRepository.create({ coupleId: couple._id, userId: uid, localDate, streak, coinAwarded: coin, expAwarded: exp });
+      doc = await checkinRepository.create({ coupleId: couple._id, userId: uid, localDate, streak, coinAwarded: coin, expAwarded: exp,
+        rewardIntent: { operationId: `checkin:${userId}:${localDate}`, actorUserId: userId, ownerUserId: userId, coin, exp } });
     } catch (err) {
       // Unique index guards against double-award under concurrent taps.
-      if (isDuplicateKey(err)) throw Errors.conflict('Bạn đã điểm danh hôm nay');
+      if (isDuplicateKey(err)) {
+        const winner = await checkinRepository.findByDate(couple._id, uid, localDate);
+        if (winner) return finishReward(couple, winner);
+      }
       throw err;
     }
 
     await realtimeAudience.couple(couple._id, ['quests', 'couple']);
-    const reward = await walletService.reward({ coupleId: couple._id, actorUserId: userId, reason: 'checkin', refId: doc._id, coin, exp });
-    await questService.refresh(couple, 'daily_checkin', localDate);
-
     logger.info('Check-in recorded', { coupleId: couple._id.toString(), userId, localDate, streak, coin, exp });
-    return {
-      localDate,
-      streak,
-      coinAwarded: coin,
-      expAwarded: exp,
-      balance: reward.coin,
-      level: reward.level,
-      leveledUp: reward.leveledUp ?? false,
-    };
+    return finishReward(couple, doc);
   },
 };

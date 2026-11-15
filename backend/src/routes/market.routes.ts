@@ -52,8 +52,8 @@ marketRouter.delete(
 /** POST /api/market/items/:id/redeem — partner requests the reward; coins are held until the seller answers. */
 marketRouter.post(
   '/items/:id/redeem',
-  validate({ params: idParam }),
-  asyncHandler(async (req, res) => ok(res, await marketService.request(req.couple!, req.userId!, req.params.id), 201)),
+  validate({ params: idParam, body: z.object({ requestKey: z.string().regex(/^[a-zA-Z0-9_-]{16,100}$/) }) }),
+  asyncHandler(async (req, res) => ok(res, await marketService.request(req.couple!, req.userId!, req.params.id, req.body.requestKey), 201)),
 );
 
 // ── Redemptions ────────────────────────────────────────────

@@ -22,6 +22,8 @@ export interface PushContent {
   url: string;
   /** Same tag = the new notification replaces the older one on the device (e.g. `story:<id>`). */
   tag?: string;
+  /** Absolute ISO cutoff for time-sensitive capture invitations. */
+  expiresAt?: string;
 }
 
 export interface PushJob {
@@ -46,6 +48,7 @@ export interface PushPayload {
   tag?: string;
   /** App icon badge count (setAppBadge). No type sends it yet. */
   badge?: number;
+  expiresAt?: string;
 }
 
 export interface PushSettingsView {
@@ -192,7 +195,7 @@ async function buildPayload(job: PushJob, preview: boolean): Promise<PushPayload
     // One collapsed "Bạn có thông báo mới" per space. Friends: the list page, so nothing about the event is in the payload.
     return job.space === 'friends'
       ? { title: APP_NAME, body: HIDDEN_BODY, url: '/friends/notifications', tag: 'friends' }
-      : { title: APP_NAME, body: HIDDEN_BODY, url: safePath(job.content.url, job.space), tag: 'couple' };
+      : { title: APP_NAME, body: HIDDEN_BODY, url: safePath(job.content.url, job.space), tag: job.content.expiresAt ? job.content.tag?.slice(0, 100) : 'couple' };
   }
   const raw = job.content.body;
   const body = typeof raw === 'function' ? raw(job.actorId ? await actorName(job.actorId, job.space) : '') : raw;
@@ -205,7 +208,17 @@ interface SendStats {
   failed: number;
 }
 
-async function sendOne(sub: PushSubscriptionRow, payload: string, opts: PushSendOptions, ctx: { userId: string; type: string }, stats: SendStats): Promise<void> {
+/** Recomputed at dequeue AND immediately before every device send (including later batches). */
+export function pushTtl(expiresAt: string | undefined, defaultTtl: number, now = Date.now()): number | null {
+  if (expiresAt === undefined) return defaultTtl;
+  const end = Date.parse(expiresAt);
+  if (!Number.isFinite(end) || end <= now) return null;
+  return Math.max(0, Math.floor((end - now) / 1000));
+}
+async function sendOne(sub: PushSubscriptionRow, payload: string, opts: PushSendOptions, ctx: { userId: string; type: string }, stats: SendStats, expiresAt?: string): Promise<void> {
+  const ttlSec = pushTtl(expiresAt, opts.ttlSec);
+  if (ttlSec === null) return;
+  opts = { ...opts, ttlSec };
   const result = await getPush().send({ endpoint: sub.endpoint, keys: sub.keys }, payload, opts);
   if (result.status === 'ok') {
     stats.ok += 1;
@@ -239,13 +252,14 @@ async function sendToAll(subs: PushSubscriptionRow[], payload: PushPayload, opts
   const json = encode(payload);
   const stats: SendStats = { ok: 0, gone: 0, failed: 0 };
   for (let i = 0; i < subs.length; i += PER_USER_PARALLEL) {
-    await Promise.all(subs.slice(i, i + PER_USER_PARALLEL).map((s) => sendOne(s, json, opts, ctx, stats)));
+    await Promise.all(subs.slice(i, i + PER_USER_PARALLEL).map((s) => sendOne(s, json, opts, ctx, stats, payload.expiresAt)));
   }
   return stats;
 }
 
 /** One event to one user: devices of that space, settings group, quiet hours, preview, then send. */
 async function deliver(job: PushJob): Promise<void> {
+  if (pushTtl(job.content.expiresAt, TTL_DEFAULT_SEC) === null) return;
   const subs = await pushSubscriptionRepository.listFor(job.userId, job.space);
   if (subs.length === 0) return;
   const profile = await userRepository.findPushProfile(job.userId);
@@ -262,6 +276,7 @@ async function deliver(job: PushJob): Promise<void> {
     return;
   }
   const payload = await buildPayload(job, own.preview === true);
+  payload.expiresAt = job.content.expiresAt;
   const stats = await sendToAll(subs, payload, { ttlSec: job.timed ? TTL_TIMED_SEC : TTL_DEFAULT_SEC, urgency: job.urgent ? 'high' : 'normal' }, ctx);
   logger.debug('Push sent', { ...ctx, devices: subs.length, ...stats });
 }

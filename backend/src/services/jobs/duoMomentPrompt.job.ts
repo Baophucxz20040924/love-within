@@ -1,6 +1,5 @@
 import { realtimeAudience } from '../realtimeAudience.service.js';
 import type { Types } from 'mongoose';
-import { MOMENT_NOTIFY_MAX_LATE_MIN } from '../../models/DuoMoment.js';
 import { coupleRepository } from '../../repositories/couple.repository.js';
 import { momentRepository, type NewMomentDay } from '../../repositories/moment.repository.js';
 import { addDays, getLocalDate } from '../../utils/date.js';
@@ -9,24 +8,15 @@ import { newMomentDay } from '../moment.service.js';
 import { notificationService } from '../notification.service.js';
 import type { SchedulerJob } from '../scheduler.service.js';
 
-// Job duo-moment.prompt (plan/ENGINEERING_WORKFLOW.md CP6, plan/OPERATIONS.md N2), every minute:
-// 1. Create today's moment (couple timezone) for every active couple that has none yet, with a random prompt time in
-//    09:00–21:00 (moment.service.ts newMomentDay; crypto RNG). Upserts on the unique (coupleId, localDate) index, so a
-//    second run, or a member opening the app at the same moment (lazy "today"), never makes a second moment or a second
-//    time. In practice only the first run after midnight of each timezone creates anything.
-// 2. Announce prompts whose time has come, at most 30 minutes late: notifiedAt null → now (pattern a in
-//    scheduler.service.ts), then push both members who have not posted yet. A prompt more than 30 minutes old (server
-//    down) is never announced: the Home card still shows the open moment.
-
+// Every minute: persist missing daily schedules, then claim only prompts still within their reward window.
 const COUPLES_PER_PAGE = 200;
 /** Safety bound: 100 pages = 20 000 couples per run; more are created by the next runs. */
 const MAX_PAGES = 100;
 /** Prompts announced per run; more wait for the next minute. */
 const NOTIFY_BATCH = 200;
-const MAX_LATE_MS = MOMENT_NOTIFY_MAX_LATE_MIN * 60_000;
 
 /** Lock-screen text of the prompt (plan wording). */
-export const PROMPT_BODY = '📸 Đến giờ Khoảnh khắc! Chụp trong 10 phút để đúng giờ';
+export const PROMPT_BODY = 'Khoảnh khắc hôm nay đã mở. Cả hai chụp trước hạn thưởng để cùng nhận 40 Xu!';
 
 async function createMissingDays(now: Date): Promise<number> {
   let after: Types.ObjectId | null = null;
@@ -51,25 +41,26 @@ async function announceDue(now: Date): Promise<number> {
   // Every timezone's "today" lies within a day of the UTC date.
   const utcToday = getLocalDate(now, 'UTC');
   const days = [addDays(utcToday, -1), utcToday, addDays(utcToday, 1)];
-  const ids = await momentRepository.listDueToNotify(days, now, MAX_LATE_MS, NOTIFY_BATCH);
+  const ids = await momentRepository.listDueToNotify(days, now, NOTIFY_BATCH);
   let sent = 0;
-  for (const id of ids) {
-    const m = await momentRepository.markNotified(id, now, MAX_LATE_MS);
+  for (const { id, sessionId } of ids) {
+    const m = await momentRepository.markNotified(id, sessionId);
     // null: another run took it a moment ago.
     if (!m) continue;
     await realtimeAudience.couple(m.coupleId, ['moments']);
     const couple = await coupleRepository.findById(m.coupleId);
     if (!couple || couple.status !== 'active') continue;
-    const posted = new Set(m.posts.map((p) => p.userId.toString()));
+    const session = m.sessions!.find((s) => s.id === sessionId)!;
+    const posted = new Set(session.posts.map((p) => p.userId.toString()));
     for (const to of couple.memberIds) {
-      if (posted.has(to.toString())) continue;
+      if (posted.has(to.toString()) || !session.rewardEndsAt || new Date() >= session.rewardEndsAt) continue;
       await notificationService.emit({
         space: 'couple',
         to,
         actorId: null,
         type: 'moment_prompt',
         entityId: m._id,
-        push: { body: PROMPT_BODY, url: '/moments', tag: `moment:${m.localDate}` },
+        push: { body: PROMPT_BODY, url: `/moments?date=${m.localDate}&session=${sessionId}`, tag: `moment:${m.localDate}:${sessionId}`, expiresAt: session.rewardEndsAt.toISOString() },
       });
     }
     logger.debug('Duo moment prompt announced', { coupleId: m.coupleId.toString(), localDate: m.localDate });

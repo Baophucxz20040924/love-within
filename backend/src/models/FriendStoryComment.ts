@@ -28,7 +28,7 @@ export interface FriendStoryCommentDoc extends Document {
   createdAt: Date;
 }
 
-const mentionSchema = new Schema<CommentMention>(
+export const mentionSchema = new Schema<CommentMention>(
   {
     userId: { type: Schema.Types.ObjectId, ref: 'User', required: true },
     offset: { type: Number, required: true, min: 0 },

@@ -53,14 +53,14 @@ export function MarketApprovalCard({ item, mode }: Props) {
     mutationFn: () => marketApi.decline(item.id, note.trim() || undefined),
     onSuccess: async () => {
       setDeclining(false);
-      toast.info(`Đã từ chối. ${formatNumber(item.priceCoin)} Xu được hoàn lại ví chung.`);
+      toast.info(`Đã từ chối. ${formatNumber(item.priceCoin)} Xu được hoàn lại ví người mua.`);
       await refresh();
     },
   });
   const cancel = useMutation({
     mutationFn: () => marketApi.cancel(item.id),
     onSuccess: async () => {
-      toast.info(`Đã rút lại. ${formatNumber(item.priceCoin)} Xu được hoàn lại ví chung.`);
+      toast.info(`Đã rút lại. ${formatNumber(item.priceCoin)} Xu được hoàn lại ví người mua.`);
       await refresh();
     },
     onError: (err) => toast.error(errorText(err)),
@@ -89,7 +89,7 @@ export function MarketApprovalCard({ item, mode }: Props) {
 
       {mode === 'incoming' ? (
         <>
-          <p className="text-sm text-muted">Bạn có thực hiện phần thưởng này được không? Từ chối thì Xu sẽ hoàn lại ví chung.</p>
+          <p className="text-sm text-muted">Bạn có thực hiện phần thưởng này được không? Từ chối thì Xu sẽ hoàn lại ví người mua.</p>
           <div className="btn-row">
             <button type="button" className="btn btn-secondary" disabled={busy} onClick={() => { decline.reset(); setDeclining(true); }}>
               Từ chối
@@ -114,7 +114,7 @@ export function MarketApprovalCard({ item, mode }: Props) {
       <BottomSheet open={declining} onClose={() => setDeclining(false)} title="Từ chối yêu cầu?">
         <div className="form">
           <p className="text-muted">
-            {formatNumber(item.priceCoin)} Xu sẽ được hoàn lại ví chung. Bạn có thể nhắn lý do để {shortName(item.buyerName)} không buồn 😉
+            {formatNumber(item.priceCoin)} Xu sẽ được hoàn lại ví người mua. Bạn có thể nhắn lý do để {shortName(item.buyerName)} không buồn 😉
           </p>
           <label className="field">
             <span className="field__label">Lời nhắn (tuỳ chọn)</span>

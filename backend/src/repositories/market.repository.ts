@@ -2,6 +2,7 @@ import type { Types } from 'mongoose';
 import {
   MarketItem,
   MarketRedemption,
+  OPEN_REDEMPTION_STATUSES,
   type MarketItemDoc,
   type MarketRedemptionDoc,
   type RedemptionStatus,
@@ -58,7 +59,22 @@ export const marketRepository = {
 
   // ── Redemptions ─────────────────────────────────────────
 
+  async assertReservationIndexes(): Promise<void> {
+    const indexes = await MarketRedemption.collection.indexes();
+    const open = indexes.find((i) => i.name === 'market_one_open');
+    const key = indexes.find((i) => i.name === 'market_request_key');
+    const statuses = open?.partialFilterExpression?.status?.$in;
+    if (!open?.unique || JSON.stringify(open.key) !== JSON.stringify({ coupleId: 1, itemId: 1, buyerUserId: 1 })
+      || !Array.isArray(statuses) || [...statuses].sort().join(',') !== [...OPEN_REDEMPTION_STATUSES].sort().join(',')
+      || !key?.unique || JSON.stringify(key.key) !== JSON.stringify({ coupleId: 1, buyerUserId: 1, requestKey: 1 })
+      || key.partialFilterExpression?.requestKey?.$type !== 'string') {
+      throw new Error('Market reservation indexes missing; complete the personal-wallet cutover before enabling writes');
+    }
+  },
+
   createRedemption(input: {
+    _id: Types.ObjectId;
+    requestKey: string;
     coupleId: Types.ObjectId;
     itemId: Types.ObjectId;
     itemTitle: string;
@@ -67,7 +83,11 @@ export const marketRepository = {
     sellerUserId: Types.ObjectId;
     priceCoin: number;
   }): Promise<MarketRedemptionDoc> {
-    return MarketRedemption.create({ ...input, status: 'requested' });
+    return MarketRedemption.create({ ...input, status: 'reserving' });
+  },
+
+  findRequest(coupleId: Types.ObjectId, buyerUserId: Types.ObjectId, requestKey: string) {
+    return MarketRedemption.findOne({ coupleId, buyerUserId, requestKey }).exec();
   },
 
   findRedemption(coupleId: Types.ObjectId, id: string): Promise<MarketRedemptionDoc | null> {
@@ -76,7 +96,11 @@ export const marketRepository = {
 
   /** An open request by this buyer for this item (guards against double taps). */
   findOpenRequest(coupleId: Types.ObjectId, itemId: Types.ObjectId, buyerUserId: Types.ObjectId): Promise<MarketRedemptionDoc | null> {
-    return MarketRedemption.findOne({ coupleId, itemId, buyerUserId, status: 'requested' }).exec();
+    return MarketRedemption.findOne({ coupleId, itemId, buyerUserId, status: { $in: OPEN_REDEMPTION_STATUSES } }).exec();
+  },
+
+  listUnsettled(coupleId: Types.ObjectId): Promise<MarketRedemptionDoc[]> {
+    return MarketRedemption.find({ coupleId, status: { $in: ['reserving', 'refunding'] } }).sort({ createdAt: 1 }).limit(20).exec();
   },
 
   listRedemptions(coupleId: Types.ObjectId, limit = 100): Promise<MarketRedemptionDoc[]> {
@@ -96,7 +120,7 @@ export const marketRepository = {
     id: Types.ObjectId,
     from: RedemptionStatus,
     to: RedemptionStatus,
-    patch: Partial<Pick<MarketRedemptionDoc, 'responseNote' | 'respondedAt' | 'fulfilledAt'>> = {},
+    patch: Partial<Pick<MarketRedemptionDoc, 'responseNote' | 'respondedAt' | 'fulfilledAt' | 'refundIntent'>> = {},
   ): Promise<MarketRedemptionDoc | null> {
     return MarketRedemption.findOneAndUpdate(
       { _id: id, coupleId, status: from },

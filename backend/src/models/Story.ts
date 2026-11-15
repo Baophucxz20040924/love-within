@@ -41,6 +41,7 @@ export interface StoryDoc extends Document {
   _id: Types.ObjectId;
   coupleId: Types.ObjectId;
   authorId: Types.ObjectId;
+  creationFingerprint?: string;
   body: string;
   mood: Mood | null;
   /** Day the memory happened ("YYYY-MM-DD", couple timezone). Defaults to the posting day. */
@@ -71,6 +72,7 @@ const storySchema = new Schema<StoryDoc>(
   {
     coupleId: { type: Schema.Types.ObjectId, ref: 'Couple', required: true },
     authorId: { type: Schema.Types.ObjectId, ref: 'User', required: true },
+    creationFingerprint: { type: String, immutable: true },
     body: { type: String, default: '', maxlength: MAX_STORY_BODY },
     mood: { type: String, enum: [...MOODS, null], default: null },
     happenedOn: { type: String, required: true },

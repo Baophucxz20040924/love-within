@@ -41,7 +41,8 @@ export const MarketItem = model<MarketItemDoc>('MarketItem', itemSchema);
  *           → (seller) declined   — coins refunded
  *           → (buyer)  cancelled  — coins refunded
  */
-export type RedemptionStatus = 'requested' | 'accepted' | 'fulfilled' | 'declined' | 'cancelled';
+export type RedemptionStatus = 'reserving' | 'requested' | 'accepted' | 'fulfilled' | 'refunding' | 'declined' | 'cancelled' | 'rejected';
+export const OPEN_REDEMPTION_STATUSES = ['reserving', 'requested', 'accepted', 'refunding'];
 
 export interface MarketRedemptionDoc extends Document {
   _id: Types.ObjectId;
@@ -53,6 +54,8 @@ export interface MarketRedemptionDoc extends Document {
   sellerUserId: Types.ObjectId;
   priceCoin: number;
   status: RedemptionStatus;
+  requestKey?: string;
+  refundIntent: { target: 'declined' | 'cancelled'; actorUserId: string } | null;
   responseNote: string | null; // optional message from the seller when declining
   respondedAt: Date | null;
   fulfilledAt: Date | null;
@@ -70,9 +73,11 @@ const redemptionSchema = new Schema<MarketRedemptionDoc>(
     priceCoin: { type: Number, required: true },
     status: {
       type: String,
-      enum: ['requested', 'accepted', 'fulfilled', 'declined', 'cancelled'],
+      enum: ['reserving', 'requested', 'accepted', 'fulfilled', 'refunding', 'declined', 'cancelled', 'rejected'],
       required: true,
     },
+    requestKey: { type: String, immutable: true },
+    refundIntent: { type: Schema.Types.Mixed, default: null },
     responseNote: { type: String, default: null, maxlength: 200 },
     respondedAt: { type: Date, default: null },
     fulfilledAt: { type: Date, default: null },
@@ -80,6 +85,8 @@ const redemptionSchema = new Schema<MarketRedemptionDoc>(
   { timestamps: { createdAt: true, updatedAt: false } },
 );
 
+redemptionSchema.index({ coupleId: 1, buyerUserId: 1, requestKey: 1 }, { unique: true, name: 'market_request_key', partialFilterExpression: { requestKey: { $type: 'string' } } });
+redemptionSchema.index({ coupleId: 1, itemId: 1, buyerUserId: 1 }, { unique: true, name: 'market_one_open', partialFilterExpression: { status: { $in: OPEN_REDEMPTION_STATUSES } } });
 redemptionSchema.index({ coupleId: 1, createdAt: -1 });
 redemptionSchema.index({ coupleId: 1, status: 1, createdAt: -1 });
 

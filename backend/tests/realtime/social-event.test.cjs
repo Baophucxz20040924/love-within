@@ -31,6 +31,7 @@ const mocks = {
   './notification.service.js': { notificationService: { emit: async () => calls.push('push'), forgetActor: async () => calls.push('forget') } },
   './realtimeAudience.service.js': { realtimeAudience: { event: async (doc, domains) => { calls.push(['event', [doc.creatorId, ...doc.inviteeIds.filter((x) => allowed.has(x.toString()))].map(String), Array.from(domains)]); }, own: async () => calls.push('own') } },
   './profile.service.js': { profileOf: () => ({}), profileService: { load: async () => new Map() } }, './story.service.js': {},
+  './mentionSpans.js': {}, './friends.service.js': {}, '../repositories/user.repository.js': {},
 };
 const mod = { exports: {} };
 vm.runInNewContext(code, { module: mod, exports: mod.exports, require(name) { assert.ok(Object.hasOwn(mocks, name), `unmocked ${name}`); return mocks[name]; } }, { filename });

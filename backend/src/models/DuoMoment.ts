@@ -1,45 +1,48 @@
 import { Schema, model, type Document, type Types } from 'mongoose';
 
-/**
- * "Khoảnh khắc đôi" (plan/ENGINEERING_WORKFLOW.md, CP6): once a day, at a random time, both members take one photo.
- * Owner decision 7 (10/11/2026): the prompt time is random in 09:00–21:00 couple time; "on time" = posted within 10 minutes
- * of it; posting is possible until 23:59 the same day, after that the day is "Bỏ lỡ" for whoever did not post.
- * The partner's photo is never returned to a member who has not posted that day (moment.service.ts).
- */
-
-/** The prompt time is drawn in this window, couple timezone. */
+/** Never change the interpretation of photos from the original/v2 schedules. */
+export const LEGACY_MOMENT_ON_TIME_MIN = 10;
+export const MOMENT_ON_TIME_MIN = 30;
+export const MOMENT_SCHEDULE_VERSION = 3;
+/** Inclusive start-minute window, in the timezone snapshotted on the day. */
 export const MOMENT_WINDOW_FROM = '09:00';
 export const MOMENT_WINDOW_TO = '21:00';
-/** Posted within this many minutes of the prompt = on time; later = "Muộn …". */
-export const MOMENT_ON_TIME_MIN = 10;
-/** The job announces a prompt at most this late (server down, missed ticks); later ones are left silent. */
-export const MOMENT_NOTIFY_MAX_LATE_MIN = 30;
 export const MAX_MOMENT_CAPTION = 100;
 
 export interface MomentPost {
   userId: Types.ObjectId;
-  /** couples/<coupleId>/moments/<YYYY-MM>/<uuid>.<ext> */
+  /** couples/<coupleId>/moments/<localDate>/<sessionId>/<userId>/<uuid>.<ext> */
   key: string;
   width: number;
   height: number;
   caption: string;
   postedAt: Date;
-  /** Minutes between the prompt and the post when later than MOMENT_ON_TIME_MIN, else 0 (server clock). */
+  /** v3: rounded-up minutes after rewardEndsAt (at least 1 if late). Historical values are retained. */
   lateMin: number;
+}
+
+export interface MomentSession {
+  id: string;
+  promptAt: Date;
+  /** Present on v3; older sessions retain their original ten-minute window. */
+  rewardEndsAt?: Date;
+  closesAt: Date;
+  notifiedAt: Date | null;
+  posts: MomentPost[];
+  storyId: Types.ObjectId | null;
 }
 
 export interface DuoMomentDoc extends Document {
   _id: Types.ObjectId;
   coupleId: Types.ObjectId;
-  /** "YYYY-MM-DD", couple timezone. */
   localDate: string;
-  /** Random time of the day's prompt. Never returned to the app before it has passed. */
+  scheduleVersion?: number;
+  timezone?: string;
+  sessions?: MomentSession[];
+  // Legacy fields remain readable, never rewritten or reopened.
   promptAt: Date;
-  /** Set (atomically) by the job duo-moment.prompt right before it pushes "Đến giờ Khoảnh khắc". */
   notifiedAt: Date | null;
-  /** At most one per member (conditional $push). */
   posts: MomentPost[];
-  /** The Story post made from both photos ("Đăng lên Story"), once. */
   storyId: Types.ObjectId | null;
   createdAt: Date;
   updatedAt: Date;
@@ -57,23 +60,51 @@ const postSchema = new Schema<MomentPost>(
   },
   { _id: false },
 );
-
+const sessionSchema = new Schema<MomentSession>(
+  {
+    id: { type: String, required: true },
+    promptAt: { type: Date, required: true },
+    rewardEndsAt: Date,
+    closesAt: { type: Date, required: true },
+    notifiedAt: { type: Date, default: null },
+    posts: { type: [postSchema], default: [] },
+    storyId: { type: Schema.Types.ObjectId, ref: 'Story', default: null },
+  },
+  { _id: false },
+);
 const momentSchema = new Schema<DuoMomentDoc>(
   {
     coupleId: { type: Schema.Types.ObjectId, ref: 'Couple', required: true },
     localDate: { type: String, required: true },
-    promptAt: { type: Date, required: true },
+    scheduleVersion: Number,
+    timezone: String,
+    // undefined is important: old documents must remain identifiable as legacy.
+    sessions: { type: [sessionSchema], default: undefined, validate: (sessions: MomentSession[]) => sessions.length <= 3 },
+    promptAt: Date,
     notifiedAt: { type: Date, default: null },
     posts: { type: [postSchema], default: [] },
     storyId: { type: Schema.Types.ObjectId, ref: 'Story', default: null },
   },
   { timestamps: true },
 );
-
-// One moment per couple per day: the job and the lazy "today" both upsert on it, so they never make two.
-// Also serves today's view, the month calendar (localDate range) and the streak.
 momentSchema.index({ coupleId: 1, localDate: 1 }, { unique: true });
-// Job: prompts of the last days whose time has come and that were not announced yet.
+// Retain the legacy index; no destructive index migration is needed.
 momentSchema.index({ localDate: 1, notifiedAt: 1, promptAt: 1 });
-
+momentSchema.index({ localDate: 1, 'sessions.promptAt': 1 });
 export const DuoMoment = model<DuoMomentDoc>('DuoMoment', momentSchema);
+
+/** Maximum distinct members in one session, never a sum across sessions. Also supports legacy quests. */
+export function momentProgress(day: Pick<DuoMomentDoc, 'sessions' | 'posts'> | null, memberIds: Types.ObjectId[]): number {
+  const members = new Set(memberIds.map(String));
+  const groups = day?.sessions?.map((s) => s.posts) ?? [day?.posts ?? []];
+  return Math.max(0, ...groups.map((posts) => new Set(posts.filter((p) => members.has(String(p.userId))).map((p) => String(p.userId))).size));
+}
+
+/** Reward progress is separate from streak completion. Old days retain their original quest policy. */
+export function momentRewardProgress(day: Pick<DuoMomentDoc, 'scheduleVersion' | 'sessions' | 'posts'> | null, memberIds: Types.ObjectId[]): number {
+  if (day?.scheduleVersion !== MOMENT_SCHEDULE_VERSION) return momentProgress(day, memberIds);
+  const members = new Set(memberIds.map(String));
+  return Math.max(0, ...(day.sessions ?? []).map((s) => new Set(s.posts.filter((p) =>
+    members.has(String(p.userId)) && s.rewardEndsAt && p.postedAt >= s.promptAt && p.postedAt < s.rewardEndsAt,
+  ).map((p) => String(p.userId))).size));
+}

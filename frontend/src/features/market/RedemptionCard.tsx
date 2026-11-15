@@ -11,6 +11,7 @@ import { MARKET_PENDING_KEY, REDEMPTIONS_KEY, marketApi } from './api';
 const errorText = (err: unknown) => (err instanceof ApiRequestError ? err.message : 'Có lỗi xảy ra, thử lại nhé.');
 
 const STATUS: Record<RedemptionStatus, { label: string; chip: string }> = {
+  refunding: { label: 'Đang hoàn Xu cho người mua', chip: 'chip--warning' },
   requested: { label: 'Chờ nhận lời', chip: 'chip--warning' },
   accepted: { label: 'Chờ thực hiện', chip: 'chip--brand' },
   fulfilled: { label: 'Đã thực hiện', chip: 'chip--success' },
@@ -45,7 +46,7 @@ export function RedemptionCard({ r }: { r: Redemption }) {
   const cancel = useMutation({
     mutationFn: () => marketApi.cancel(r.id),
     onSuccess: async () => {
-      toast.info(`Đã rút lại. ${formatNumber(r.priceCoin)} Xu hoàn về ví chung.`);
+      toast.info(`Đã rút lại. ${formatNumber(r.priceCoin)} Xu hoàn về ví của bạn.`);
       await refresh();
     },
     onError: (err) => toast.error(errorText(err)),

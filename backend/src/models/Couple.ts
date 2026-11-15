@@ -8,6 +8,8 @@ export interface CoupleDoc extends Document {
   anniversaryDate: Date | null;
   level: number;
   exp: number;
+  expRevision: number;
+  expReceipt: { operationId: string; exp: number; level: number; leveledUp: boolean } | null;
   timezone: string;
   status: CoupleStatus;
   pinnedSavingsGoalId: Types.ObjectId | null;
@@ -34,6 +36,8 @@ const coupleSchema = new Schema<CoupleDoc>(
     anniversaryDate: { type: Date, default: null },
     level: { type: Number, default: 1 },
     exp: { type: Number, default: 0 },
+    expRevision: { type: Number, default: 0 },
+    expReceipt: { type: Schema.Types.Mixed, default: null },
     timezone: { type: String, default: 'Asia/Ho_Chi_Minh' },
     status: { type: String, enum: ['active', 'archived'], default: 'active' },
   },

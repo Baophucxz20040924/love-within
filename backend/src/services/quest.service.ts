@@ -2,12 +2,13 @@ import { realtimeAudience } from './realtimeAudience.service.js';
 import { Types } from 'mongoose';
 import { ECONOMY } from '../config/economy.js';
 import type { CoupleDoc } from '../models/Couple.js';
-import type { QuestDoc, QuestProgressDoc, QuestProgressStatus, QuestType } from '../models/Quest.js';
+import { QuestProgress, type QuestDoc, type QuestProgressDoc, type QuestProgressStatus, type QuestType } from '../models/Quest.js';
 import { questRepository } from '../repositories/quest.repository.js';
 import { checkinRepository } from '../repositories/checkin.repository.js';
 import { coupleSettingsRepository } from '../repositories/coupleSettings.repository.js';
 import { answerRepository, questionRepository } from '../repositories/question.repository.js';
 import { momentRepository } from '../repositories/moment.repository.js';
+import { momentRewardProgress, MOMENT_SCHEDULE_VERSION } from '../models/DuoMoment.js';
 import { WaterDaily } from '../models/WaterDaily.js';
 import { walletService } from './wallet.service.js';
 import { getLocalDate } from '../utils/date.js';
@@ -59,12 +60,12 @@ const resolvers: Record<QuestType, QuestResolver> = {
       return { progress: Math.min(onTime, target), target };
     },
   },
-  // CP6: photos posted to the day's duo moment (one per member, on time or late; posting closes at the end of the day).
+  // Daily reward requires both timely posts; late pairs still count for the independent photo streak.
   duo_moment: {
     async resolve(couple, localDate) {
       const target = couple.memberIds.length;
       const m = await momentRepository.findDay(couple._id, localDate);
-      return { progress: Math.min(m?.posts.length ?? 0, target), target };
+      return { progress: Math.min(momentRewardProgress(m, couple.memberIds), target), target };
     },
   },
 };
@@ -102,7 +103,7 @@ export const DEFAULT_QUESTS = [
   {
     key: DUO_MOMENT_QUEST_KEY,
     title: 'Khoảnh khắc đôi',
-    description: 'Cả hai cùng chụp Khoảnh khắc hôm nay.',
+    description: 'Cả hai đăng ảnh trong 30 phút đầu để nhận 40 Xu chung (20 Xu mỗi người). Chụp muộn vẫn giữ chuỗi.',
     type: 'duo_moment' as QuestType,
     coinReward: ECONOMY.quests.duo_moment.coin,
     expReward: ECONOMY.quests.duo_moment.exp,
@@ -122,22 +123,33 @@ export interface QuestView {
   localDate: string;
 }
 
-function rewardFor(q: QuestDoc): { coin: number; exp: number } {
+interface QuestReward { coin: number; exp: number; description?: string }
+
+async function rewardFor(q: QuestDoc, couple: CoupleDoc, localDate: string): Promise<QuestReward> {
+  if (q.key === DUO_MOMENT_QUEST_KEY) {
+    const day = await momentRepository.findDay(couple._id, localDate);
+    if (day && day.scheduleVersion !== MOMENT_SCHEDULE_VERSION) {
+      return { ...ECONOMY.legacyDuoMoment, description: 'Khoảnh khắc theo lịch cũ: giữ nguyên điều kiện và thưởng của ngày này.' };
+    }
+    return { ...ECONOMY.quests.duo_moment, description: DEFAULT_QUESTS.find(d => d.key === DUO_MOMENT_QUEST_KEY)!.description };
+  }
   return ECONOMY.quests[q.key] ?? { coin: q.coinReward, exp: q.expReward };
 }
 
-function toView(q: QuestDoc, p: QuestProgressDoc): QuestView {
-  const r = rewardFor(q);
+function toView(q: QuestDoc, p: QuestProgressDoc, reward: QuestReward): QuestView {
+  const r = p.rewardIntent ? { coin: p.rewardIntent.coin, exp: p.rewardIntent.exp } : reward;
   return {
     key: q.key,
     title: q.title,
-    description: q.description,
+    description: q.key === DUO_MOMENT_QUEST_KEY && p.rewardIntent && p.rewardIntent.coin !== reward.coin
+      ? 'Phần thưởng Khoảnh khắc đã chốt theo chính sách trước; giữ nguyên số Xu và EXP.'
+      : reward.description ?? q.description,
     type: q.type,
     coinReward: r.coin,
     expReward: r.exp,
     progress: p.progress,
     target: p.target,
-    status: p.status,
+    status: p.status === 'rewarded' && p.rewardIntent && !p.rewardCompletedAt ? 'completed' : p.status,
     localDate: p.localDate,
   };
 }
@@ -161,7 +173,7 @@ export const questService = {
         const updated =
           (await questRepository.setProgress(couple._id, q.key, localDate, resolved.progress, resolved.target)) ??
           (await questRepository.findOne(couple._id, q.key, localDate));
-        return updated ? toView(q, updated) : null;
+        return updated ? toView(q, updated, await rewardFor(q, couple, localDate)) : null;
       }),
     );
     return views.filter((v): v is QuestView => v !== null);
@@ -188,16 +200,22 @@ export const questService = {
     await questService.refresh(couple, questKey, localDate);
     const current = await questRepository.findOne(couple._id, questKey, localDate);
     if (!current) throw Errors.notFound('Nhiệm vụ chưa khả dụng hôm nay');
-    if (current.status === 'rewarded') throw Errors.conflict('Nhiệm vụ đã nhận thưởng hôm nay');
-    if (current.status !== 'completed') throw Errors.conflict('Nhiệm vụ chưa hoàn thành');
+    if (current.status === 'rewarded' && !current.rewardIntent) throw Errors.conflict('Nhiệm vụ đã nhận thưởng hôm nay');
+    if (current.status !== 'completed' && current.status !== 'rewarded') throw Errors.conflict('Nhiệm vụ chưa hoàn thành');
 
-    const rewarded = await questRepository.markRewarded(couple._id, questKey, localDate, new Types.ObjectId(userId));
-    if (!rewarded) throw Errors.conflict('Nhiệm vụ đã nhận thưởng hôm nay');
+    const r = await rewardFor(q, couple, localDate);
+    const intent = { operationId: `quest:${current._id}`, actorUserId: userId, ownerUserId: null, coin: r.coin, exp: r.exp };
+    const rewarded = current.status === 'rewarded' ? current :
+      (await questRepository.markRewarded(couple._id, questKey, localDate, new Types.ObjectId(userId), intent)) ??
+      await questRepository.findOne(couple._id, questKey, localDate);
+    if (!rewarded?.rewardIntent) throw Errors.conflict('Nhiệm vụ đã nhận thưởng hôm nay');
 
+    await walletService.reward({ ...rewarded.rewardIntent, coupleId: couple._id, reason: 'quest', refId: rewarded._id });
+    const completedAt = new Date();
+    await QuestProgress.updateOne({ _id: rewarded._id, rewardCompletedAt: null }, { $set: { rewardCompletedAt: completedAt } }).exec();
+    rewarded.rewardCompletedAt = completedAt;
     await realtimeAudience.couple(couple._id, ['quests']);
-    const r = rewardFor(q);
-    await walletService.reward({ coupleId: couple._id, actorUserId: userId, reason: 'quest', refId: rewarded._id, coin: r.coin, exp: r.exp });
     logger.info('Quest reward claimed', { coupleId: couple._id.toString(), userId, questKey, localDate });
-    return toView(q, rewarded);
+    return toView(q, rewarded, r);
   },
 };

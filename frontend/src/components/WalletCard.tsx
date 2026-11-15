@@ -8,14 +8,14 @@ export function CoinChip() {
   const wallet = useQuery({ queryKey: WALLET_KEY, queryFn: walletApi.get });
   if (!wallet.data) return null;
   return (
-    <span className="coin-chip" aria-label={`${wallet.data.coinBalance} Xu`}>
+    <span className="coin-chip" aria-label={`Ví Xu của bạn: ${wallet.data.coinBalance} Xu`}>
       <span aria-hidden="true">🪙</span>
       {formatNumber(wallet.data.coinBalance)}
     </span>
   );
 }
 
-/** Shared couple wallet: coins + level with progress inside the current level. */
+/** Personal coins; EXP and level remain shared by the couple. */
 export function WalletCard() {
   const wallet = useQuery({ queryKey: WALLET_KEY, queryFn: walletApi.get });
   if (wallet.isLoading) return <div className="skeleton" style={{ height: 112 }} />;
@@ -30,7 +30,7 @@ export function WalletCard() {
     <div className="card wallet-card">
       <div className="row row--between">
         <div>
-          <p className="text-sm text-muted">Ví chung</p>
+          <p className="text-sm text-muted">Ví Xu của bạn</p>
           <p className="wallet-card__coins">
             <span aria-hidden="true">🪙 </span>
             {formatNumber(w.coinBalance)} Xu

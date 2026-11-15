@@ -42,17 +42,18 @@ export const questRepository = {
   async setProgress(coupleId: Types.ObjectId, questKey: string, localDate: string, progress: number, target: number): Promise<QuestProgressDoc | null> {
     const status = progress >= target ? 'completed' : 'in_progress';
     return QuestProgress.findOneAndUpdate(
-      { coupleId, questKey, localDate, status: { $ne: 'rewarded' } },
+      // Moment posts are append-only: a delayed refresh must not overwrite a newer completion.
+      { coupleId, questKey, localDate, status: { $ne: 'rewarded' }, ...(questKey === 'duo_moment' ? { progress: { $lte: progress } } : {}) },
       { $set: { progress, target, status } },
       { new: true },
     ).exec();
   },
 
   /** Atomically transition completed → rewarded. Returns null if not claimable (anti double-claim). */
-  markRewarded(coupleId: Types.ObjectId, questKey: string, localDate: string, userId: Types.ObjectId): Promise<QuestProgressDoc | null> {
+  markRewarded(coupleId: Types.ObjectId, questKey: string, localDate: string, userId: Types.ObjectId, rewardIntent: import('../models/WalletOperation.js').RewardIntent): Promise<QuestProgressDoc | null> {
     return QuestProgress.findOneAndUpdate(
       { coupleId, questKey, localDate, status: 'completed' },
-      { $set: { status: 'rewarded', rewardedAt: new Date(), rewardedBy: userId } },
+      { $set: { status: 'rewarded', rewardedAt: new Date(), rewardedBy: userId, rewardIntent } },
       { new: true },
     ).exec();
   },

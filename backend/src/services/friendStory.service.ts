@@ -2,7 +2,8 @@ import { randomUUID } from 'node:crypto';
 import { Types } from 'mongoose';
 import { env } from '../config/env.js';
 import type { FriendStoryDoc } from '../models/FriendStory.js';
-import { MAX_MENTIONS, type CommentMention, type FriendStoryCommentDoc } from '../models/FriendStoryComment.js';
+import { type CommentMention, type FriendStoryCommentDoc } from '../models/FriendStoryComment.js';
+import { badMention, checkedSpans } from './mentionSpans.js';
 import { MAX_STORY_PHOTOS, type ReactionType, type StoryPhoto, type StoryVideo } from '../models/Story.js';
 import { createStoryVideoUploadUrl, normalizeStoryVideos, sameStoryVideos, storyVideoPrefix, validateStoryPhotoHead, validateStoryVideos } from './storyMedia.service.js';
 import type { UserDoc } from '../models/User.js';
@@ -76,6 +77,8 @@ export interface MentionView {
 
 export interface FriendCommentView {
   id: string;
+  /** Event discussions: author is still eligible for reply-prefill. */
+  canMentionAuthor?: boolean;
   author: PublicProfile;
   isMine: boolean;
   /** Comment author, or the post author (they moderate their own post). */
@@ -113,7 +116,6 @@ const NOT_MEMBER = 'Không tìm thấy người này trong Hội bạn bè';
 const MENTIONABLE_LIMIT = 10;
 /** Same answer whether the person cannot see the post or blocks / is blocked by the writer: a block is never revealed. */
 const mentionNotAllowed = () => new AppError(400, 'MENTION_NOT_ALLOWED', 'Không nhắc được tên người này trong bài viết này');
-const badMention = () => new AppError(400, 'BAD_MENTION', 'Nhắc tên không hợp lệ. Hãy chọn lại tên trong danh sách nhé.');
 
 const toObjectIds = (ids: Iterable<string>) => [...ids].map((id) => new Types.ObjectId(id));
 
@@ -219,18 +221,6 @@ async function canSeeStory(userId: Types.ObjectId, story: FriendStoryDoc): Promi
  * Mentions of a new comment (BB8): sorted, inside the trimmed body, each starting with "@" followed by the person's name,
  * no overlap, at most 10. The person must be able to see the post and must not block (or be blocked by) the writer.
  */
-function checkedSpans(body: string, raw: MentionView[]): MentionView[] {
-  if (raw.length > MAX_MENTIONS) throw badMention();
-  const sorted = [...raw].sort((a, b) => a.offset - b.offset);
-  let end = 0;
-  for (const m of sorted) {
-    if (!Types.ObjectId.isValid(m.userId) || !Number.isInteger(m.offset) || !Number.isInteger(m.length) ||
-        m.length < 2 || m.offset < end || m.offset + m.length > body.length || body[m.offset] !== '@') throw badMention();
-    end = m.offset + m.length;
-  }
-  return sorted;
-}
-
 async function validateMentions(
   story: FriendStoryDoc,
   body: string,

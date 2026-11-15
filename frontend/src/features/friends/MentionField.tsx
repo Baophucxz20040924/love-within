@@ -6,14 +6,15 @@ import type { FriendUser } from '../../lib/types';
 import { friendMentionableKey } from './api';
 import { MAX_MENTIONS, activeQuery, insertMention, reconcile, type DraftMention } from './mentions';
 
-/** Who can be named in this discussion: `id` keys the cache (the post id), `fn` asks the server. */
+/** Resource and ID isolate the picker cache; eligibility always comes from the server. */
 export interface MentionSearch {
   id: string;
+  resource?: 'story' | 'event';
   fn: (q: string) => Promise<FriendUser[]>;
 }
 
 interface Props {
-  /** Left out: a plain box without the "@" picker (event discussions have no mentions). */
+  /** Left out: a plain box without the "@" picker. */
   search?: MentionSearch;
   text: string;
   mentions: DraftMention[];
@@ -84,19 +85,22 @@ export function MentionField({
   const open = active !== null && closedAt !== active.start && !atLimit;
   const q = useDebounced(active?.query ?? '', 200);
   const people = useQuery({
-    queryKey: friendMentionableKey(search?.id ?? '', q),
+    queryKey: friendMentionableKey(search?.id ?? '', q, search?.resource),
     queryFn: () => search!.fn(q),
     enabled: open && Boolean(search),
-    staleTime: 30_000,
+    staleTime: search?.resource === 'event' ? 0 : 30_000,
+    refetchOnMount: search?.resource === 'event' ? 'always' : true,
     placeholderData: (previous) => previous,
   });
-  // Do not let Enter choose a result for an earlier query while the new name is loading.
-  const options = open && q === active?.query && !people.isPlaceholderData ? (people.data ?? []) : [];
+  // Never choose an earlier query or a retained event roster during access revalidation.
+  const options = open && q === active?.query && !people.isPlaceholderData && !people.isError &&
+    !(search?.resource === 'event' && people.isFetching) ? (people.data ?? []) : [];
   const showList = options.length > 0;
+  const peopleLabel = search?.resource === 'event' ? 'thành viên kèo' : 'bạn bè';
   const feedback = pickError ?? (active && atLimit ? `Nhắc tối đa ${MAX_MENTIONS} người.` :
-    open && q === active?.query ? people.isError ? 'Chưa tìm được bạn bè. Gõ lại để thử nhé.' :
-      people.isFetching && !options.length ? 'Đang tìm bạn bè…' :
-        !people.isFetching && !options.length ? 'Không có bạn bè phù hợp.' : null : null);
+    open && q === active?.query ? people.isError ? `Chưa tìm được ${peopleLabel}. Gõ lại để thử nhé.` :
+      people.isFetching && !options.length ? `Đang tìm ${peopleLabel}…` :
+        !people.isFetching && !options.length ? `Không có ${peopleLabel} phù hợp.` : null : null);
 
   useEffect(() => setHi(0), [q]);
   // A new "@" opens the list again after Escape.

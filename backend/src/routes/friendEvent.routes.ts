@@ -22,6 +22,7 @@ import {
   RSVP_STATUSES,
 } from '../models/FriendEvent.js';
 import { MAX_COMMENT_BODY } from '../models/StoryComment.js';
+import { MAX_MENTIONS } from '../models/FriendStoryComment.js';
 import { friendEventService } from '../services/friendEvent.service.js';
 import { STORY_IMAGE_TYPES } from '../services/story.service.js';
 import { ok } from '../utils/response.js';
@@ -90,7 +91,13 @@ const rsvpSchema = z.object({ status: z.enum(RSVP_STATUSES) });
 const commentSchema = z.object({
   body: z.string().trim().min(1, 'Bình luận trống').max(MAX_COMMENT_BODY, 'Bình luận quá dài'),
   parentId: objectId.optional(),
+  mentions: z.array(z.object({
+    userId: objectId,
+    offset: z.number().int().min(0).max(MAX_COMMENT_BODY),
+    length: z.number().int().min(2).max(MAX_COMMENT_BODY),
+  })).max(MAX_MENTIONS).default([]),
 });
+const mentionQuery = z.object({ q: z.string().trim().max(100).default('') });
 const uploadSchema = z.object({
   mimeType: z.enum(Object.keys(STORY_IMAGE_TYPES) as [string, ...string[]]),
   sizeBytes: z.number().int().positive(),
@@ -167,6 +174,13 @@ friendEventRouter.post(
   friendEventUpdateLimiter,
   validate({ params: idParam }),
   asyncHandler(async (req, res) => ok(res, await friendEventService.cancel(req.friendsMember!, req.params.id))),
+);
+
+friendEventRouter.get(
+  '/:id/mentionable',
+  expensiveReadLimiter,
+  validate({ params: idParam, query: mentionQuery }),
+  asyncHandler(async (req, res) => ok(res, await friendEventService.mentionable(req.friendsMember!, req.params.id, String(req.query.q ?? '')))),
 );
 
 friendEventRouter.get(
