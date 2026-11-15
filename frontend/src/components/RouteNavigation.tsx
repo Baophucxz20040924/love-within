@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef } from 'react';
 import { useLocation, useNavigationType } from 'react-router-dom';
+import { isPrivacyLocked } from '../features/privacy/store';
 
 /** Router-level focus and scroll, independent of query filters and modal state. */
 export function RouteNavigation() {
@@ -34,6 +35,7 @@ export function RouteNavigation() {
     let focusedTitle: HTMLElement | null = null;
     let restoring = true;
     const apply = () => {
+      if (isPrivacyLocked()) return;
       // A lazy route can replace a header focused during the initial commit.
       if (focusedTitle && !focusedTitle.isConnected) focused = false;
       if (!focused && !document.querySelector('[aria-modal="true"]')) {

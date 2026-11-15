@@ -12,6 +12,7 @@ export function RealtimeSync() {
   const { isAuthenticated, me, space, refreshMe, revokeMe, verifyMe } = useAuth();
   const qc = useQueryClient();
   const [eligible, setEligible] = useState(() => document.visibilityState === 'visible' && navigator.onLine);
+  const [resumeVersion, setResumeVersion] = useState(0);
   const generation = tokenStore.generation();
   const userId = me?.user.id;
 
@@ -23,6 +24,8 @@ export function RealtimeSync() {
       previous = next;
       if (isAuthenticated && userId && tokenStore.isCurrent(generation) && tokenStore.get()) setVerification('checking');
       setEligible(next);
+      // Fast hidden/visible pairs may batch back to the original Boolean.
+      if (next) setResumeVersion(value => value + 1);
     };
     update();
     document.addEventListener('visibilitychange', update);
@@ -91,6 +94,6 @@ export function RealtimeSync() {
     reconcileAccess();
     stream.start();
     return () => { active = false; verificationId++; if (retryTimer !== undefined) clearTimeout(retryTimer); batch.clear(); stream.stop(); };
-  }, [eligible, generation, isAuthenticated, qc, refreshMe, revokeMe, verifyMe, space, userId]);
+  }, [eligible, resumeVersion, generation, isAuthenticated, qc, refreshMe, revokeMe, verifyMe, space, userId]);
   return null;
 }

@@ -11,10 +11,13 @@ import { announceInvite } from '../features/friends/inviteResult';
 import { useFriendsTheme } from '../features/friends/useFriendsTheme';
 import { ApiRequestError } from '../lib/apiClient';
 import { shortName } from '../lib/format';
+import { usePrivacyLock } from '../features/privacy/PrivacyBoundary';
+import { canEnterHidden, isPrivacyCurrent, privacyEpoch } from '../features/privacy/store';
+import { tokenStore } from '../lib/tokenStore';
 
 /**
- * /j/:code — invite link into the friends space. Valid link: blue page with the inviter, then the hidden
- * login (no heart trick needed). Invalid link: a neutral pink page that does not mention the friends space.
+ * /j/:code — preview and joining are deferred until deliberate hidden-space entry.
+ * Invalid links remain neutral and do not disclose the inviter.
  */
 export function InviteLandingPage() {
   const { code = '' } = useParams();
@@ -22,9 +25,12 @@ export function InviteLandingPage() {
   const qc = useQueryClient();
   const toast = useToast();
   const { isAuthenticated, loading, space, logout } = useAuth();
+  const locked = usePrivacyLock();
+  const allowed = !locked && canEnterHidden();
 
   const preview = useQuery({
     queryKey: ['invite-preview', code],
+    enabled: allowed,
     queryFn: () => friendsApi.invitePreview(code),
     retry: false,
     staleTime: 60_000,
@@ -32,26 +38,37 @@ export function InviteLandingPage() {
   const valid = preview.data?.valid === true;
   useFriendsTheme(valid);
 
-  // Already inside the friends space: use the link straight away.
+  // Keep attempted codes for this mounted page: a hidden response may already have committed.
+  const attempted = useRef(new Set<string>());
+  const currentCode = useRef(code);
+  currentCode.current = code;
   const join = useMutation({
-    mutationFn: () => friendsApi.join(code),
-    onSuccess: async (result) => {
+    mutationFn: async (attempt: { code: string; epoch: number; generation: string }) => ({
+      result: await friendsApi.join(attempt.code), attempt,
+    }),
+    onSuccess: async ({ result, attempt }) => {
+      if (!isPrivacyCurrent(attempt.epoch) || !tokenStore.isCurrent(attempt.generation) || currentCode.current !== attempt.code) return;
       announceInvite(result, toast);
       await qc.invalidateQueries({ queryKey: ['friends'] });
-      navigate('/friends', { replace: true });
+      if (isPrivacyCurrent(attempt.epoch) && tokenStore.isCurrent(attempt.generation) && currentCode.current === attempt.code) navigate('/friends', { replace: true });
     },
-    onError: (err) => {
+    onError: (err, attempt) => {
+      if (!isPrivacyCurrent(attempt.epoch) || !tokenStore.isCurrent(attempt.generation) || currentCode.current !== attempt.code) return;
       toast.error(err instanceof ApiRequestError ? err.message : 'Không dùng được link, thử lại nhé.');
       navigate('/friends', { replace: true });
     },
   });
-  const started = useRef(false);
-  const autoJoin = valid && isAuthenticated && space === 'friends';
+  const autoJoin = allowed && valid && isAuthenticated && space === 'friends';
   useEffect(() => {
-    if (!autoJoin || started.current) return;
-    started.current = true;
-    join.mutate();
-  }, [autoJoin, join]);
+    if (!autoJoin || attempted.current.has(code)) return;
+    attempted.current.add(code);
+    join.mutate({ code, epoch: privacyEpoch(), generation: tokenStore.generation() });
+  }, [autoJoin, code, join]);
+
+  if (!allowed) return null;
+  if (autoJoin && attempted.current.has(code) && !join.isPending && !join.isIdle) return (
+    <main className="auth"><div className="card stack"><p>Đã xử lý lời mời. Bạn có thể kiểm tra lại trong danh sách bạn bè.</p><Link to="/friends" replace className="btn btn-primary">Về trang chủ</Link></div></main>
+  );
 
   if (loading || preview.isLoading || autoJoin) return <Loading />;
 

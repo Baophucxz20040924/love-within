@@ -108,10 +108,12 @@ const tick = () => new Promise(resolve => setTimeout(resolve, 0));
   let observerCallback; const root = new Element(); const portal = new Element(); portal.setAttribute('aria-hidden', 'false');
   const body = { children: [root, portal], appendChild: node => body.children.push(node) };
   const pauseCalls = [];
-  const verification = load('features/realtime/verification.tsx', { react: {}, 'react/jsx-runtime': {}, 'react-dom': {}, '../../hooks/useModal': { setModalPrivacyPause: value => pauseCalls.push(value) } }, {
-    HTMLElement: Element, document: { body, activeElement: null, createElement: tag => new Element(tag.toUpperCase()) },
+  const maskGlobals = {
+    HTMLElement: Element, document: { body, documentElement: new Element(), activeElement: null, querySelectorAll: () => [], addEventListener() {}, createElement: tag => new Element(tag.toUpperCase()) },
     MutationObserver: class { constructor(cb) { observerCallback = cb; } observe() {} disconnect() {} },
-  });
+  };
+  const mask = load('features/privacy/mask.ts', { '../../hooks/useModal': { setModalPrivacyPause: value => pauseCalls.push(value) } }, maskGlobals);
+  const verification = load('features/realtime/verification.tsx', { react: {}, 'react/jsx-runtime': {}, 'react-dom': {}, '../privacy/mask': mask, './VerificationScreen': {} }, maskGlobals);
   verification.setVerification('checking');
   assert.equal(root.style.getPropertyValue('display'), 'none'); assert.equal(portal.inert, true); assert.equal(portal.getAttribute('aria-hidden'), 'true');
   const newPortal = new Element(); body.children.push(newPortal); observerCallback(); assert.equal(newPortal.style.getPropertyValue('display'), 'none');

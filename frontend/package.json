@@ -13,7 +13,9 @@
     "test:mentions": "node tests/post-mentions/mentions.cjs",
     "test:mentions:browser": "node tests/post-mentions/browser.mjs",
     "test:media": "node tests/post-media/media.cjs && node tests/post-media/upload.cjs && node tests/post-media/player.cjs && node tests/post-media/composer.cjs",
-    "test:media:browser": "node tests/post-media/browser.mjs"
+    "test:media:browser": "node tests/post-media/browser.mjs",
+    "test:privacy": "node --test tests/privacy/store.cjs",
+    "test:privacy:browser": "node tests/privacy/browser.mjs"
   },
   "dependencies": {
     "@fontsource/be-vietnam-pro": "^5.3.0",

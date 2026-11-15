@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
 import { isAppPath, syncThisDevice } from './device';
+import { queueNotification } from '../privacy/PrivacyBoundary';
 
 /**
  * Mounted once (App): on app start re-sends this device's subscription when it belongs to the signed-in user and the
@@ -22,7 +23,7 @@ export function PushSync() {
     if (!('serviceWorker' in navigator)) return undefined;
     const onMessage = (e: MessageEvent) => {
       const data = e.data as { type?: unknown; url?: unknown } | null;
-      if (data?.type === 'lw:navigate' && isAppPath(data.url)) navigate(data.url);
+      if (data?.type === 'lw:navigate' && isAppPath(data.url) && !queueNotification(data.url)) navigate(data.url);
     };
     navigator.serviceWorker.addEventListener('message', onMessage);
     return () => navigator.serviceWorker.removeEventListener('message', onMessage);

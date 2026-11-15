@@ -6,6 +6,7 @@ import { WATER_PENDING_KEY, waterApi } from '../water/api';
 import { MARKET_PENDING_KEY, marketApi } from '../market/api';
 import { savingsNeedsRetry } from '../savings/api';
 import type { PendingWater, Proposal, Redemption } from '../../lib/types';
+import { setPrivacyTitle } from '../privacy/store';
 
 /** How often approvals are re-checked while the app is visible (cheap: three small queries). */
 const POLL_MS = 20_000;
@@ -69,7 +70,7 @@ export function useApprovals() {
 export function useApprovalSignals(count: number, brand = 'Love Within', approximate = false) {
   useEffect(() => {
     const badge = count > 0 ? `${count}${approximate ? '+' : ''}` : approximate ? '•' : '';
-    document.title = badge ? `(${badge}) ${brand}` : brand;
+    setPrivacyTitle(badge ? `(${badge}) ${brand}` : brand);
     const nav = navigator as Navigator & {
       setAppBadge?: (n?: number) => Promise<void>;
       clearAppBadge?: () => Promise<void>;

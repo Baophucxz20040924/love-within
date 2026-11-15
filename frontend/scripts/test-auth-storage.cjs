@@ -95,6 +95,7 @@ async function main() {
     '../../lib/spaceStore': { spaceStore: { get: () => 'couple', set: () => {}, isSpaceKey: () => false } },
     '../../lib/tokenStore': { tokenStore },
     '../push/device': { forgetThisDevice: () => { throw new Error('unexpected device operation'); } },
+    '../privacy/store': { bindPrivacySession() {}, privacyEpoch: () => 0, reconcilePrivacySession() {} },
     '../../components/StatusViews': { ErrorState: 'error', Loading: 'loading' },
   };
   const module = { exports: {} };

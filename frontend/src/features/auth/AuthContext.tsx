@@ -6,11 +6,17 @@ import { spaceStore, type Space } from '../../lib/spaceStore';
 import { tokenStore } from '../../lib/tokenStore';
 import type { AuthTokens, JoinResult, Me } from '../../lib/types';
 import { forgetThisDevice } from '../push/device';
-import { ErrorState, Loading } from '../../components/StatusViews';
+import { bindPrivacySession, canEnterHidden, isPrivacyCurrent, privacyEpoch, reconcilePrivacySession } from '../privacy/store';
+
+function assertEntry(target: Space, epoch: number): void {
+  if (target === 'friends' && (!isPrivacyCurrent(epoch) || !canEnterHidden())) throw new DOMException('Hãy vào lại từ màn hình chào.', 'AbortError');
+}
 
 interface AuthState {
   me: Me | null;
   loading: boolean;
+  bootstrapError: boolean;
+  retryBootstrap: () => void;
   isAuthenticated: boolean;
   /** Couple app, or the hidden friends space (chosen by which login page was used). */
   space: Space;
@@ -63,6 +69,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     tokenStore.clear();
     setSpace('couple');
     clearView();
+    reconcilePrivacySession();
   }, [clearView, setSpace]);
 
   const revokeMe = useCallback((maskCouple: boolean) => {
@@ -146,12 +153,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   /** Store the new session. The friends space is joined first, so its API works as soon as the user lands there. */
   const startSession = useCallback(
-    async (tokens: AuthTokens, target: Space, opts?: SessionOptions): Promise<JoinResult | null> => {
+    async (tokens: AuthTokens, target: Space, opts?: SessionOptions, entryEpoch = privacyEpoch()): Promise<JoinResult | null> => {
+      assertEntry(target, entryEpoch);
       void qc.cancelQueries();
       qc.clear();
       setMe(null);
       tokenStore.set(tokens);
+      setSpace(target);
+      bindPrivacySession(entryEpoch, target);
       const generation = tokenStore.generation();
+      assertEntry(target, entryEpoch);
       let joined: JoinResult | null = null;
       if (target === 'friends') {
         try {
@@ -165,9 +176,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
       }
       assertCurrentSession(generation);
-      setSpace(target);
       await refreshMe();
       assertCurrentSession(generation);
+      assertEntry(target, entryEpoch);
       return joined;
     },
     [qc, refreshMe, setSpace, endSession],
@@ -176,6 +187,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const login = useCallback(
     async (email: string, password: string, target: Space = 'couple', opts?: SessionOptions) => {
       const attempt = ++loginAttempt.current;
+      const entryEpoch = privacyEpoch();
       const generation = tokenStore.generation();
       const tokens = await apiRequest<AuthTokens>('/auth/login', {
         method: 'POST',
@@ -184,7 +196,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       });
       assertCurrentSession(generation);
       if (attempt !== loginAttempt.current) throw new Error('Phiên đăng nhập đã thay đổi.');
-      return startSession(tokens, target, opts);
+      return startSession(tokens, target, opts, entryEpoch);
     },
     [startSession],
   );
@@ -192,6 +204,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const register = useCallback(
     async (email: string, password: string, displayName: string, target: Space = 'couple', opts?: SessionOptions) => {
       const attempt = ++loginAttempt.current;
+      const entryEpoch = privacyEpoch();
       const generation = tokenStore.generation();
       const tokens = await apiRequest<AuthTokens>('/auth/register', {
         method: 'POST',
@@ -200,7 +213,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       });
       assertCurrentSession(generation);
       if (attempt !== loginAttempt.current) throw new Error('Phiên đăng nhập đã thay đổi.');
-      return startSession(tokens, target, opts);
+      return startSession(tokens, target, opts, entryEpoch);
     },
     [startSession],
   );
@@ -214,10 +227,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [endSession]);
 
+  const bootstrapError = Boolean(!me && bootstrapFailed && tokenStore.get());
+  const retryBootstrap = useCallback(() => {
+    if (loading) return;
+    setLoading(true);
+    void refreshMe().finally(() => setLoading(false));
+  }, [loading, refreshMe]);
   const value = useMemo<AuthState>(
     () => ({
       me,
       loading,
+      bootstrapError,
+      retryBootstrap,
       isAuthenticated: me !== null,
       space,
       login,
@@ -227,11 +248,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       revokeMe,
       verifyMe,
     }),
-    [me, loading, space, login, register, logout, refreshMe, revokeMe, verifyMe],
+    [me, loading, bootstrapError, retryBootstrap, space, login, register, logout, refreshMe, revokeMe, verifyMe],
   );
 
-  const bootstrapError = !me && bootstrapFailed && tokenStore.get();
-  return <AuthContext.Provider value={value}>{bootstrapError ? <main className="app-content"><ErrorState title="Chưa kiểm tra được phiên đăng nhập" message="Phiên của bạn vẫn được giữ. Thử tải lại thay vì đăng nhập lại." onRetry={() => { if (loading) return; setLoading(true); void refreshMe().finally(() => setLoading(false)); }} />{loading && <Loading />}</main> : children}</AuthContext.Provider>;
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 
 export function useAuth(): AuthState {

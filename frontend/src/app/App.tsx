@@ -1,9 +1,9 @@
-import { Suspense } from 'react';
+import { cloneElement, Suspense } from 'react';
 import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { AuthProvider, useAuth } from '../features/auth/AuthContext';
 import { ToastProvider } from '../components/Toast';
-import { Loading } from '../components/StatusViews';
+import { ErrorState, Loading } from '../components/StatusViews';
 import { ProtectedRoute } from './ProtectedRoute';
 import { RequireCouple } from './RequireCouple';
 import { RequireSpace } from './RequireSpace';
@@ -16,6 +16,8 @@ import { useFriendsTheme } from '../features/friends/useFriendsTheme';
 import { PushSync } from '../features/push/PushSync';
 import { RealtimeSync } from '../features/realtime/RealtimeSync';
 import { RealtimeBoundary } from '../features/realtime/verification';
+import { PrivacyCover, PrivacyRoutes } from '../features/privacy/PrivacyBoundary';
+import { canEnterHidden } from '../features/privacy/store';
 import {
   ApprovalsPage,
   BucketPage,
@@ -73,25 +75,21 @@ function LoginRoute() {
   return <AuthPage />;
 }
 
-/**
- * Hidden login of the friends space. Only reachable from /login (4 taps on the heart, then
- * "Đăng nhập", then the sailing boat) or from an invite link (/j/<code>), which pass `unlocked` in the history state;
- * typing the URL leads back to /login.
- */
+/** Hidden login requires a live document gesture; old history state never grants entry. */
 function FriendsLoginRoute() {
   const { isAuthenticated, space } = useAuth();
   const location = useLocation();
   const state = location.state as { unlocked?: boolean; mode?: 'login' | 'register'; invite?: { code: string; inviterName: string } } | null;
   if (isAuthenticated) return <Navigate to={homeOf(space)} replace />;
-  if (!state?.unlocked) return <Navigate to="/login" replace />;
-  return <AuthPage variant="friends" invite={state.invite} initialMode={state.mode} />;
+  if (!canEnterHidden()) return <Navigate to="/login" replace />;
+  return <AuthPage variant="friends" invite={state?.invite} initialMode={state?.mode} />;
 }
 
 /** Blue theme while the session is in the friends space or on its hidden login page. */
 function SpaceTheme() {
   const { space } = useAuth();
-  const { pathname, state } = useLocation();
-  const onHiddenLogin = pathname === FRIENDS_LOGIN && Boolean((state as { unlocked?: boolean } | null)?.unlocked);
+  const { pathname } = useLocation();
+  const onHiddenLogin = pathname === FRIENDS_LOGIN && canEnterHidden();
   useFriendsTheme(space === 'friends' || onHiddenLogin);
   return null;
 }
@@ -106,17 +104,24 @@ function PairingRoute() {
   );
 }
 
+function AuthBootstrapBoundary({ children, location }: { children: import('react').ReactElement<{ location?: ReturnType<typeof useLocation> }>; location?: ReturnType<typeof useLocation> }) {
+  const { bootstrapError, loading, retryBootstrap } = useAuth();
+  if (bootstrapError) return <main className="app-content"><ErrorState title="Chưa kiểm tra được phiên đăng nhập" message="Phiên của bạn vẫn được giữ. Thử tải lại thay vì đăng nhập lại." onRetry={retryBootstrap} />{loading && <Loading />}</main>;
+  return cloneElement(children, { location });
+}
+
 export function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <ToastProvider>
         <BrowserRouter>
+          <PrivacyCover />
           <AuthProvider>
             <SpaceTheme />
             <RouteNavigation />
             <PushSync />
             <RealtimeSync />
-            <RealtimeBoundary><Routes>
+            <RealtimeBoundary><PrivacyRoutes><AuthBootstrapBoundary><Routes>
               <Route path="/login" element={<LoginRoute />} />
               <Route path={FRIENDS_LOGIN} element={<FriendsLoginRoute />} />
               <Route
@@ -219,7 +224,7 @@ export function App() {
                 }
               />
               <Route path="*" element={<Navigate to="/" replace />} />
-            </Routes></RealtimeBoundary>
+            </Routes></AuthBootstrapBoundary></PrivacyRoutes></RealtimeBoundary>
           </AuthProvider>
         </BrowserRouter>
       </ToastProvider>
