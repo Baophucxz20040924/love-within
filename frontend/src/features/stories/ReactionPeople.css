@@ -1,0 +1,52 @@
+.post__reactions {
+  min-height: var(--touch);
+  border: 0;
+  border-radius: 8px;
+  padding: 0 4px;
+  margin-left: -4px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.post__reactions:focus-visible {
+  outline: 2px solid var(--brand, #d84170);
+  outline-offset: 2px;
+}
+
+.reaction-person {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 60px;
+  padding: 8px 0;
+}
+
+.reaction-person__name {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-weight: 600;
+}
+
+.reaction-person__you {
+  display: inline-block;
+  margin-left: 6px;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.reaction-person__reaction {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text-muted);
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.reaction-person__reaction > span:first-child { font-size: 20px; }
+.reaction-people__more { margin-top: 12px; }

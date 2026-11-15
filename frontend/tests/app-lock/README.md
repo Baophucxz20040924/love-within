@@ -12,6 +12,10 @@ npm --prefix frontend run test:realtime
 npm --prefix backend run test:privacy-lock
 ```
 
+The unlock screen uses six masked dots and a touch keypad. Six digits submit automatically through one guarded handler; invalid PIN feedback lasts 600ms, while network/rate-limit failures remain separate and never auto-resubmit. Configuration still uses explicit save/password confirmation.
+
+`pin-entry.cjs` exercises the actual component with mocked hooks/timers: leading zero, keypad/delete, partial input, duplicate/Enter guards, invalid feedback, countdown, cleanup and stale epoch/session continuations.
+
 `store.cjs` exercises actual controller/mask source with deterministic DOM and API mocks: configuration matrix, epochs/generations/revisions, invalid responses, independent masks, late portals and media. `tokens.cjs` checks atomic publication of session identity and credential pair, rotation and logout. Auth regression covers stale join completions. These are not device tests.
 
 ## Mongo integration

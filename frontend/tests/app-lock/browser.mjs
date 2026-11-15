@@ -77,7 +77,6 @@ async function background(page) {
 async function locked(page) { await page.getByLabel('Nhập mã mở ứng dụng', { exact: true }).waitFor({ state: 'visible' }); }
 async function unlock(page, pin, target) {
   await page.getByLabel('Nhập mã mở ứng dụng', { exact: true }).fill(pin);
-  await page.getByRole('button', { name: 'Mở ứng dụng', exact: true }).click();
   await page.waitForURL(url => url.pathname === target, { timeout: 20000 });
   await page.getByLabel('Nhập mã mở ứng dụng', { exact: true }).waitFor({ state: 'hidden' });
 }
@@ -122,11 +121,23 @@ try {
     await page.getByText('Khóa ứng dụng: Đang bật', { exact: true }).waitFor();
     await background(page); await locked(page);
     await shot(page, 'locked');
+    assert.equal(await page.getByRole('button', { name: 'Mở ứng dụng', exact: true }).count(), 0);
+    let attempts = 0;
+    const countAttempt = request => { if (new URL(request.url()).pathname === '/api/privacy-lock/unlock') attempts++; };
+    page.on('request', countAttempt);
+    for (const digit of lovePin.slice(0, 5)) await page.getByRole('group', { name: 'Bàn phím mã khóa' }).getByRole('button', { name: digit, exact: true }).click();
+    assert.equal(attempts, 0);
+    await page.getByRole('button', { name: 'Xóa một số', exact: true }).click();
+    assert.equal(await page.locator('.pin-entry__dot.is-filled').count(), 4);
+    await page.getByLabel('Nhập mã mở ứng dụng', { exact: true }).fill('');
     expect400('POST', '/api/privacy-lock/unlock');
     await page.getByLabel('Nhập mã mở ứng dụng', { exact: true }).fill(wrongPin);
-    await page.getByRole('button', { name: 'Mở ứng dụng', exact: true }).click();
-    await page.getByRole('alert').getByText(/Mã không đúng/).waitFor();
+      await page.getByText('Mã chưa đúng. Hãy thử lại.', { exact: true }).waitFor();
+    await page.locator('.pin-entry--invalid').waitFor({ state: 'hidden' });
+    assert.equal(attempts, 1);
     await unlock(page, lovePin, '/');
+    assert.equal(attempts, 2);
+    page.off('request', countAttempt);
   });
   await check('recovery returns full password login and preserves configured PIN', async () => {
     await background(page); await locked(page);
@@ -189,12 +200,11 @@ try {
     };
     await page.route('**/api/privacy-lock/unlock', handler);
     await page.getByLabel('Nhập mã mở ứng dụng', { exact: true }).fill(lovePin);
-    await page.getByRole('button', { name: 'Mở ứng dụng', exact: true }).click();
-    await arrived;
+      await arrived;
     await background(page);
     release();
     await locked(page);
-    await page.getByRole('button', { name: 'Mở ứng dụng', exact: true }).waitFor();
+    await page.getByRole('group', { name: 'Bàn phím mã khóa' }).waitFor();
     assert.equal(new URL(page.url()).pathname, '/login');
     await page.unroute('**/api/privacy-lock/unlock', handler);
     await unlock(page, darkPin, '/friends');

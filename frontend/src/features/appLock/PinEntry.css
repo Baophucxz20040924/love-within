@@ -1,0 +1,34 @@
+.pin-entry { width: 100%; max-width: 300px; margin: 0 auto; text-align: center; color: #422b34; }
+.pin-entry__label { display: block; font-size: 19px; font-weight: 700; }
+.pin-entry__hint { margin: 6px 0 12px; color: #806b76; font-size: 13px; }
+.pin-entry__control { position: relative; border-radius: 16px; }
+.pin-entry__control:focus-within { outline: 2px solid #bd3155; outline-offset: 4px; }
+.pin-entry__input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; font-size: 16px; cursor: text; z-index: 1; }
+.pin-entry__dots { display: flex; justify-content: center; gap: 18px; padding: 18px 8px; pointer-events: none; }
+.pin-entry__dot { width: 14px; height: 14px; border: 1.5px solid #bd8f9d; border-radius: 50%; background: transparent; transition: background 120ms ease, border-color 120ms ease; }
+.pin-entry__dot.is-filled { border-color: #b82d51; background: #b82d51; }
+.pin-entry__status { min-height: 42px; padding: 6px 0; font-size: 12px; color: #806b76; }
+.pin-entry--invalid .pin-entry__dots { animation: pin-reject 280ms ease-in-out; }
+.pin-entry--invalid .pin-entry__dot { background: #d3323d; border-color: #d3323d; }
+.pin-entry--invalid .pin-entry__status { color: #b62431; }
+.pin-entry__keypad { display: grid; grid-template-columns: repeat(3, 1fr); justify-items: center; gap: 12px 20px; }
+.pin-entry__key { width: 64px; height: 64px; border: 1px solid #efdee4; border-radius: 50%; background: #faf1f4; color: #422b34; font: inherit; font-size: 27px; font-weight: 500; cursor: pointer; touch-action: manipulation; transition: background 120ms ease, transform 120ms ease; }
+.pin-entry__key:active:not(:disabled) { background: #f1d6df; transform: scale(.95); }
+.pin-entry__key:focus-visible { outline: 2px solid #bd3155; outline-offset: 3px; }
+.pin-entry__key:disabled { opacity: .45; cursor: default; }
+.pin-entry__key--delete { background: transparent; border-color: transparent; font-size: 25px; }
+.app-lock-cover:has(.pin-entry) { padding-top: max(20px, env(safe-area-inset-top)); padding-bottom: max(16px, env(safe-area-inset-bottom)); gap: 20px; }
+.app-lock-cover:has(.pin-entry) .auth__brand .brand-mark { width: 56px; height: 56px; border-radius: 20px; }
+.app-lock-cover:has(.pin-entry) .auth__title { font-size: 25px; }
+.app-lock-cover:has(.pin-entry) > .card { width: min(100%, 360px); }
+@keyframes pin-reject { 25% { transform: translateX(-6px); } 75% { transform: translateX(6px); } }
+@media (max-height: 720px) {
+  .app-lock-cover:has(.pin-entry) { gap: 10px; justify-content: flex-start; }
+  .pin-entry__key { width: 52px; height: 52px; font-size: 24px; }
+  .pin-entry__keypad { gap: 8px 20px; }
+  .pin-entry__dots { padding: 12px 8px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .pin-entry__dot, .pin-entry__key { transition: none; }
+  .pin-entry--invalid .pin-entry__dots { animation: none; }
+}

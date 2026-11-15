@@ -24,7 +24,7 @@ const map: Record<Domain, readonly QueryKey[]> = {
   finance: [['finance']],
   assistant: [['finance', 'assistant']],
   friends: [['friends']],
-  'friend-posts': [['friends', 'feed'], ['friends', 'story'], ['friends', 'comments'], ['friends', 'user-stories'], ['friends', 'poll-voters'], ['friends', 'mentionable']],
+  'friend-posts': [['friends', 'feed'], ['friends', 'story'], ['friends', 'comments'], ['friends', 'user-stories'], ['friends', 'poll-voters'], ['friends', 'reactions'], ['friends', 'mentionable']],
   'friend-events': [['friends', 'events'], ['friends', 'event'], ['friends', 'event-comments']],
   'friend-outings': [['friends', 'outings'], ['friends', 'outing']],
   'friend-notifications': [['friends', 'notifications'], ['friends', 'unread']],

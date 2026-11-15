@@ -25,11 +25,12 @@ export function profileOf(profiles: Map<string, PublicProfile>, id: Types.Object
 
 export const profileService = {
   /** Name + photo for several users with one query. Signing photo URLs is local (no network call). */
-  async load(ids: Types.ObjectId[]): Promise<Map<string, PublicProfile>> {
+  async load(ids: Types.ObjectId[], options?: { skipMissing?: boolean }): Promise<Map<string, PublicProfile>> {
     const unique = [...new Map(ids.map((id) => [id.toString(), id])).values()];
     const rows = await userRepository.findProfiles(unique);
+    const included = options?.skipMissing ? unique.filter((id) => rows.has(id.toString())) : unique;
     const entries = await Promise.all(
-      unique.map(async (id): Promise<[string, PublicProfile]> => {
+      included.map(async (id): Promise<[string, PublicProfile]> => {
         const key = id.toString();
         const row = rows.get(key);
         return [key, { id: key, displayName: row?.displayName ?? UNKNOWN_NAME, avatarUrl: await avatarUrlOf(row?.avatarKey) }];

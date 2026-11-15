@@ -81,6 +81,10 @@ const voteSchema = z.object({
   optionIds: z.array(optionId).min(1, 'Hãy chọn ít nhất một lựa chọn').max(POLL_MAX_OPTIONS),
 });
 const votersQuery = z.object({ option: optionId });
+const reactionsQuery = z.object({
+  cursor: objectId.optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(50),
+});
 
 const uploadSchema = z.object({
   mimeType: z.enum(Object.keys(STORY_IMAGE_TYPES) as [string, ...string[]]),
@@ -168,6 +172,16 @@ friendStoryRouter.delete(
   asyncHandler(async (req, res) => {
     await friendStoryService.remove(req.friendsMember!, req.params.id);
     ok(res, { ok: true });
+  }),
+);
+
+/** GET reactions in stable user-ID order, excluding profiles blocked either way. */
+friendStoryRouter.get(
+  '/:id/reactions', expensiveReadLimiter,
+  validate({ params: idParam, query: reactionsQuery }),
+  asyncHandler(async (req, res) => {
+    const cursor = typeof req.query.cursor === 'string' ? req.query.cursor : undefined;
+    ok(res, await friendStoryService.reactions(req.friendsMember!, req.params.id, cursor, Number(req.query.limit)));
   }),
 );
 

@@ -16,6 +16,7 @@ import type {
   FriendStory,
   FriendStoryInput,
   FriendStoryPage,
+  FriendStoryReactionsPage,
   FriendSuggestion,
   FriendUser,
   FriendsOverview,
@@ -92,6 +93,8 @@ export const friendStoriesApi = {
   remove: (id: string) => apiRequest<{ ok: true }>(`/friends/stories/${enc(id)}`, { method: 'DELETE' }),
   react: (id: string, type: string) => apiRequest<FriendStory>(`/friends/stories/${enc(id)}/reaction`, { method: 'PUT', body: { type } }),
   unreact: (id: string) => apiRequest<FriendStory>(`/friends/stories/${enc(id)}/reaction`, { method: 'DELETE' }),
+  reactions: (id: string, cursor?: string) =>
+    apiRequest<FriendStoryReactionsPage>(`/friends/stories/${enc(id)}/reactions?limit=50${cursor ? `&cursor=${enc(cursor)}` : ''}`),
   hide: (id: string) => apiRequest<{ ok: true }>(`/friends/stories/${enc(id)}/hide`, { method: 'POST' }),
   comments: (id: string) => apiRequest<FriendCommentThread[]>(`/friends/stories/${enc(id)}/comments`),
   /** A comment, or a reply with parentId (BB8). Mention offsets are relative to the trimmed body. */
@@ -161,6 +164,7 @@ export const FRIENDS_UNREAD_KEY = ['friends', 'unread'] as const;
 export const friendSearchKey = (q: string) => ['friends', 'search', q] as const;
 export const FRIEND_FEED_KEY = ['friends', 'feed'] as const;
 export const friendStoryKey = (id: string) => ['friends', 'story', id] as const;
+export const friendReactionsKey = (id: string) => ['friends', 'reactions', id] as const;
 export const friendCommentsKey = (id: string) => ['friends', 'comments', id] as const;
 export const FRIEND_NOTIFICATIONS_KEY = ['friends', 'notifications'] as const;
 export const friendProfileKey = (id: string) => ['friends', 'profile', id] as const;

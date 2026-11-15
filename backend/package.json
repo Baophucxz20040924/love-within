@@ -12,6 +12,7 @@
     "test:realtime": "node tests/realtime/run.cjs",
     "test:privacy-lock": "npm run build && node tests/privacy-lock/service.cjs",
     "test:mentions": "node tests/post-mentions/story.test.cjs && node tests/post-mentions/repository.test.cjs && node tests/post-mentions/notification.test.cjs",
+    "test:reactions": "node tests/post-mentions/reactions.test.cjs",
     "test:media": "node tests/post-media/story.test.cjs && node tests/post-media/storage.test.cjs",
     "test:ai": "tsx scripts/test-ai.ts",
     "seed:couple": "tsx scripts/seed-couple.ts",

@@ -1,6 +1,7 @@
 import { useSyncExternalStore, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { setAppMask, setVerificationHost } from '../appLock/mask';
+import { VerificationScreen } from './VerificationScreen';
 
 type Status = 'clear' | 'checking' | 'failed';
 let status: Status = 'clear';
@@ -30,9 +31,8 @@ export function RealtimeBoundary({ children }: { children: ReactNode }) {
   const state = useSyncExternalStore(subscribeVerification, getVerificationStatus, () => 'clear' as Status);
   return <>
     {children}
-    {state !== 'clear' && statusHost && createPortal(<main className="app-content" role="status" aria-live="polite">
-      <p>{state === 'checking' ? 'Đang kiểm tra lại quyền truy cập…' : 'Chưa kiểm tra được quyền truy cập. Nội dung được tạm ẩn để bảo vệ dữ liệu.'}</p>
-      {state === 'failed' && <button type="button" className="btn btn-primary" onClick={() => retry?.()}>Thử lại</button>}
-    </main>, statusHost)}
+    {state !== 'clear' && statusHost && createPortal(
+      <VerificationScreen state={state} onRetry={() => retry?.()} />, statusHost,
+    )}
   </>;
 }

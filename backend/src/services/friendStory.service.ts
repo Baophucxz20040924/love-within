@@ -573,6 +573,31 @@ export const friendStoryService = {
     return viewOne(me, story);
   },
 
+  /** Reactions have no timestamps: page by user ID, not by reaction recency. */
+  async reactions(me: UserDoc, id: string, cursor: string | undefined, limit: number): Promise<{
+    items: (PublicProfile & { type: ReactionType })[]; nextCursor: string | null;
+  }> {
+    const story = await requireVisible(me, id);
+    const blocked = await friendBlockRepository.blockedIdsFor(me._id);
+    const after = cursor?.toLowerCase();
+    const candidates = [...(story.reactions ?? new Map<string, ReactionType>()).entries()]
+      .filter(([userId]) => !blocked.has(userId) && (!after || userId > after))
+      .sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0);
+    const found: (PublicProfile & { type: ReactionType })[] = [];
+    // Continue past deleted users, but never return their IDs as cursors or profile placeholders.
+    for (let offset = 0; offset < candidates.length && found.length <= limit; offset += limit + 1) {
+      const batch = candidates.slice(offset, offset + limit + 1);
+      const profiles = await profileService.load(toObjectIds(batch.map(([userId]) => userId)), { skipMissing: true });
+      for (const [userId, type] of batch) {
+        const profile = profiles.get(userId);
+        if (profile) found.push({ id: profile.id, displayName: profile.displayName, avatarUrl: profile.avatarUrl, type });
+        if (found.length > limit) break;
+      }
+    }
+    const items = found.slice(0, limit);
+    return { items, nextCursor: found.length > limit ? items[items.length - 1].id : null };
+  },
+
   /**
    * BB6: choose (or change to) `optionIds` in the post's poll; anyone who may see the post, the author too. One vote per
    * person, written atomically on the person's own key. 404 if the post cannot be seen or has no poll, 409 POLL_CLOSED

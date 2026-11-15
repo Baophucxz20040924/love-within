@@ -733,6 +733,15 @@ export interface PollVoters {
   items: FriendUser[];
 }
 
+export interface StoryReactor extends FriendUser {
+  type: ReactionType;
+}
+
+export interface FriendStoryReactionsPage {
+  items: StoryReactor[];
+  nextCursor: string | null;
+}
+
 export interface FriendStoryPage {
   items: FriendStory[];
   nextCursor: string | null;

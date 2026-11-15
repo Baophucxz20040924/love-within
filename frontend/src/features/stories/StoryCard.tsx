@@ -10,13 +10,14 @@ import { useAuth } from '../auth/AuthContext';
 import { useAvatarOf } from '../auth/useAvatarOf';
 import { ApiRequestError } from '../../lib/apiClient';
 import { formatDateTime, formatDay, localDateOf, shortName, timeAgo } from '../../lib/format';
-import type { ReactionType, Story } from '../../lib/types';
+import type { ReactionType, Story, StoryReactor } from '../../lib/types';
 import { STORY_UNREAD_KEY, storiesApi } from './api';
 import { removeStoryFromCache, replaceStoryInCache, updateStoryInCache } from './cache';
 import { moodOf, reactionOf } from './constants';
 import { PhotoGrid } from './PhotoGrid';
 import { PostVideo } from './PostVideo';
 import { ReactionButton } from './ReactionButton';
+import { ReactionPeople } from './ReactionPeople';
 
 interface Props {
   story: Story;
@@ -31,7 +32,7 @@ interface Props {
   onComment?: () => void;
 }
 
-function ReactionSummary({ story }: { story: Story }) {
+function ReactionSummary({ story, onOpen }: { story: Story; onOpen: () => void }) {
   const { me } = useAuth();
   const partner = me?.couple?.members.find((m) => m.id !== me.user.id);
   const { mine, partner: theirs } = story.reactions;
@@ -40,7 +41,7 @@ function ReactionSummary({ story }: { story: Story }) {
   const partnerName = partner ? shortName(partner.displayName) : 'Người ấy';
   const who = mine && theirs ? `Bạn và ${partnerName}` : mine ? 'Bạn' : partnerName;
   return (
-    <span className="post__reactions">
+    <button type="button" className="post__reactions" aria-label="Xem người đã thả cảm xúc" onClick={onOpen}>
       <span className="reaction-stack" aria-hidden="true">
         {types.map((t) => (
           <span key={t} className="reaction-stack__item">
@@ -49,7 +50,7 @@ function ReactionSummary({ story }: { story: Story }) {
         ))}
       </span>
       <span>{who}</span>
-    </span>
+    </button>
   );
 }
 
@@ -61,6 +62,7 @@ export function StoryCard({ story, isNew = false, clamp = true, onEdit, onDelete
   const tz = me?.couple?.timezone ?? 'Asia/Ho_Chi_Minh';
   const [expanded, setExpanded] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [reactionsOpen, setReactionsOpen] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [gallery, setGallery] = useState<number | null>(null);
 
@@ -68,6 +70,10 @@ export function StoryCard({ story, isNew = false, clamp = true, onEdit, onDelete
   const isLong = story.body.length > 280 || story.body.split('\n').length > 5;
   const isShortText = story.photos.length === 0 && !story.videos?.length && story.body.length > 0 && story.body.length <= 85 && !story.body.includes('\n');
   const memoryDay = story.happenedOn !== localDateOf(story.createdAt, tz) ? story.happenedOn : null;
+  const partner = me?.couple?.members.find((member) => member.id !== me.user.id);
+  const people: StoryReactor[] = [];
+  if (me && story.reactions.mine) people.push({ id: me.user.id, displayName: me.user.displayName, avatarUrl: avatarOf(me.user.id), type: story.reactions.mine });
+  if (partner && story.reactions.partner) people.push({ id: partner.id, displayName: partner.displayName, avatarUrl: avatarOf(partner.id), type: story.reactions.partner });
 
   const react = useMutation({
     mutationFn: (type: ReactionType | null) => (type ? storiesApi.react(story.id, type) : storiesApi.unreact(story.id)),
@@ -152,7 +158,7 @@ export function StoryCard({ story, isNew = false, clamp = true, onEdit, onDelete
 
       {(story.reactions.mine || story.reactions.partner || story.commentCount > 0) && (
         <div className="post__stats">
-          <ReactionSummary story={story} />
+          <ReactionSummary story={story} onOpen={() => setReactionsOpen(true)} />
           {story.commentCount > 0 && (
             <button type="button" className="post__stat-link" onClick={onComment}>
               {story.commentCount} bình luận
@@ -168,6 +174,10 @@ export function StoryCard({ story, isNew = false, clamp = true, onEdit, onDelete
           <span>Bình luận</span>
         </button>
       </div>
+
+      <BottomSheet open={reactionsOpen} onClose={() => setReactionsOpen(false)} title="Người đã thả cảm xúc">
+        {people.length ? <ReactionPeople people={people} myId={me?.user.id} /> : <p className="text-muted">Chưa có ai để hiện ở đây.</p>}
+      </BottomSheet>
 
       <BottomSheet open={menuOpen} onClose={() => setMenuOpen(false)} title="Bài viết của bạn">
         <div className="list">

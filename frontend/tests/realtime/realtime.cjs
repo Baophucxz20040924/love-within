@@ -42,7 +42,7 @@ const tick = () => new Promise(resolve => setTimeout(resolve, 0));
   assert.throws(() => new parser.EventParser().push(encode.encode('x'.repeat(65537))), /large/);
   assert.equal(new parser.EventParser().push(encode.encode(frame('dirty', { version: 1, domains: ['water'] }).repeat(2000))).length, 2000);
   const keys = plain(invalidation.queryPrefixes(['friend-events', 'friend-outings', 'friend-posts', 'friend-notifications']));
-  for (const key of ['events', 'event', 'event-comments', 'outings', 'outing', 'feed', 'story', 'comments', 'user-stories', 'poll-voters', 'notifications', 'unread']) assert.ok(keys.some(k => k[0] === 'friends' && k[1] === key), key);
+  for (const key of ['events', 'event', 'event-comments', 'outings', 'outing', 'feed', 'story', 'comments', 'user-stories', 'poll-voters', 'reactions', 'notifications', 'unread']) assert.ok(keys.some(k => k[0] === 'friends' && k[1] === key), key);
   assert.deepEqual(plain(invalidation.queryPrefixes(['friend-events', 'friends'])), [['friends']]);
   assert.ok(invalidation.needsMe(invalidation.scopeDomains('couple')));
   const calls = [];
@@ -58,6 +58,13 @@ const tick = () => new Promise(resolve => setTimeout(resolve, 0));
   assert.equal(realCache.getQueryData(['friends', 'outing', '1']), undefined, 'revocation clears warm cache synchronously');
   resolveOld({ secret: 'late' }); await oldFetch;
   assert.equal(realCache.getQueryData(['friends', 'outing', '1']), undefined, 'cancelled GET cannot repopulate');
+  realCache.setQueryData(['friends', 'reactions', 'post'], { pages: [{ items: [{ id: 'private' }] }] });
+  let resolveReactions;
+  const oldReactions = realCache.fetchQuery({ queryKey: ['friends', 'reactions', 'post'], queryFn: () => new Promise(resolve => { resolveReactions = resolve; }) }).catch(() => undefined);
+  invalidation.revokeDomains(realCache, 'friends', ['friend-posts']);
+  assert.equal(realCache.getQueryData(['friends', 'reactions', 'post']), undefined, 'post revocation clears reactions');
+  resolveReactions({ pages: [{ items: [{ id: 'late' }] }] }); await oldReactions;
+  assert.equal(realCache.getQueryData(['friends', 'reactions', 'post']), undefined, 'cancelled reaction list cannot repopulate');
   await realCache.fetchQuery({ queryKey: ['friends', 'outing', '1'], queryFn: async () => ({ access: 'restricted', balance: 17 }) });
   assert.deepEqual(realCache.getQueryData(['friends', 'outing', '1']), { access: 'restricted', balance: 17 });
   // A seen acknowledgement must synchronize badges across tabs without refetching
@@ -108,7 +115,7 @@ const tick = () => new Promise(resolve => setTimeout(resolve, 0));
   const root = new Element(); const portal = new Element();
   const body = { children: [root, portal], appendChild: node => body.children.push(node) };
   const maskCalls = []; let host;
-  const verification = load('features/realtime/verification.tsx', { react: {}, 'react/jsx-runtime': {}, 'react-dom': {}, '../appLock/mask': {
+  const verification = load('features/realtime/verification.tsx', { react: {}, 'react/jsx-runtime': {}, 'react-dom': {}, './VerificationScreen': {}, '../appLock/mask': {
     setAppMask: (reason, enabled) => maskCalls.push([reason, enabled]), setVerificationHost: node => { host = node; },
   } }, { document: { body, createElement: tag => new Element(tag.toUpperCase()) } });
   verification.setVerification('checking');

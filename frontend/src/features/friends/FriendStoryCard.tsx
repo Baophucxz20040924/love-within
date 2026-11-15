@@ -13,7 +13,8 @@ import { PhotoGrid } from '../stories/PhotoGrid';
 import { PostVideo } from '../stories/PostVideo';
 import { ReactionButton } from '../stories/ReactionButton';
 import { reactionOf } from '../stories/constants';
-import { friendStoriesApi } from './api';
+import { friendReactionsKey, friendStoriesApi } from './api';
+import { FriendReactionsSheet } from './FriendReactionsSheet';
 import { removeFriendStoryFromCache, replaceFriendStoryInCache, updateFriendStoryInCache } from './cache';
 import { FriendPollView } from './FriendPoll';
 import { segments } from './mentions';
@@ -33,12 +34,12 @@ interface Props {
 const errorText = (err: unknown) => (err instanceof ApiRequestError ? err.message : 'Có lỗi xảy ra, thử lại nhé.');
 
 /** "Bạn và 3 người khác" / "Bạn" / "4" next to the reaction emojis, like Facebook. */
-function ReactionSummary({ story }: { story: FriendStory }) {
+function ReactionSummary({ story, onOpen }: { story: FriendStory; onOpen: () => void }) {
   const { mine, total, top } = story.reactions;
   if (total === 0) return <span />;
   const who = mine ? (total > 1 ? `Bạn và ${total - 1} người khác` : 'Bạn') : String(total);
   return (
-    <span className="post__reactions">
+    <button type="button" className="post__reactions" aria-label="Xem người đã thả cảm xúc" onClick={onOpen}>
       <span className="reaction-stack" aria-hidden="true">
         {top.map((t) => (
           <span key={t} className="reaction-stack__item">
@@ -47,7 +48,7 @@ function ReactionSummary({ story }: { story: FriendStory }) {
         ))}
       </span>
       <span>{who}</span>
-    </span>
+    </button>
   );
 }
 
@@ -64,6 +65,7 @@ export function FriendStoryCard({ story, clamp = true, onEdit, onDeleted, onComm
   const toast = useToast();
   const [expanded, setExpanded] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [reactionsOpen, setReactionsOpen] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [gallery, setGallery] = useState<number | null>(null);
   const [reporting, setReporting] = useState<ReportTargetInfo | null>(null);
@@ -77,7 +79,10 @@ export function FriendStoryCard({ story, clamp = true, onEdit, onDeleted, onComm
   const react = useMutation({
     mutationFn: (type: ReactionType | null) => (type ? friendStoriesApi.react(story.id, type) : friendStoriesApi.unreact(story.id)),
     onMutate: (type) => updateFriendStoryInCache(qc, story.id, (s) => withMyReaction(s, type)),
-    onSuccess: (s) => replaceFriendStoryInCache(qc, s),
+    onSuccess: (s) => {
+      replaceFriendStoryInCache(qc, s);
+      void qc.invalidateQueries({ queryKey: friendReactionsKey(story.id) });
+    },
     onError: (err) => {
       toast.error(err instanceof ApiRequestError ? err.message : 'Không thả được cảm xúc, thử lại nhé.');
       void qc.invalidateQueries({ queryKey: ['friends'] });
@@ -181,7 +186,7 @@ export function FriendStoryCard({ story, clamp = true, onEdit, onDeleted, onComm
 
       {(story.reactions.total > 0 || story.commentCount > 0) && (
         <div className="post__stats">
-          <ReactionSummary story={story} />
+          <ReactionSummary story={story} onOpen={() => setReactionsOpen(true)} />
           {story.commentCount > 0 && (
             <button type="button" className="post__stat-link" onClick={onComment}>
               {story.commentCount} bình luận
@@ -230,6 +235,8 @@ export function FriendStoryCard({ story, clamp = true, onEdit, onDeleted, onComm
           </div>
         </div>
       </BottomSheet>
+
+      {reactionsOpen && <FriendReactionsSheet key={story.id} storyId={story.id} onClose={() => setReactionsOpen(false)} />}
 
       <ReportSheet target={reporting} onClose={() => setReporting(null)} onBlock={setBlocking} onHide={() => hide.mutate()} />
       <BlockSheet user={blocking} onClose={() => setBlocking(null)} onBlocked={() => onDeleted?.()} />
