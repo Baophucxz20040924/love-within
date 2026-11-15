@@ -9,36 +9,32 @@ import { Avatar } from '../../components/Avatar';
 import { Icon } from '../../components/Icon';
 import { useToast } from '../../components/Toast';
 import { useAuth } from '../auth/AuthContext';
+import { assertCurrentSession } from '../../lib/apiClient';
+import { tokenStore } from '../../lib/tokenStore';
 import { formatDay, localDateOf, shortName } from '../../lib/format';
 import type { Mood, Story } from '../../lib/types';
-import { storiesApi, uploadStoryPhoto } from './api';
+import { storiesApi } from './api';
+import { PostMediaEditor } from './PostMediaEditor';
+import { POST_MEDIA_ACCEPT, type ExistingMedia } from './postMedia';
+import { usePostMedia } from './usePostMedia';
+import { uploadPostMedia, type PostMediaUploadCache } from './uploadPostMedia';
 import { prependStoryToFeed, replaceStoryInCache } from './cache';
 import { DateSheet, LeaveSheet, MoodSheet } from './ComposerPickers';
 import { moodOf } from './constants';
 import { clearDraft, loadDraft, saveDraft } from './draft';
 
-const MAX_PHOTOS = 10;
-
-type LocalPhoto =
-  | { id: string; kind: 'existing'; key: string; url: string; width: number; height: number }
-  | { id: string; kind: 'new'; file: File; url: string };
-
-type Uploaded = { key: string; width: number; height: number };
-
-let seq = 0;
-const nextId = () => `p${++seq}`;
-
-function fromFiles(files: File[]): LocalPhoto[] {
-  return files
-    .filter((f) => f.type.startsWith('image/'))
-    .map((file) => ({ id: nextId(), kind: 'new' as const, file, url: URL.createObjectURL(file) }));
+function existingMedia(story: Story | null): ExistingMedia[] {
+  return [
+    ...(story?.photos ?? []).map((p) => ({ ...p, id: p.key, kind: 'existing' as const, mediaType: 'image' as const })),
+    ...(story?.videos ?? []).map((v) => ({ ...v, id: v.key, kind: 'existing' as const, mediaType: 'video' as const })),
+  ];
 }
 
 interface Props {
   open: boolean;
   /** null = new post. */
   editing: Story | null;
-  /** Photos picked from the feed's photo button before the composer opened. */
+  /** Media picked from the feed before the composer opened. */
   initialFiles?: File[];
   onClose: () => void;
 }
@@ -64,10 +60,7 @@ function ComposerDialog({ editing, initialFiles, onClose }: { editing: Story | n
   const [mood, setMood] = useState<Mood | null>(editing?.mood ?? draft?.mood ?? null);
   // New posts: null = "today at posting time". Edits always keep an explicit day.
   const [happenedOn, setHappenedOn] = useState<string | null>(editing?.happenedOn ?? draft?.happenedOn ?? null);
-  const [photos, setPhotos] = useState<LocalPhoto[]>(() => {
-    const existing: LocalPhoto[] = (editing?.photos ?? []).map((p) => ({ id: nextId(), kind: 'existing', ...p }));
-    return [...existing, ...fromFiles(initialFiles.slice(0, MAX_PHOTOS - existing.length))];
-  });
+  const { media, addFiles, remove, pending, errors: mediaErrors } = usePostMedia(existingMedia(editing), initialFiles);
   const [moodOpen, setMoodOpen] = useState(false);
   const [dateOpen, setDateOpen] = useState(false);
   const [leaveOpen, setLeaveOpen] = useState(false);
@@ -75,26 +68,19 @@ function ComposerDialog({ editing, initialFiles, onClose }: { editing: Story | n
   const [status, setStatus] = useState<string | null>(null);
   const { error, setError, errorRef, submitting, errorId, hintId } = useComposerFeedback();
 
-  const uploaded = useRef(new Map<string, Uploaded>()); // reused if posting is retried after an error
+  const uploaded = useRef<PostMediaUploadCache>(new Map());
+  const mounted = useRef(false);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   const finished = useRef(false); // posted or discarded: stop autosaving the draft
   const fileRef = useRef<HTMLInputElement>(null);
   const textRef = useRef<HTMLTextAreaElement>(null);
-  const photosRef = useRef(photos);
-  photosRef.current = photos;
-
-  useEffect(() => {
-    return () => {
-      for (const p of photosRef.current) if (p.kind === 'new') URL.revokeObjectURL(p.url);
-    };
-  }, []);
-
   // Grow the textarea with its content.
   useEffect(() => {
     const el = textRef.current;
     if (!el) return;
     el.style.height = 'auto';
     el.style.height = `${el.scrollHeight}px`;
-  }, [body, photos.length]);
+  }, [body, media.length]);
 
   // Autosave text, mood and date for new posts (survives the phone killing the tab).
   useEffect(() => {
@@ -106,18 +92,18 @@ function ComposerDialog({ editing, initialFiles, onClose }: { editing: Story | n
   }, [editing, userId, body, mood, happenedOn]);
 
   const original = useMemo(
-    () => (editing ? JSON.stringify([editing.body, editing.mood ?? null, editing.happenedOn, editing.photos.map((p) => p.key)]) : ''),
+    () => (editing ? JSON.stringify([editing.body, editing.mood ?? null, editing.happenedOn, existingMedia(editing).map((p) => p.key)]) : ''),
     [editing],
   );
-  const current = JSON.stringify([body.trim(), mood, happenedOn, photos.map((p) => (p.kind === 'existing' ? p.key : p.id))]);
-  const hasContent = body.trim().length > 0 || photos.length > 0;
+  const current = JSON.stringify([body.trim(), mood, happenedOn, media.map((p) => (p.kind === 'existing' ? p.key : p.id))]);
+  const hasContent = body.trim().length > 0 || media.length > 0;
   const changed = editing ? current !== original : hasContent || mood !== null || happenedOn !== null;
-  const canSubmit = !busy && hasContent && (!editing || changed);
+  const canSubmit = !busy && !pending && !mediaErrors && hasContent && (!editing || changed);
 
   const m = moodOf(mood);
   const effectiveDay = happenedOn ?? today;
   const showDay = effectiveDay !== baseDay;
-  const big = photos.length === 0 && body.length < 85 && !body.includes('\n');
+  const big = media.length === 0 && body.length < 85 && !body.includes('\n');
 
   function finish() {
     finished.current = true;
@@ -134,45 +120,31 @@ function ComposerDialog({ editing, initialFiles, onClose }: { editing: Story | n
     if (submitting.current) return;
     const files = Array.from(e.target.files ?? []);
     e.target.value = '';
-    const room = MAX_PHOTOS - photos.length;
-    if (files.length > room) toast.info(`Mỗi bài viết tối đa ${MAX_PHOTOS} ảnh`);
-    const added = fromFiles(files.slice(0, Math.max(0, room)));
-    if (added.length) setPhotos((ps) => [...ps, ...added]);
+    addFiles(files);
   }
 
-  function removePhoto(id: string) {
-    const p = photos.find((x) => x.id === id);
-    if (p?.kind === 'new') URL.revokeObjectURL(p.url);
+  function removeMedia(id: string) {
     uploaded.current.delete(id);
-    setPhotos((ps) => ps.filter((x) => x.id !== id));
+    remove(id);
   }
 
   async function submit() {
     if (!canSubmit || submitting.current) return;
+    const generation = tokenStore.generation();
+    const assertActive = () => {
+      assertCurrentSession(generation);
+      if (!mounted.current) throw new DOMException('Đã đóng bài viết.', 'AbortError');
+    };
     submitting.current = true;
     setError(null);
     setBusy(true);
     try {
-      const total = photos.filter((p) => p.kind === 'new').length;
-      const out: Uploaded[] = [];
-      let n = 0;
-      for (const p of photos) {
-        if (p.kind === 'existing') {
-          out.push({ key: p.key, width: p.width, height: p.height });
-          continue;
-        }
-        n += 1;
-        let up = uploaded.current.get(p.id);
-        if (!up) {
-          setStatus(`Đang tải ảnh ${n}/${total}…`);
-          up = await uploadStoryPhoto(p.file);
-          uploaded.current.set(p.id, up);
-        }
-        out.push(up);
-      }
+      const attachments = await uploadPostMedia(media, uploaded.current, storiesApi, setStatus, assertActive);
+      assertActive();
       setStatus(editing ? 'Đang lưu…' : 'Đang đăng…');
-      const input = { body: body.trim(), mood, happenedOn, photos: out };
+      const input = { body: body.trim(), mood, happenedOn, ...attachments };
       const story = editing ? await storiesApi.update(editing.id, input) : await storiesApi.create(input);
+      assertActive();
       if (editing) {
         replaceStoryInCache(qc, story);
       } else {
@@ -182,6 +154,7 @@ function ComposerDialog({ editing, initialFiles, onClose }: { editing: Story | n
       toast.success(editing ? 'Đã lưu thay đổi' : 'Đã đăng bài viết 💞');
       finish();
     } catch (err) {
+      if (!mounted.current || !tokenStore.isCurrent(generation)) return;
       // ApiRequestError extends Error, so server messages ("Có ảnh chưa tải lên xong…") show as-is.
       setError(err instanceof Error ? err.message : 'Không đăng được, thử lại nhé.');
       submitting.current = false;
@@ -239,28 +212,10 @@ function ComposerDialog({ editing, initialFiles, onClose }: { editing: Story | n
           maxLength={20_000}
           rows={3}
           aria-label="Nội dung bài viết"
-          placeholder={photos.length ? 'Hãy nói gì đó về những bức ảnh này…' : `${shortName(authorName)} ơi, bạn đang nghĩ gì?`}
+          placeholder={media.length ? 'Hãy nói gì đó về ảnh hoặc video này…' : `${shortName(authorName)} ơi, bạn đang nghĩ gì?`}
         />
 
-        {photos.length > 0 && (
-          <div className="composer__photos">
-            {photos.map((p) => (
-              <div key={p.id} className="composer__photo">
-                <img src={p.url} alt="" />
-                <button type="button" className="composer__photo-remove" aria-label="Bỏ ảnh này" disabled={busy} onClick={() => removePhoto(p.id)}>
-                  <span>
-                    <Icon name="x" size={16} />
-                  </span>
-                </button>
-              </div>
-            ))}
-            {photos.length < MAX_PHOTOS && (
-              <button type="button" className="composer__add" aria-label="Thêm ảnh" disabled={busy} onClick={() => fileRef.current?.click()}>
-                <Icon name="plus" size={26} />
-              </button>
-            )}
-          </div>
-        )}
+        <PostMediaEditor media={media} busy={busy} onRemove={removeMedia} onAdd={() => fileRef.current?.click()} />
       </div>
 
       <footer className="composer__footer">
@@ -270,14 +225,15 @@ function ComposerDialog({ editing, initialFiles, onClose }: { editing: Story | n
           </p>
         )}
         {error && <p ref={errorRef} id={errorId} className="form-feedback" role="alert" tabIndex={-1}>{error}</p>}
-        <p id={hintId} className="composer__hint">Chỉ hai bạn xem được bài viết. Thêm tối đa 10 ảnh.</p>
+        {pending && <p className="composer__status" role="status">Đang xử lý ảnh/video…</p>}
+        <p id={hintId} className="composer__hint">Chỉ hai bạn xem được bài viết. Tối đa 10 tệp, gồm 1 video MP4/WebM ≤ 50 MB.</p>
         <div className="composer__tools">
           <span className="composer__tools-label">Thêm vào bài viết</span>
           <button
             type="button"
             className="tool-btn tool-btn--photo"
-            aria-label="Thêm ảnh"
-            disabled={busy || photos.length >= MAX_PHOTOS}
+            aria-label="Thêm ảnh hoặc video"
+            disabled={busy}
             onClick={() => fileRef.current?.click()}
           >
             <Icon name="image" />
@@ -298,7 +254,7 @@ function ComposerDialog({ editing, initialFiles, onClose }: { editing: Story | n
         </div>
       </footer>
 
-      <input ref={fileRef} disabled={busy} type="file" accept="image/*" multiple hidden onChange={onPick} />
+      <input ref={fileRef} disabled={busy} type="file" accept={POST_MEDIA_ACCEPT} multiple hidden onChange={onPick} />
 
       <MoodSheet open={moodOpen} value={mood} onClose={() => setMoodOpen(false)} onPick={setMood} />
       <DateSheet
@@ -313,7 +269,7 @@ function ComposerDialog({ editing, initialFiles, onClose }: { editing: Story | n
       <LeaveSheet
         open={leaveOpen}
         editing={Boolean(editing)}
-        hasPhotos={photos.some((p) => p.kind === 'new')}
+        hasPhotos={media.some((p) => p.kind === 'new')}
         onKeep={() => setLeaveOpen(false)}
         onSaveDraft={() => {
           saveDraft(userId, { body, mood, happenedOn });

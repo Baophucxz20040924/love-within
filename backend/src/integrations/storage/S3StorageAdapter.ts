@@ -1,3 +1,4 @@
+import type { Readable } from 'node:stream';
 import {
   DeleteObjectCommand,
   GetObjectCommand,
@@ -25,7 +26,9 @@ export class S3StorageAdapter implements StorageProvider {
   private readonly bucket: string;
 
   constructor() {
-    const cfg: S3ClientConfig = { region: env.s3.region };
+    // Presigning has no Body: SDK's default CRC32 would sign the checksum of an empty
+    // payload, which cannot match the browser's nonempty PUT. No checksum is required here.
+    const cfg: S3ClientConfig = { region: env.s3.region, requestChecksumCalculation: 'WHEN_REQUIRED' };
     if (env.s3.accessKeyId && env.s3.secretAccessKey) {
       cfg.credentials = { accessKeyId: env.s3.accessKeyId, secretAccessKey: env.s3.secretAccessKey };
     }
@@ -34,15 +37,18 @@ export class S3StorageAdapter implements StorageProvider {
   }
 
   async getUploadUrl(input: { key: string; mimeType: string; sizeBytes: number }) {
-    // ContentType and ContentLength are part of the signature: the client must send
-    // exactly these headers, so oversized or non-image uploads are rejected by S3 itself.
+    // Bind the declared size and MIME header (not the actual file format). The browser
+    // supplies Content-Length from the Blob and must explicitly send Content-Type.
     const cmd = new PutObjectCommand({
       Bucket: this.bucket,
       Key: input.key,
       ContentType: input.mimeType,
       ContentLength: input.sizeBytes,
     });
-    const uploadUrl = await getSignedUrl(this.client, cmd, { expiresIn: UPLOAD_URL_TTL_SEC });
+    const uploadUrl = await getSignedUrl(this.client, cmd, {
+      expiresIn: UPLOAD_URL_TTL_SEC,
+      signableHeaders: new Set(['content-type']),
+    });
     return { uploadUrl, expiresIn: UPLOAD_URL_TTL_SEC };
   }
 
@@ -82,6 +88,40 @@ export class S3StorageAdapter implements StorageProvider {
     const bytes = await res.Body.transformToByteArray();
     const body = Buffer.from(bytes);
     return { body, mimeType: res.ContentType ?? 'application/octet-stream', size: body.length };
+  }
+
+  async getObjectPrefix(key: string, maxBytes: number): Promise<Buffer> {
+    if (!Number.isSafeInteger(maxBytes) || maxBytes <= 0) {
+      throw new RangeError('maxBytes must be a positive safe integer');
+    }
+    const res = await this.client.send(new GetObjectCommand({
+      Bucket: this.bucket, Key: key, Range: `bytes=0-${maxBytes - 1}`,
+    }));
+    if (!res.Body) throw new Error(`S3 object ${key} has no body`);
+    // This backend uses the Node HTTP handler. Never fall back to transformToByteArray:
+    // a provider can ignore Range and return the entire (potentially large) object.
+    const stream = res.Body as Readable;
+    if (typeof stream[Symbol.asyncIterator] !== 'function' || typeof stream.destroy !== 'function') {
+      throw new Error('S3 prefix reads require a destroyable Node stream');
+    }
+    const chunks: Buffer[] = [];
+    let size = 0;
+    try {
+      for await (const chunk of stream) {
+        if (!(chunk instanceof Uint8Array)) throw new Error('S3 object stream must contain bytes');
+        const part = chunk.subarray(0, maxBytes - size);
+        // Copy only the prefix; do not retain a potentially huge underlying chunk buffer.
+        chunks.push(Buffer.from(part));
+        size += part.byteLength;
+        if (size === maxBytes) {
+          stream.destroy();
+          break;
+        }
+      }
+      return Buffer.concat(chunks, size);
+    } finally {
+      stream.destroy();
+    }
   }
 
   async deleteObject(key: string) {

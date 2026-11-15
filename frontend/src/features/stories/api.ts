@@ -1,6 +1,6 @@
 import { apiRequest } from '../../lib/apiClient';
 import { compressImageWithSize } from '../../lib/image';
-import type { Story, StoryComment, StoryContentInput, StoryPage, StoryUnread, UploadUrlResult } from '../../lib/types';
+import type { Story, StoryComment, StoryContentInput, StoryPage, StoryUnread, UploadUrlResult, VideoUploadUrlResult } from '../../lib/types';
 
 const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
 const ALLOWED = ['image/jpeg', 'image/png', 'image/webp'];
@@ -25,6 +25,8 @@ export const storiesApi = {
   onThisDay: () => apiRequest<Story[]>('/stories/on-this-day'),
   uploadUrl: (mimeType: string, sizeBytes: number) =>
     apiRequest<UploadUrlResult>('/stories/upload-url', { method: 'POST', body: { mimeType, sizeBytes } }),
+  videoUploadUrl: (mimeType: string, sizeBytes: number) =>
+    apiRequest<VideoUploadUrlResult>('/stories/video-upload-url', { method: 'POST', body: { mimeType, sizeBytes } }),
 };
 
 /** Compress on the phone (≤ 1600 px JPEG, EXIF/GPS stripped) → presigned URL → PUT straight to storage. */

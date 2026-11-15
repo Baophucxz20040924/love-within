@@ -1,6 +1,6 @@
 export const DOMAINS = [
   'account', 'couple', 'pairing', 'quests', 'wallet', 'water', 'market', 'proposals',
-  'stories', 'questions', 'events', 'letters', 'moods', 'bucket', 'moments', 'savings',
+  'stories', 'story-unread', 'questions', 'events', 'letters', 'moods', 'bucket', 'moments', 'savings',
   'finance', 'assistant', 'friends', 'friend-posts', 'friend-events', 'friend-outings',
   'friend-notifications', 'friend-profile',
 ] as const;

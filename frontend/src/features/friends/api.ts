@@ -27,6 +27,7 @@ import type {
   ReportTarget,
   RsvpStatus,
   UploadUrlResult,
+  VideoUploadUrlResult,
 } from '../../lib/types';
 
 const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
@@ -111,6 +112,8 @@ export const friendStoriesApi = {
     apiRequest<PollVoters>(`/friends/stories/${enc(id)}/poll/voters?option=${enc(optionId)}`),
   uploadUrl: (mimeType: string, sizeBytes: number) =>
     apiRequest<UploadUrlResult>('/friends/stories/upload-url', { method: 'POST', body: { mimeType, sizeBytes } }),
+  videoUploadUrl: (mimeType: string, sizeBytes: number) =>
+    apiRequest<VideoUploadUrlResult>('/friends/stories/video-upload-url', { method: 'POST', body: { mimeType, sizeBytes } }),
 };
 
 /** "Lên kèo" (BB5). */

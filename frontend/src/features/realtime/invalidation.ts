@@ -13,6 +13,7 @@ const map: Record<Domain, readonly QueryKey[]> = {
   market: [['market'], ['wallet'], ['ledger'], ['quests'], ['couple']],
   proposals: [['proposals'], ['couple'], ['water'], ['savings'], ['quests']],
   stories: [['stories'], ['couple']],
+  'story-unread': [['stories', 'unread']],
   questions: [['questions'], ['quests'], ['couple']],
   events: [['events'], ['couple']],
   letters: [['letters'], ['couple']],

@@ -53,6 +53,12 @@
 .composer--form .letter-title-input[readonly] { background: var(--surface-2); }
 .composer--form .composer__photos { gap: 8px; }
 .composer--form .composer__photo img { display: block; }
+.composer--form .composer__photo--video,
+.composer--form .composer__photo--message { grid-column: 1 / -1; aspect-ratio: auto; min-height: 100px; }
+.composer__media-message { margin: 0; padding: 16px 48px 16px 16px; font-size: 14px; line-height: 1.6; overflow-wrap: anywhere; }
+.composer__media-message span { display: block; font-weight: 600; }
+.composer__photo--video .post-video video { max-height: 280px; }
+.composer__photo-remove { z-index: 1; }
 .composer__footer {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;

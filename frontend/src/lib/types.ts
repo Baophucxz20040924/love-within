@@ -242,6 +242,24 @@ export interface StoryPhotoView {
   height: number;
 }
 
+export interface StoryVideoInput {
+  key: string;
+  mimeType: 'video/mp4' | 'video/webm';
+  width: number;
+  height: number;
+}
+
+export interface StoryVideoView extends StoryVideoInput {
+  url: string;
+}
+
+export interface VideoUploadUrlResult {
+  uploadUrl: string;
+  videoKey: string;
+  expiresIn: number;
+  maxBytes: number;
+}
+
 export interface Story {
   id: string;
   author: { id: string; displayName: string };
@@ -251,6 +269,7 @@ export interface Story {
   /** YYYY-MM-DD — day the memory happened. */
   happenedOn: string;
   photos: StoryPhotoView[];
+  videos: StoryVideoView[];
   reactions: { mine: ReactionType | null; partner: ReactionType | null };
   commentCount: number;
   createdAt: string;
@@ -283,6 +302,8 @@ export interface StoryContentInput {
   mood: Mood | null;
   happenedOn: string | null;
   photos: { key: string; width: number; height: number }[];
+  /** Omitted on edit preserves existing videos; [] removes them. */
+  videos?: StoryVideoInput[];
 }
 
 // ── Daily question (plan/ENGINEERING_WORKFLOW.md, CP1) ─────────
@@ -667,6 +688,7 @@ export interface FriendStory {
   /** Named friends; blocked people remain plain text. */
   mentions: MentionSpan[];
   photos: StoryPhotoView[];
+  videos: StoryVideoView[];
   /** total = everyone's reactions; top = up to 3 most used types. */
   reactions: { mine: ReactionType | null; total: number; top: ReactionType[] };
   commentCount: number;
@@ -760,6 +782,8 @@ export interface FriendStoryInput {
   body: string;
   mentions?: MentionSpan[];
   photos: { key: string; width: number; height: number }[];
+  /** Omitted on edit preserves existing videos; [] removes them. */
+  videos?: StoryVideoInput[];
   /** Create: a poll or nothing. Edit: left out = keep; null = remove (only without votes). */
   poll?: FriendPollInput | null;
 }

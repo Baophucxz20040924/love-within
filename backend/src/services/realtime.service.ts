@@ -2,7 +2,7 @@ import type { Response } from 'express';
 
 /** Wire protocol v1 carries invalidation hints only; REST remains authoritative. */
 export const REALTIME_DOMAINS = [
-  'account', 'couple', 'pairing', 'quests', 'wallet', 'water', 'market', 'proposals', 'stories',
+  'account', 'couple', 'pairing', 'quests', 'wallet', 'water', 'market', 'proposals', 'stories', 'story-unread',
   'questions', 'events', 'letters', 'moods', 'bucket', 'moments', 'savings', 'finance', 'assistant',
   'friends', 'friend-posts', 'friend-events', 'friend-outings', 'friend-notifications', 'friend-profile',
 ] as const;

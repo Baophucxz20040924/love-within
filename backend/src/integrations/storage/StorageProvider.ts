@@ -24,5 +24,7 @@ export interface StorageProvider {
   headObject(key: string): Promise<{ size: number; mimeType: string } | null>;
   /** Read the object into memory to forward to the AI provider. */
   getObject(key: string): Promise<{ body: Buffer; mimeType: string; size: number }>;
+  /** Read at most maxBytes (a positive safe integer), stopping the stream even if Range is ignored. */
+  getObjectPrefix(key: string, maxBytes: number): Promise<Buffer>;
   deleteObject(key: string): Promise<void>;
 }

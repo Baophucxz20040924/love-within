@@ -63,7 +63,7 @@ export function createApp(): Express {
 
   // Dev-only fake "S3" endpoint (raw bodies) — mounted before the JSON parser.
   const mem = getMemoryStorage();
-  if (mem) app.use('/api/dev-storage', mem.router(env.s3.maxUploadBytes));
+  if (mem) app.use('/api/dev-storage', mem.router(env.s3.maxUploadBytes, 50 * 1024 * 1024));
 
   // The largest legitimate body is a 20 000-character story (~60 KB); a tighter cap limits parse/validation cost.
   app.use(express.json({ limit: '256kb' }));

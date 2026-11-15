@@ -15,6 +15,7 @@ import { STORY_UNREAD_KEY, storiesApi } from './api';
 import { removeStoryFromCache, replaceStoryInCache, updateStoryInCache } from './cache';
 import { moodOf, reactionOf } from './constants';
 import { PhotoGrid } from './PhotoGrid';
+import { PostVideo } from './PostVideo';
 import { ReactionButton } from './ReactionButton';
 
 interface Props {
@@ -65,7 +66,7 @@ export function StoryCard({ story, isNew = false, clamp = true, onEdit, onDelete
 
   const mood = moodOf(story.mood);
   const isLong = story.body.length > 280 || story.body.split('\n').length > 5;
-  const isShortText = story.photos.length === 0 && story.body.length > 0 && story.body.length <= 85 && !story.body.includes('\n');
+  const isShortText = story.photos.length === 0 && !story.videos?.length && story.body.length > 0 && story.body.length <= 85 && !story.body.includes('\n');
   const memoryDay = story.happenedOn !== localDateOf(story.createdAt, tz) ? story.happenedOn : null;
 
   const react = useMutation({
@@ -147,6 +148,7 @@ export function StoryCard({ story, isNew = false, clamp = true, onEdit, onDelete
       )}
 
       <PhotoGrid photos={story.photos} onOpen={setGallery} />
+      {(story.videos ?? []).map((video) => <PostVideo key={video.key} src={video.url} />)}
 
       {(story.reactions.mine || story.reactions.partner || story.commentCount > 0) && (
         <div className="post__stats">

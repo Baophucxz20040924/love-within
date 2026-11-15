@@ -10,6 +10,7 @@ import { ApiRequestError } from '../../lib/apiClient';
 import { formatDateTime, shortName, timeAgo } from '../../lib/format';
 import type { FriendStory, ReactionType } from '../../lib/types';
 import { PhotoGrid } from '../stories/PhotoGrid';
+import { PostVideo } from '../stories/PostVideo';
 import { ReactionButton } from '../stories/ReactionButton';
 import { reactionOf } from '../stories/constants';
 import { friendStoriesApi } from './api';
@@ -71,7 +72,7 @@ export function FriendStoryCard({ story, clamp = true, onEdit, onDeleted, onComm
   const author = story.author;
   const profileUrl = `/friends/u/${author.id}`;
   const isLong = story.body.length > 280 || story.body.split('\n').length > 5;
-  const isShortText = story.photos.length === 0 && story.body.length > 0 && story.body.length <= 85 && !story.body.includes('\n');
+  const isShortText = story.photos.length === 0 && !story.videos?.length && story.body.length > 0 && story.body.length <= 85 && !story.body.includes('\n');
 
   const react = useMutation({
     mutationFn: (type: ReactionType | null) => (type ? friendStoriesApi.react(story.id, type) : friendStoriesApi.unreact(story.id)),
@@ -176,6 +177,7 @@ export function FriendStoryCard({ story, clamp = true, onEdit, onDeleted, onComm
       {story.poll && <FriendPollView story={story} poll={story.poll} />}
 
       <PhotoGrid photos={story.photos} onOpen={setGallery} />
+      {(story.videos ?? []).map((video) => <PostVideo key={video.key} src={video.url} />)}
 
       {(story.reactions.total > 0 || story.commentCount > 0) && (
         <div className="post__stats">

@@ -134,7 +134,7 @@ export function LeaveSheet({
   const hint = editing
     ? 'Những thay đổi chưa lưu sẽ mất.'
     : hasPhotos
-      ? 'Bản nháp giữ lại chữ, cảm xúc và ngày. Ảnh sẽ không được lưu.'
+      ? 'Bản nháp giữ lại chữ, cảm xúc và ngày. Ảnh và video sẽ không được lưu.'
       : 'Bạn có thể quay lại viết tiếp bất cứ lúc nào.';
   return (
     <BottomSheet open={open} onClose={onKeep} title={editing ? 'Bỏ thay đổi?' : 'Lưu làm bản nháp?'}>

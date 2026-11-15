@@ -11,16 +11,21 @@ import { Icon } from '../../components/Icon';
 import { Switch } from '../../components/Switch';
 import { useToast } from '../../components/Toast';
 import { useAuth } from '../auth/AuthContext';
+import { assertCurrentSession } from '../../lib/apiClient';
+import { tokenStore } from '../../lib/tokenStore';
 import { formatDateTime, shortName } from '../../lib/format';
 import type { FriendPollInput, FriendStory, PollDurationDays } from '../../lib/types';
-import { friendStoriesApi, uploadFriendPhoto } from './api';
+import { friendStoriesApi } from './api';
+import { PostMediaEditor } from '../stories/PostMediaEditor';
+import { POST_MEDIA_ACCEPT, type ExistingMedia } from '../stories/postMedia';
+import { usePostMedia } from '../stories/usePostMedia';
+import { uploadPostMedia, type PostMediaUploadCache } from '../stories/uploadPostMedia';
 import { prependFriendStoryToFeed, replaceFriendStoryInCache } from './cache';
 import { MentionField } from './MentionField';
 import { fromPayload, toPayload, type DraftMention } from './mentions';
 
 const mentionSearch = { id: 'draft-post', fn: friendStoriesApi.draftMentionable };
 
-const MAX_PHOTOS = 10;
 /** Poll (BB6): 2–4 options of ≤ 80 characters. */
 const MIN_OPTIONS = 2;
 const MAX_OPTIONS = 4;
@@ -34,26 +39,18 @@ const DURATIONS: { value: PollDurationDays; label: string }[] = [
 ];
 const sameText = (a: string, b: string) => a.toLocaleLowerCase('vi') === b.toLocaleLowerCase('vi');
 
-type LocalPhoto =
-  | { id: string; kind: 'existing'; key: string; url: string; width: number; height: number }
-  | { id: string; kind: 'new'; file: File; url: string };
-
-type Uploaded = { key: string; width: number; height: number };
-
-let seq = 0;
-const nextId = () => `fp${++seq}`;
-
-function fromFiles(files: File[]): LocalPhoto[] {
-  return files
-    .filter((f) => f.type.startsWith('image/'))
-    .map((file) => ({ id: nextId(), kind: 'new' as const, file, url: URL.createObjectURL(file) }));
+function existingMedia(story: FriendStory | null): ExistingMedia[] {
+  return [
+    ...(story?.photos ?? []).map((p) => ({ ...p, id: p.key, kind: 'existing' as const, mediaType: 'image' as const })),
+    ...(story?.videos ?? []).map((v) => ({ ...v, id: v.key, kind: 'existing' as const, mediaType: 'video' as const })),
+  ];
 }
 
 interface Props {
   open: boolean;
   /** null = new post. */
   editing: FriendStory | null;
-  /** Photos picked from the feed's photo button before the composer opened. */
+  /** Media picked from the feed before the composer opened. */
   initialFiles?: File[];
   /** Text to start a new post with (BB5 "Đăng ảnh buổi này": the event title). */
   initialBody?: string;
@@ -84,10 +81,7 @@ function ComposerDialog({
 
   const [body, setBody] = useState(editing?.body ?? initialBody);
   const [mentions, setMentions] = useState<DraftMention[]>(() => editing ? fromPayload(editing.body, editing.mentions ?? []) : []);
-  const [photos, setPhotos] = useState<LocalPhoto[]>(() => {
-    const existing: LocalPhoto[] = (editing?.photos ?? []).map((p) => ({ id: nextId(), kind: 'existing', ...p }));
-    return [...existing, ...fromFiles(initialFiles.slice(0, MAX_PHOTOS - existing.length))];
-  });
+  const { media, addFiles, remove, pending, errors: mediaErrors } = usePostMedia(existingMedia(editing), initialFiles);
   const [leaveOpen, setLeaveOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
@@ -103,17 +97,11 @@ function ComposerDialog({
   const optionRefs = useRef<(HTMLInputElement | null)[]>([]);
   const focusOption = useRef<number | null>(null);
 
-  const uploaded = useRef(new Map<string, Uploaded>()); // reused if posting is retried after an error
+  const uploaded = useRef<PostMediaUploadCache>(new Map());
+  const mounted = useRef(false);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   const fileRef = useRef<HTMLInputElement>(null);
   const textRef = useRef<HTMLTextAreaElement>(null);
-  const photosRef = useRef(photos);
-  photosRef.current = photos;
-
-  useEffect(() => {
-    return () => {
-      for (const p of photosRef.current) if (p.kind === 'new') URL.revokeObjectURL(p.url);
-    };
-  }, []);
 
   // Grow the textarea with its content.
   useEffect(() => {
@@ -121,7 +109,7 @@ function ComposerDialog({
     if (!el) return;
     el.style.height = 'auto';
     el.style.height = `${el.scrollHeight}px`;
-  }, [body, photos.length]);
+  }, [body, media.length]);
 
   // Focus the option the user just added (or the first one when the poll opens).
   useEffect(() => {
@@ -151,18 +139,18 @@ function ComposerDialog({
         ? JSON.stringify([
             editing.body,
             toPayload(editing.body, fromPayload(editing.body, editing.mentions ?? [])).mentions,
-            editing.photos.map((p) => p.key),
+            existingMedia(editing).map((p) => p.key),
             editing.poll ? [locked ? 'locked' : editing.poll.options.map((o) => o.text), editing.poll.multi, 'keep'] : null,
           ])
         : '',
     [editing, locked],
   );
   const payload = toPayload(body, mentions);
-  const current = JSON.stringify([payload.body, payload.mentions, photos.map((p) => (p.kind === 'existing' ? p.key : p.id)), pollSig]);
-  const hasContent = body.trim().length > 0 || photos.length > 0;
+  const current = JSON.stringify([payload.body, payload.mentions, media.map((p) => (p.kind === 'existing' ? p.key : p.id)), pollSig]);
+  const hasContent = body.trim().length > 0 || media.length > 0;
   const changed = editing ? current !== original : hasContent || pollOn;
-  const canSubmit = !busy && hasContent && !pollProblem && (!editing || changed);
-  const big = photos.length === 0 && body.length < 85 && !body.includes('\n');
+  const canSubmit = !busy && !pending && !mediaErrors && hasContent && !pollProblem && (!editing || changed);
+  const big = media.length === 0 && body.length < 85 && !body.includes('\n');
 
   /** Create: a poll or nothing. Edit: left out = keep (always when it has votes), null = remove. */
   function pollInput(): FriendPollInput | null | undefined {
@@ -207,50 +195,37 @@ function ComposerDialog({
     if (submitting.current) return;
     const files = Array.from(e.target.files ?? []);
     e.target.value = '';
-    const room = MAX_PHOTOS - photos.length;
-    if (files.length > room) toast.info(`Mỗi bài viết tối đa ${MAX_PHOTOS} ảnh`);
-    const added = fromFiles(files.slice(0, Math.max(0, room)));
-    if (added.length) setPhotos((ps) => [...ps, ...added]);
+    addFiles(files);
   }
 
-  function removePhoto(id: string) {
-    const p = photos.find((x) => x.id === id);
-    if (p?.kind === 'new') URL.revokeObjectURL(p.url);
+  function removeMedia(id: string) {
     uploaded.current.delete(id);
-    setPhotos((ps) => ps.filter((x) => x.id !== id));
+    remove(id);
   }
 
   async function submit() {
     if (!canSubmit || submitting.current) return;
+    const generation = tokenStore.generation();
+    const assertActive = () => {
+      assertCurrentSession(generation);
+      if (!mounted.current) throw new DOMException('Đã đóng bài viết.', 'AbortError');
+    };
     submitting.current = true;
     setError(null);
     setBusy(true);
     try {
-      const total = photos.filter((p) => p.kind === 'new').length;
-      const out: Uploaded[] = [];
-      let n = 0;
-      for (const p of photos) {
-        if (p.kind === 'existing') {
-          out.push({ key: p.key, width: p.width, height: p.height });
-          continue;
-        }
-        n += 1;
-        let up = uploaded.current.get(p.id);
-        if (!up) {
-          setStatus(`Đang tải ảnh ${n}/${total}…`);
-          up = await uploadFriendPhoto(p.file);
-          uploaded.current.set(p.id, up);
-        }
-        out.push(up);
-      }
+      const attachments = await uploadPostMedia(media, uploaded.current, friendStoriesApi, setStatus, assertActive);
+      assertActive();
       setStatus(editing ? 'Đang lưu…' : 'Đang đăng…');
-      const input = { ...payload, photos: out, poll: pollInput() };
+      const input = { ...payload, ...attachments, poll: pollInput() };
       const story = editing ? await friendStoriesApi.update(editing.id, input) : await friendStoriesApi.create(input);
+      assertActive();
       if (editing) replaceFriendStoryInCache(qc, story);
       else prependFriendStoryToFeed(qc, story);
       toast.success(editing ? 'Đã lưu thay đổi' : 'Đã đăng bài viết');
       onClose();
     } catch (err) {
+      if (!mounted.current || !tokenStore.isCurrent(generation)) return;
       setError(err instanceof Error ? err.message : 'Không đăng được, thử lại nhé.');
       submitting.current = false;
       setBusy(false);
@@ -303,8 +278,8 @@ function ComposerDialog({
           placeholder={
             pollOn
               ? 'Đặt câu hỏi, ví dụ: Cuối tuần đi đâu?'
-              : photos.length
-                ? 'Hãy nói gì đó về những bức ảnh này…'
+              : media.length
+                ? 'Hãy nói gì đó về ảnh hoặc video này…'
                 : `${shortName(authorName)} ơi, bạn đang nghĩ gì?`
           }
         />
@@ -415,25 +390,7 @@ function ComposerDialog({
           </section>
         )}
 
-        {photos.length > 0 && (
-          <div className="composer__photos">
-            {photos.map((p) => (
-              <div key={p.id} className="composer__photo">
-                <img src={p.url} alt="" />
-                <button type="button" className="composer__photo-remove" aria-label="Bỏ ảnh này" disabled={busy} onClick={() => removePhoto(p.id)}>
-                  <span>
-                    <Icon name="x" size={16} />
-                  </span>
-                </button>
-              </div>
-            ))}
-            {photos.length < MAX_PHOTOS && (
-              <button type="button" className="composer__add" aria-label="Thêm ảnh" disabled={busy} onClick={() => fileRef.current?.click()}>
-                <Icon name="plus" size={26} />
-              </button>
-            )}
-          </div>
-        )}
+        <PostMediaEditor media={media} busy={busy} onRemove={removeMedia} onAdd={() => fileRef.current?.click()} />
       </div>
 
       <footer className="composer__footer">
@@ -443,14 +400,15 @@ function ComposerDialog({
           </p>
         )}
         {error && <p ref={errorRef} id={errorId} className="form-feedback" role="alert" tabIndex={-1}>{error}</p>}
-        <p id={hintId} className="composer__hint">Gõ @ để nhắc tên bạn bè. Thêm tối đa 10 ảnh hoặc bình chọn.</p>
+        {pending && <p className="composer__status" role="status">Đang xử lý ảnh/video…</p>}
+        <p id={hintId} className="composer__hint">Gõ @ để nhắc tên bạn bè. Tối đa 10 tệp, gồm 1 video MP4/WebM ≤ 50 MB; có thể thêm bình chọn.</p>
         <div className="composer__tools">
           <span className="composer__tools-label">Thêm vào bài viết</span>
           <button
             type="button"
             className="tool-btn tool-btn--photo"
-            aria-label="Thêm ảnh"
-            disabled={busy || photos.length >= MAX_PHOTOS}
+            aria-label="Thêm ảnh hoặc video"
+            disabled={busy}
             onClick={() => fileRef.current?.click()}
           >
             <Icon name="image" />
@@ -475,7 +433,7 @@ function ComposerDialog({
         </div>
       </footer>
 
-      <input ref={fileRef} disabled={busy} type="file" accept="image/*" multiple hidden onChange={onPick} />
+      <input ref={fileRef} disabled={busy} type="file" accept={POST_MEDIA_ACCEPT} multiple hidden onChange={onPick} />
 
       <BottomSheet open={leaveOpen} onClose={() => setLeaveOpen(false)} title={editing ? 'Bỏ thay đổi?' : 'Bỏ bài viết?'}>
         <div className="stack">

@@ -3,7 +3,8 @@ import { randomUUID } from 'node:crypto';
 import { Types } from 'mongoose';
 import { env } from '../config/env.js';
 import type { CoupleDoc } from '../models/Couple.js';
-import { MAX_STORY_PHOTOS, type Mood, type ReactionType, type StoryDoc, type StoryPhoto } from '../models/Story.js';
+import { MAX_STORY_PHOTOS, type Mood, type ReactionType, type StoryDoc, type StoryPhoto, type StoryVideo } from '../models/Story.js';
+import { createStoryVideoUploadUrl, normalizeStoryVideos, sameStoryVideos, storyVideoPrefix, validateStoryPhotoHead, validateStoryVideos } from './storyMedia.service.js';
 import type { StoryCommentDoc } from '../models/StoryComment.js';
 import { getStorage } from '../integrations/index.js';
 import { storyCommentRepository, storyRepository, type StoryContent } from '../repositories/story.repository.js';
@@ -24,6 +25,8 @@ export interface StoryInput {
   mood?: Mood | null;
   happenedOn?: string | null;
   photos: StoryPhoto[];
+  /** Create omission means []; edit omission preserves existing videos. */
+  videos?: StoryVideo[];
 }
 
 export interface StoryView {
@@ -34,6 +37,7 @@ export interface StoryView {
   mood: Mood | null;
   happenedOn: string;
   photos: { key: string; url: string; width: number; height: number }[];
+  videos: (StoryVideo & { url: string })[];
   reactions: { mine: ReactionType | null; partner: ReactionType | null };
   commentCount: number;
   createdAt: string;
@@ -83,6 +87,10 @@ async function toView(s: StoryDoc, userId: string, names: Names): Promise<StoryV
       url: (await storage.getDownloadUrl(p.key, { cacheable: true })).url,
     })),
   );
+  const videos = await Promise.all((s.videos ?? []).map(async (v) => ({
+    key: v.key, mimeType: v.mimeType, width: v.width, height: v.height,
+    url: (await storage.getDownloadUrl(v.key, { cacheable: true })).url,
+  })));
   let mine: ReactionType | null = null;
   let partner: ReactionType | null = null;
   for (const [uid, type] of s.reactions ?? new Map<string, ReactionType>()) {
@@ -98,6 +106,7 @@ async function toView(s: StoryDoc, userId: string, names: Names): Promise<StoryV
     mood: s.mood ?? null,
     happenedOn: s.happenedOn,
     photos,
+    videos,
     reactions: { mine, partner },
     commentCount: s.commentCount ?? 0,
     createdAt: s.createdAt.toISOString(),
@@ -117,9 +126,10 @@ function toCommentView(c: StoryCommentDoc, userId: string, names: Names): Commen
 }
 
 /** Trim, apply defaults and reject empty posts / future dates. */
-function normalize(couple: CoupleDoc, input: StoryInput): StoryContent {
+function normalize(couple: CoupleDoc, input: StoryInput, retainedVideos: StoryVideo[] = []): StoryContent & { videos: StoryVideo[] } {
   const body = input.body.trim();
-  if (!body && input.photos.length === 0) throw Errors.badRequest('Hãy viết gì đó hoặc thêm ít nhất một ảnh');
+  const videos = normalizeStoryVideos(input.photos, input.videos ?? retainedVideos);
+  if (!body && input.photos.length === 0 && videos.length === 0) throw Errors.badRequest('Hãy viết gì đó hoặc thêm ảnh/video');
   const today = getLocalDate(new Date(), couple.timezone);
   const happenedOn = input.happenedOn ?? today;
   if (happenedOn > today) throw Errors.badRequest('Ngày kỷ niệm không thể ở tương lai');
@@ -128,6 +138,7 @@ function normalize(couple: CoupleDoc, input: StoryInput): StoryContent {
     mood: input.mood ?? null,
     happenedOn,
     photos: input.photos.map((p) => ({ key: p.key, width: p.width, height: p.height })),
+    videos,
   };
 }
 
@@ -160,8 +171,7 @@ async function validatePhotos(
   // One storage HEAD per new photo, in parallel (up to 10 network round trips otherwise).
   const heads = await Promise.all(toCheck.map((key) => getStorage().headObject(key)));
   for (const head of heads) {
-    if (!head) throw Errors.badRequest('Có ảnh chưa tải lên xong. Thử đăng lại nhé.');
-    if (head.size > env.s3.maxUploadBytes) throw Errors.badRequest('Ảnh vượt kích thước cho phép');
+    validateStoryPhotoHead(head, env.s3.maxUploadBytes);
   }
 }
 
@@ -170,6 +180,7 @@ function sameContent(a: StoryContent, b: StoryDoc): boolean {
     a.body === b.body &&
     a.mood === (b.mood ?? null) &&
     a.happenedOn === b.happenedOn &&
+    sameStoryVideos(a.videos, b.videos) &&
     a.photos.length === b.photos.length &&
     a.photos.every((p, i) => p.key === b.photos[i].key)
   );
@@ -222,6 +233,11 @@ export const storyService = {
     return { uploadUrl, imageKey, expiresIn, maxBytes: env.s3.maxUploadBytes };
   },
 
+  async createVideoUploadUrl(couple: CoupleDoc, mimeType: string, sizeBytes: number) {
+    return createStoryVideoUploadUrl(storyVideoPrefix('couples', couple._id.toString()),
+      getLocalDate(new Date(), couple.timezone).slice(0, 7), mimeType, sizeBytes);
+  },
+
   /**
    * `notify: false` when the caller sends its own push about the same thing (CP3: "đã làm xong" replaces "vừa đăng một
    * bài viết mới", so the partner gets one notification, not two).
@@ -236,6 +252,7 @@ export const storyService = {
   ): Promise<StoryView> {
     const content = normalize(couple, input);
     await validatePhotos(couple, userId, content.photos, new Set(), opts.sharedPhotos);
+    await validateStoryVideos(storyVideoPrefix('couples', couple._id.toString()), content.videos);
     const story = await storyRepository.create({ ...content, coupleId: couple._id, authorId: new Types.ObjectId(userId) });
     await realtimeAudience.couple(couple._id, ['stories']);
     logger.info('Story created', { coupleId: couple._id.toString(), userId, storyId: story._id.toString(), photos: content.photos.length });
@@ -253,15 +270,17 @@ export const storyService = {
   /** Author-only. Marks the post as edited (unless nothing changed) and removes dropped photos from storage. */
   async update(couple: CoupleDoc, userId: string, id: string, input: StoryInput): Promise<StoryView> {
     const current = await requireOwnStory(couple, userId, id);
-    const content = normalize(couple, input);
+    const content = normalize(couple, input, current.videos ?? []);
     const names = await memberNames(couple);
     if (sameContent(content, current)) return toView(current, userId, names);
 
     await validatePhotos(couple, userId, content.photos, new Set(current.photos.map((p) => p.key)));
+    await validateStoryVideos(storyVideoPrefix('couples', couple._id.toString()), content.videos, current.videos);
     const updated = await storyRepository.updateContent(couple._id, id, new Types.ObjectId(userId), content);
     if (!updated) throw Errors.notFound('Bài viết không tồn tại hoặc đã bị xóa');
 
     await realtimeAudience.couple(couple._id, ['stories']);
+    // Removed videos deliberately stay in storage: other posts may reference the same key, as with soft deletion.
     const kept = new Set(content.photos.map((p) => p.key));
     // Only the story's own photos are deleted; shared ones (a moment's photos) belong to their feature.
     const own = storyPrefix(couple._id);
@@ -360,7 +379,8 @@ export const storyService = {
   async markSeen(userId: string): Promise<{ previousSeenAt: string | null }> {
     const me = await userRepository.findById(userId);
     await userRepository.setStoriesSeenAt(userId, new Date());
-    await realtimeAudience.own(userId, 'couple', ['stories']);
+    // Seen acknowledgements update badges only; refreshing the feed would mark it seen again.
+    await realtimeAudience.own(userId, 'couple', ['story-unread']);
     return { previousSeenAt: me?.storiesSeenAt ? me.storiesSeenAt.toISOString() : null };
   },
 

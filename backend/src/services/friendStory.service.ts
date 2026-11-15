@@ -3,7 +3,8 @@ import { Types } from 'mongoose';
 import { env } from '../config/env.js';
 import type { FriendStoryDoc } from '../models/FriendStory.js';
 import { MAX_MENTIONS, type CommentMention, type FriendStoryCommentDoc } from '../models/FriendStoryComment.js';
-import { MAX_STORY_PHOTOS, type ReactionType, type StoryPhoto } from '../models/Story.js';
+import { MAX_STORY_PHOTOS, type ReactionType, type StoryPhoto, type StoryVideo } from '../models/Story.js';
+import { createStoryVideoUploadUrl, normalizeStoryVideos, sameStoryVideos, storyVideoPrefix, validateStoryPhotoHead, validateStoryVideos } from './storyMedia.service.js';
 import type { UserDoc } from '../models/User.js';
 import { getStorage } from '../integrations/index.js';
 import { friendshipRepository, otherOf } from '../repositories/friendship.repository.js';
@@ -43,6 +44,8 @@ import { STORY_IMAGE_TYPES } from './story.service.js';
 export interface FriendStoryInput {
   body: string;
   photos: StoryPhoto[];
+  /** Create omission means []; edit omission preserves existing videos. */
+  videos?: StoryVideo[];
   mentions?: MentionView[];
   /** BB6. Create: a poll or nothing. Edit: left out = keep the poll as it is; null = remove it; a poll = replace it (only without votes). */
   poll?: FriendPollInput | null;
@@ -55,6 +58,7 @@ export interface FriendStoryView {
   body: string;
   mentions: MentionView[];
   photos: { key: string; url: string; width: number; height: number }[];
+  videos: (StoryVideo & { url: string })[];
   /** total = everyone's reactions; top = up to 3 most used types (most first). */
   reactions: { mine: ReactionType | null; total: number; top: ReactionType[] };
   commentCount: number;
@@ -132,6 +136,10 @@ async function toView(s: FriendStoryDoc, userId: string, ctx: ViewCtx): Promise<
       url: (await storage.getDownloadUrl(p.key, { cacheable: true })).url,
     })),
   );
+  const videos = await Promise.all((s.videos ?? []).map(async (v) => ({
+    key: v.key, mimeType: v.mimeType, width: v.width, height: v.height,
+    url: (await storage.getDownloadUrl(v.key, { cacheable: true })).url,
+  })));
   let mine: ReactionType | null = null;
   let total = 0;
   const counts = new Map<ReactionType, number>();
@@ -152,6 +160,7 @@ async function toView(s: FriendStoryDoc, userId: string, ctx: ViewCtx): Promise<
     mentions: (s.mentions ?? []).filter((m) => !ctx.blocked.has(m.userId.toString()))
       .map((m) => ({ userId: m.userId.toString(), offset: m.offset, length: m.length })),
     photos,
+    videos,
     reactions: { mine, total, top },
     commentCount: s.commentCount ?? 0,
     poll: s.poll ? pollView(s.poll, userId, profiles, ctx.blocked) : null,
@@ -340,10 +349,11 @@ async function toPage(docs: FriendStoryDoc[], limit: number, me: UserDoc) {
   return { items: await Promise.all(page.map((s) => toView(s, userId, ctx))), nextCursor };
 }
 
-function normalize(input: FriendStoryInput): Omit<FriendStoryContent, 'mentions'> {
+function normalize(input: FriendStoryInput, retainedVideos: StoryVideo[] = []): Omit<FriendStoryContent, 'mentions'> & { videos: StoryVideo[] } {
   const body = input.body.trim();
-  if (!body && input.photos.length === 0) throw Errors.badRequest('Hãy viết gì đó hoặc thêm ít nhất một ảnh');
-  return { body, photos: input.photos.map((p) => ({ key: p.key, width: p.width, height: p.height })) };
+  const videos = normalizeStoryVideos(input.photos, input.videos ?? retainedVideos);
+  if (!body && input.photos.length === 0 && videos.length === 0) throw Errors.badRequest('Hãy viết gì đó hoặc thêm ảnh/video');
+  return { body, photos: input.photos.map((p) => ({ key: p.key, width: p.width, height: p.height })), videos };
 }
 
 /** Photos must live under the author's own prefix and really exist in storage. */
@@ -363,14 +373,14 @@ async function validatePhotos(me: UserDoc, photos: StoryPhoto[], alreadyAttached
   }
   const heads = await Promise.all(toCheck.map((key) => getStorage().headObject(key)));
   for (const head of heads) {
-    if (!head) throw Errors.badRequest('Có ảnh chưa tải lên xong. Thử đăng lại nhé.');
-    if (head.size > env.s3.maxUploadBytes) throw Errors.badRequest('Ảnh vượt kích thước cho phép');
+    validateStoryPhotoHead(head, env.s3.maxUploadBytes);
   }
 }
 
 function sameContent(a: FriendStoryContent, b: FriendStoryDoc): boolean {
   const old = b.mentions ?? [];
-  return a.body === b.body && a.photos.length === b.photos.length && a.photos.every((p, i) => p.key === b.photos[i].key) &&
+  return a.body === b.body && sameStoryVideos(a.videos, b.videos) &&
+    a.photos.length === b.photos.length && a.photos.every((p, i) => p.key === b.photos[i].key) &&
     a.mentions.length === old.length && a.mentions.every((m, i) =>
       m.userId.equals(old[i].userId) && m.offset === old[i].offset && m.length === old[i].length);
 }
@@ -459,6 +469,11 @@ export const friendStoryService = {
     return { uploadUrl, imageKey, expiresIn, maxBytes: env.s3.maxUploadBytes };
   },
 
+  async createVideoUploadUrl(me: UserDoc, mimeType: string, sizeBytes: number) {
+    return createStoryVideoUploadUrl(storyVideoPrefix('friends', me._id.toString()),
+      getLocalDate(new Date(), me.timezone).slice(0, 7), mimeType, sizeBytes);
+  },
+
   async create(me: UserDoc, input: FriendStoryInput): Promise<FriendStoryView> {
     // The body is the poll's question.
     if (input.poll && !input.body.trim()) throw pollErrors.noQuestion();
@@ -467,6 +482,7 @@ export const friendStoryService = {
     const content = { ...normalized, mentions };
     const poll = input.poll ? newPoll(input.poll) : null;
     await validatePhotos(me, content.photos, new Set());
+    await validateStoryVideos(storyVideoPrefix('friends', me._id.toString()), content.videos);
     const story = await friendStoryRepository.create({ ...content, authorId: me._id, poll });
     await invalidateStory(story);
     await notifyPostMentions(story, []).catch((err: Error) =>
@@ -490,7 +506,7 @@ export const friendStoryService = {
     const pollChange = pollEdit(current.poll, input.poll);
     const finalPoll = pollChange === undefined ? current.poll : pollChange;
     if (finalPoll && !input.body.trim()) throw pollErrors.noQuestion();
-    const normalized = normalize(input);
+    const normalized = normalize(input, current.videos ?? []);
     const mentions = input.mentions === undefined
       ? (normalized.body === current.body ? current.mentions ?? [] : [])
       : await postMentions(me._id, normalized.body, input.mentions, current);
@@ -499,6 +515,7 @@ export const friendStoryService = {
     if (sameContent(content, current) && pollChange === undefined) return viewOne(me, current);
 
     await validatePhotos(me, content.photos, new Set(current.photos.map((p) => p.key)));
+    await validateStoryVideos(storyVideoPrefix('friends', me._id.toString()), content.videos, current.videos);
     const updated = await friendStoryRepository.updateContent(id, me._id, content, current.contentRevision ?? 0, pollChange);
     if (!updated) {
       const latest = await friendStoryRepository.findById(id);
@@ -520,6 +537,7 @@ export const friendStoryService = {
       await notificationService.forgetEntity(updated._id, 'poll_closed');
     }
 
+    // Removed videos deliberately stay in storage: other posts may reference the same key, as with soft deletion.
     const kept = new Set(content.photos.map((p) => p.key));
     const dropped = current.photos.filter((p) => !kept.has(p.key));
     await Promise.all(

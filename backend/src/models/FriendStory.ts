@@ -1,5 +1,5 @@
 import { Schema, model, type Document, type Types } from 'mongoose';
-import { MAX_STORY_BODY, REACTION_TYPES, type ReactionType, type StoryPhoto } from './Story.js';
+import { MAX_STORY_BODY, REACTION_TYPES, storyVideoSchema, type ReactionType, type StoryPhoto, type StoryVideo } from './Story.js';
 import type { CommentMention } from './FriendStoryComment.js';
 
 const mentionSchema = new Schema<CommentMention>({
@@ -46,6 +46,7 @@ export interface FriendStoryDoc extends Document {
   contentRevision: number;
   /** key: friends/<authorId>/stories/<YYYY-MM>/<uuid>.<ext> */
   photos: StoryPhoto[];
+  videos: StoryVideo[];
   /** userId → reaction (any friend of the author). */
   reactions: Map<string, ReactionType>;
   commentCount: number;
@@ -95,6 +96,7 @@ const friendStorySchema = new Schema<FriendStoryDoc>(
     mentions: { type: [mentionSchema], default: [] },
     contentRevision: { type: Number, default: 0, min: 0 },
     photos: { type: [photoSchema], default: [] },
+    videos: { type: [storyVideoSchema], default: [] },
     reactions: { type: Map, of: { type: String, enum: REACTION_TYPES }, default: () => new Map() },
     commentCount: { type: Number, default: 0, min: 0 },
     poll: { type: pollSchema, default: null },

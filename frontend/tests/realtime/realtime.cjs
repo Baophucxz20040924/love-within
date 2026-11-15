@@ -60,6 +60,24 @@ const tick = () => new Promise(resolve => setTimeout(resolve, 0));
   assert.equal(realCache.getQueryData(['friends', 'outing', '1']), undefined, 'cancelled GET cannot repopulate');
   await realCache.fetchQuery({ queryKey: ['friends', 'outing', '1'], queryFn: async () => ({ access: 'restricted', balance: 17 }) });
   assert.deepEqual(realCache.getQueryData(['friends', 'outing', '1']), { access: 'restricted', balance: 17 });
+  // A seen acknowledgement must synchronize badges across tabs without refetching
+  // the feed, whose dataUpdatedAt effect would issue another seen acknowledgement.
+  assert.deepEqual(plain(new parser.EventParser().push(encode.encode(frame('dirty', { version: 1, domains: ['story-unread'] })))), [{ type: 'dirty', domains: ['story-unread'] }]);
+  assert.deepEqual(plain(invalidation.queryPrefixes(['story-unread'])), [['stories', 'unread']]);
+  assert.ok(invalidation.scopeDomains('couple').includes('story-unread'));
+  const seenClient = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
+  const seenReads = { feed: 0, unread: 0, otd: 0 };
+  const seenObservers = [
+    ['feed', ['stories', 'feed']], ['unread', ['stories', 'unread']], ['otd', ['stories', 'on-this-day']],
+  ].map(([name, queryKey]) => new QueryObserver(seenClient, {
+    queryKey, queryFn: async () => { seenReads[name]++; return { name }; },
+  }));
+  const seenUnsubscribe = seenObservers.map(observer => observer.subscribe(() => {}));
+  await tick();
+  for (let n = 0; n < 3; n++) { invalidation.invalidateDomains(seenClient, ['story-unread'], 'couple'); await tick(); }
+  assert.deepEqual(seenReads, { feed: 1, unread: 4, otd: 1 });
+  for (const unsubscribe of seenUnsubscribe) unsubscribe();
+  seenClient.clear();
   const verifyClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   verifyClient.setQueryData(['friends', 'event', 'inactive'], { secret: 'old' });
   verifyClient.setQueryData(['friends', 'outing', 'active'], { secret: 'old' });

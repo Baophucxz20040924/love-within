@@ -9,7 +9,27 @@ export const MOODS = ['happy', 'loved', 'in_love', 'grateful', 'excited', 'peace
 export type Mood = (typeof MOODS)[number];
 
 export const MAX_STORY_PHOTOS = 10;
+export const MAX_STORY_ATTACHMENTS = 10;
+export const MAX_STORY_VIDEOS = 1;
+export const MAX_STORY_VIDEO_BYTES = 50 * 1024 * 1024;
+export const STORY_VIDEO_MIME_TYPES = ['video/mp4', 'video/webm'] as const;
 export const MAX_STORY_BODY = 20_000;
+
+export interface StoryVideo {
+  /** Separate from the image prefix: <scope>/<id>/story-videos/<YYYY-MM>/<uuid>.<ext>. */
+  key: string;
+  mimeType: (typeof STORY_VIDEO_MIME_TYPES)[number];
+  /** Client-supplied display dimensions, not server-verified codec/duration metadata. */
+  width: number;
+  height: number;
+}
+
+export const storyVideoSchema = new Schema<StoryVideo>({
+  key: { type: String, required: true },
+  mimeType: { type: String, enum: STORY_VIDEO_MIME_TYPES, required: true },
+  width: { type: Number, required: true, min: 1, max: 20_000 },
+  height: { type: Number, required: true, min: 1, max: 20_000 },
+}, { _id: false });
 
 export interface StoryPhoto {
   key: string; // couples/<coupleId>/stories/<YYYY-MM>/<uuid>.<ext>
@@ -26,6 +46,7 @@ export interface StoryDoc extends Document {
   /** Day the memory happened ("YYYY-MM-DD", couple timezone). Defaults to the posting day. */
   happenedOn: string;
   photos: StoryPhoto[];
+  videos: StoryVideo[];
   /** userId → reaction. At most two entries (the couple). */
   reactions: Map<string, ReactionType>;
   commentCount: number;
@@ -54,6 +75,7 @@ const storySchema = new Schema<StoryDoc>(
     mood: { type: String, enum: [...MOODS, null], default: null },
     happenedOn: { type: String, required: true },
     photos: { type: [photoSchema], default: [] },
+    videos: { type: [storyVideoSchema], default: [] },
     reactions: { type: Map, of: { type: String, enum: REACTION_TYPES }, default: () => new Map() },
     commentCount: { type: Number, default: 0, min: 0 },
     editedAt: { type: Date, default: null },

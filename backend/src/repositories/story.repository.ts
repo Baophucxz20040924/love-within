@@ -1,5 +1,5 @@
 import { Types } from 'mongoose';
-import { Story, type Mood, type ReactionType, type StoryDoc, type StoryPhoto } from '../models/Story.js';
+import { Story, type Mood, type ReactionType, type StoryDoc, type StoryPhoto, type StoryVideo } from '../models/Story.js';
 import { StoryComment, type StoryCommentDoc } from '../models/StoryComment.js';
 
 export interface StoryContent {
@@ -7,6 +7,8 @@ export interface StoryContent {
   mood: Mood | null;
   happenedOn: string;
   photos: StoryPhoto[];
+  /** Optional for existing internal moment/bucket callers; services resolve edit omission before persistence. */
+  videos?: StoryVideo[];
 }
 
 const alive = { deletedAt: null };

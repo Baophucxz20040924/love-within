@@ -9,6 +9,7 @@ import { useAuth } from '../features/auth/AuthContext';
 import { STORY_FEED_KEY, STORY_OTD_KEY, STORY_UNREAD_KEY, storiesApi } from '../features/stories/api';
 import { StoryCard } from '../features/stories/StoryCard';
 import { StoryComposer } from '../features/stories/StoryComposer';
+import { POST_MEDIA_ACCEPT } from '../features/stories/postMedia';
 import { formatDay, shortName } from '../lib/format';
 import type { Story, StoryUnread } from '../lib/types';
 
@@ -32,7 +33,7 @@ function OnThisDay({ items }: { items: Story[] }) {
             <span className="otd__when">
               {year - Number(s.happenedOn.slice(0, 4))} năm trước · {formatDay(s.happenedOn)}
             </span>
-            <span className="otd__excerpt">{s.body || 'Một kỷ niệm bằng ảnh'}</span>
+            <span className="otd__excerpt">{s.body || ((s.videos?.length ?? 0) > 0 ? 'Một kỷ niệm bằng video' : 'Một kỷ niệm bằng ảnh')}</span>
           </span>
           <Icon name="chevronRight" className="text-muted" />
         </Link>
@@ -135,10 +136,10 @@ export function StoriesPage() {
         <button type="button" className="composer-prompt__input" onClick={write}>
           {shortName(name)} ơi, bạn đang nghĩ gì?
         </button>
-        <button type="button" className="icon-btn composer-prompt__photo" aria-label="Đăng ảnh" onClick={() => fileRef.current?.click()}>
+        <button type="button" className="icon-btn composer-prompt__photo" aria-label="Đăng ảnh hoặc video" onClick={() => fileRef.current?.click()}>
           <Icon name="image" />
         </button>
-        <input ref={fileRef} type="file" accept="image/*" multiple hidden onChange={onFiles} />
+        <input ref={fileRef} type="file" accept={POST_MEDIA_ACCEPT} multiple hidden onChange={onFiles} />
       </div>
 
       {otd.data && otd.data.length > 0 && <OnThisDay items={otd.data} />}

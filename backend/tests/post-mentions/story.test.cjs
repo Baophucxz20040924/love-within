@@ -18,7 +18,7 @@ const makeStory = (input) => ({ _id: storyId, authorId: author, hiddenByReportsA
 const mocks = {
   'node:crypto': { randomUUID: () => 'uuid' }, mongoose: { Types }, '../config/env.js': { env: { s3: { maxUploadBytes: 100 } } },
   '../models/FriendStoryComment.js': { MAX_MENTIONS: 10 }, '../models/Story.js': { MAX_STORY_PHOTOS: 10 },
-  '../integrations/index.js': { getStorage: () => ({ headObject: async () => ({size: 1}), getDownloadUrl: async () => ({url:'url'}), deleteObject: async () => {} }) },
+  '../integrations/index.js': { getStorage: () => ({ headObject: async () => ({size: 1, mimeType: 'image/jpeg'}), getDownloadUrl: async () => ({url:'url'}), deleteObject: async () => {} }) },
   '../repositories/friendship.repository.js': { friendshipRepository: {
     areFriends: async () => true,
     friendIds: async () => [...accepted].map((id) => new Types.ObjectId(id)),
@@ -44,6 +44,13 @@ const mocks = {
   './profile.service.js': { profileOf: () => ({}), profileService: { load: async () => new Map(), of: async (u) => u } },
   './friendPoll.js': { previewIdsOf: () => [], pollEdit: (_old, input) => input === undefined ? undefined : input, pollErrors: { locked: () => Error('poll locked'), noQuestion: () => Error('no question') }, newPoll: (p) => p, pollView: () => ({}) }, './story.service.js': {},
 };
+// Keep the actual media helper in the service graph; storage remains mocked (no providers).
+const mediaFilename = path.resolve(__dirname, '../../src/services/storyMedia.service.ts');
+const mediaCode = ts.transpileModule(fs.readFileSync(mediaFilename, 'utf8'), { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } }).outputText;
+const mediaMod = { exports: {} };
+Object.assign(mocks['../models/Story.js'], { MAX_STORY_ATTACHMENTS: 10, MAX_STORY_VIDEOS: 1, MAX_STORY_VIDEO_BYTES: 50 * 1024 * 1024 });
+vm.runInNewContext(mediaCode, { module: mediaMod, exports: mediaMod.exports, Buffer, require(name) { assert.ok(Object.hasOwn(mocks, name), `unmocked media ${name}`); return mocks[name]; } }, { filename: mediaFilename });
+mocks['./storyMedia.service.js'] = mediaMod.exports;
 const mod = { exports: {} };
 vm.runInNewContext(code, { module: mod, exports: mod.exports, require(name) { assert.ok(Object.hasOwn(mocks, name), `unmocked ${name}`); return mocks[name]; } }, { filename });
 const service = mod.exports.friendStoryService;

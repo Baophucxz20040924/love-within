@@ -5,7 +5,7 @@ import { requireAuth } from '../middleware/auth.js';
 import { requireCouple } from '../middleware/coupleContext.js';
 import { validate } from '../middleware/validate.js';
 import { commentLimiter, storyCreateLimiter, storyUploadLimiter } from '../middleware/rateLimit.js';
-import { MAX_STORY_BODY, MAX_STORY_PHOTOS, MOODS, REACTION_TYPES } from '../models/Story.js';
+import { MAX_STORY_BODY, MAX_STORY_PHOTOS, MAX_STORY_VIDEOS, MAX_STORY_VIDEO_BYTES, STORY_VIDEO_MIME_TYPES, MOODS, REACTION_TYPES } from '../models/Story.js';
 import { MAX_COMMENT_BODY } from '../models/StoryComment.js';
 import { STORY_IMAGE_TYPES, storyService } from '../services/story.service.js';
 import { ok } from '../utils/response.js';
@@ -28,7 +28,13 @@ const photoSchema = z.object({
   height: z.number().int().min(1).max(20_000),
 });
 
-/** Full post content (used for both create and edit — the composer always sends everything). */
+const videoSchema = photoSchema.extend({ mimeType: z.enum(STORY_VIDEO_MIME_TYPES) });
+const videoUploadSchema = z.object({
+  mimeType: z.enum(STORY_VIDEO_MIME_TYPES),
+  sizeBytes: z.number().int().positive().max(MAX_STORY_VIDEO_BYTES),
+});
+
+/** Full body/photos. Videos stay optional so old clients cannot erase them on edit. */
 const contentSchema = z.object({
   body: z.string().max(MAX_STORY_BODY, 'Bài viết quá dài').default(''),
   mood: z.enum(MOODS).nullable().optional(),
@@ -39,6 +45,7 @@ const contentSchema = z.object({
     .nullable()
     .optional(),
   photos: z.array(photoSchema).max(MAX_STORY_PHOTOS, `Tối đa ${MAX_STORY_PHOTOS} ảnh`).default([]),
+  videos: z.array(videoSchema).max(MAX_STORY_VIDEOS, `Tối đa ${MAX_STORY_VIDEOS} video`).optional(),
 });
 
 const uploadSchema = z.object({
@@ -84,6 +91,16 @@ storyRouter.post(
   validate({ body: uploadSchema }),
   asyncHandler(async (req, res) => {
     ok(res, await storyService.createUploadUrl(req.couple!, req.body.mimeType, req.body.sizeBytes), 201);
+  }),
+);
+
+/** Separate cap/prefix, with exactly the same auth, couple context and upload limiter as photos. */
+storyRouter.post(
+  '/video-upload-url',
+  storyUploadLimiter,
+  validate({ body: videoUploadSchema }),
+  asyncHandler(async (req, res) => {
+    ok(res, await storyService.createVideoUploadUrl(req.couple!, req.body.mimeType, req.body.sizeBytes), 201);
   }),
 );
 

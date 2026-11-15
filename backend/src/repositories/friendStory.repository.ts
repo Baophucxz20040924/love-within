@@ -1,11 +1,12 @@
 import { Types } from 'mongoose';
 import { FriendStory, type FriendStoryDoc, type PollOption } from '../models/FriendStory.js';
 import { FriendStoryComment, type CommentMention, type FriendStoryCommentDoc } from '../models/FriendStoryComment.js';
-import type { ReactionType, StoryPhoto } from '../models/Story.js';
+import type { ReactionType, StoryPhoto, StoryVideo } from '../models/Story.js';
 
 export interface FriendStoryContent {
   body: string;
   photos: StoryPhoto[];
+  videos?: StoryVideo[];
   mentions: CommentMention[];
 }
 

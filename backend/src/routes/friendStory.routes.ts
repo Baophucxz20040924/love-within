@@ -15,7 +15,7 @@ import {
 } from '../middleware/rateLimit.js';
 import { MAX_POLL_OPTION, POLL_DURATION_DAYS, POLL_MAX_OPTIONS, POLL_MIN_OPTIONS } from '../models/FriendStory.js';
 import { MAX_MENTIONS } from '../models/FriendStoryComment.js';
-import { MAX_STORY_BODY, MAX_STORY_PHOTOS, REACTION_TYPES } from '../models/Story.js';
+import { MAX_STORY_BODY, MAX_STORY_PHOTOS, MAX_STORY_VIDEOS, MAX_STORY_VIDEO_BYTES, STORY_VIDEO_MIME_TYPES, REACTION_TYPES } from '../models/Story.js';
 import { MAX_COMMENT_BODY } from '../models/StoryComment.js';
 import { friendStoryService } from '../services/friendStory.service.js';
 import { friendSafetyService } from '../services/friendSafety.service.js';
@@ -41,10 +41,17 @@ const photoSchema = z.object({
   height: z.number().int().min(1).max(20_000),
 });
 
-/** Full post content (create and edit: the composer always sends body and photos). */
+const videoSchema = photoSchema.extend({ mimeType: z.enum(STORY_VIDEO_MIME_TYPES) });
+const videoUploadSchema = z.object({
+  mimeType: z.enum(STORY_VIDEO_MIME_TYPES),
+  sizeBytes: z.number().int().positive().max(MAX_STORY_VIDEO_BYTES),
+});
+
+/** Full body/photos. Videos stay optional so old clients cannot erase them on edit. */
 const contentSchema = z.object({
   body: z.string().max(MAX_STORY_BODY, 'Bài viết quá dài').default(''),
   photos: z.array(photoSchema).max(MAX_STORY_PHOTOS, `Tối đa ${MAX_STORY_PHOTOS} ảnh`).default([]),
+  videos: z.array(videoSchema).max(MAX_STORY_VIDEOS, `Tối đa ${MAX_STORY_VIDEOS} video`).optional(),
   mentions: z.array(z.object({
     userId: objectId,
     offset: z.number().int().min(0).max(MAX_STORY_BODY),
@@ -111,6 +118,16 @@ friendStoryRouter.post(
   validate({ body: uploadSchema }),
   asyncHandler(async (req, res) => {
     ok(res, await friendStoryService.createUploadUrl(req.friendsMember!, req.body.mimeType, req.body.sizeBytes), 201);
+  }),
+);
+
+/** Separate cap/prefix, with exactly the same auth, membership and upload limiter as photos. */
+friendStoryRouter.post(
+  '/video-upload-url',
+  friendStoryUploadLimiter,
+  validate({ body: videoUploadSchema }),
+  asyncHandler(async (req, res) => {
+    ok(res, await friendStoryService.createVideoUploadUrl(req.friendsMember!, req.body.mimeType, req.body.sizeBytes), 201);
   }),
 );
 

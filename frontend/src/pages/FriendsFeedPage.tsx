@@ -8,6 +8,7 @@ import { EmptyState, ErrorState, Page, Skeleton } from '../components/StatusView
 import { useAuth } from '../features/auth/AuthContext';
 import { FRIEND_FEED_KEY, FRIENDS_OVERVIEW_KEY, friendStoriesApi, friendsApi } from '../features/friends/api';
 import { FriendComposer } from '../features/friends/FriendComposer';
+import { POST_MEDIA_ACCEPT } from '../features/stories/postMedia';
 import { FriendEventStrip } from '../features/friends/FriendEventStrip';
 import { FriendStoryCard } from '../features/friends/FriendStoryCard';
 import { FriendSuggestions } from '../features/friends/FriendSuggestions';
@@ -81,10 +82,10 @@ export function FriendsFeedPage() {
           <button type="button" className="composer-prompt__input" onClick={write}>
             {shortName(name)} ơi, bạn đang nghĩ gì?
           </button>
-          <button type="button" className="icon-btn composer-prompt__photo" aria-label="Đăng ảnh" onClick={() => fileRef.current?.click()}>
+          <button type="button" className="icon-btn composer-prompt__photo" aria-label="Đăng ảnh hoặc video" onClick={() => fileRef.current?.click()}>
             <Icon name="image" />
           </button>
-          <input ref={fileRef} type="file" accept="image/*" multiple hidden onChange={onFiles} />
+          <input ref={fileRef} type="file" accept={POST_MEDIA_ACCEPT} multiple hidden onChange={onFiles} />
         </div>
       </section>
 

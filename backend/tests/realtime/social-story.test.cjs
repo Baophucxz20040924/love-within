@@ -40,6 +40,13 @@ const mocks = {
   './profile.service.js': { profileOf: () => ({}), profileService: { load: async () => new Map() } },
   './friendPoll.js': { previewIdsOf: () => [] }, './story.service.js': {},
 };
+// Load the real media helper without importing integrations, dotenv or provider code.
+const mediaFilename = path.resolve(__dirname, '../../src/services/storyMedia.service.ts');
+const mediaCode = ts.transpileModule(fs.readFileSync(mediaFilename, 'utf8'), { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } }).outputText;
+const mediaMod = { exports: {} };
+Object.assign(mocks['../models/Story.js'], { MAX_STORY_ATTACHMENTS: 10, MAX_STORY_VIDEOS: 1, MAX_STORY_VIDEO_BYTES: 50 * 1024 * 1024 });
+vm.runInNewContext(mediaCode, { module: mediaMod, exports: mediaMod.exports, Buffer, require(name) { assert.ok(Object.hasOwn(mocks, name), `unmocked media ${name}`); return mocks[name]; } }, { filename: mediaFilename });
+mocks['./storyMedia.service.js'] = mediaMod.exports;
 const mod = { exports: {} };
 vm.runInNewContext(code, { module: mod, exports: mod.exports, require(name) { assert.ok(Object.hasOwn(mocks, name), `unmocked ${name}`); return mocks[name]; } }, { filename });
 const service = mod.exports.friendStoryService;

@@ -3,6 +3,12 @@ import { createPortal } from 'react-dom';
 import { setModalPrivacyPause } from '../../hooks/useModal';
 
 type Status = 'clear' | 'checking' | 'failed';
+/** Media must stop while private content is masked, even though its React tree stays mounted. */
+export function subscribeVerification(listener: () => void): () => void {
+  listeners.add(listener);
+  return () => { listeners.delete(listener); };
+}
+export function getVerificationStatus(): Status { return status; }
 let status: Status = 'clear';
 let retry: (() => void) | undefined;
 let maskObserver: MutationObserver | undefined;
