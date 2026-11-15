@@ -15,6 +15,7 @@ import { reactionOf } from '../stories/constants';
 import { friendStoriesApi } from './api';
 import { removeFriendStoryFromCache, replaceFriendStoryInCache, updateFriendStoryInCache } from './cache';
 import { FriendPollView } from './FriendPoll';
+import { segments } from './mentions';
 import { BlockSheet, ReportSheet, type ReportTargetInfo } from './SafetySheets';
 
 interface Props {
@@ -159,7 +160,11 @@ export function FriendStoryCard({ story, clamp = true, onEdit, onDeleted, onComm
 
       {story.body && (
         <div className={`post__body${isShortText ? ' post__body--big' : ''}`}>
-          <p className={clamp && isLong && !expanded ? 'is-clamped' : undefined}>{story.body}</p>
+          <p className={clamp && isLong && !expanded ? 'is-clamped' : undefined}>
+            {segments(story.body, story.mentions ?? []).map((part, i) => part.userId ? (
+              <Link key={i} to={`/friends/u/${part.userId}`} className="mention">{part.text}</Link>
+            ) : part.text)}
+          </p>
           {clamp && isLong && !expanded && (
             <button type="button" className="post__more" onClick={() => setExpanded(true)}>
               Xem thêm

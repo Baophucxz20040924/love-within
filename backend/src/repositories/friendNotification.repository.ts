@@ -35,6 +35,25 @@ export const friendNotificationRepository = {
     });
   },
 
+  /** Insert a post mention only once while its notification exists, without touching an existing row. */
+  async addPostMentionOnce(userId: Types.ObjectId, actorId: Types.ObjectId, entityId: Types.ObjectId): Promise<boolean> {
+    const type = 'post_mention';
+    const groupKey = `${type}:${entityId.toString()}`;
+    const now = new Date();
+    try {
+      const result = await FriendNotification.updateOne(
+        { userId, groupKey },
+        { $setOnInsert: { userId, type, entityId, groupKey, actorIds: [actorId], recentActorIds: [actorId], readAt: null, createdAt: now, updatedAt: now } },
+        { upsert: true },
+      ).exec();
+      return result.upsertedCount > 0;
+    } catch (err) {
+      // A concurrent first insert won the unique (userId, groupKey) index. Do not update the winner.
+      if (isDuplicateKey(err)) return false;
+      throw err;
+    }
+  },
+
   /**
    * One row per (recipient, type, post): adds the actor once, moves them to the front of the recent list,
    * marks the row unread again and bumps it to the top. A single atomic pipeline upsert (sent through the

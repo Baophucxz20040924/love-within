@@ -1,7 +1,7 @@
 import type { FriendUser, MentionSpan } from '../../lib/types';
 
 /**
- * "@Tên" in comments (plan/ENGINEERING_WORKFLOW.md, BB8). The body is plain text; each mention is a span of it that starts with
+ * "@Tên" in posts and comments (plan/ENGINEERING_WORKFLOW.md, BB8). The body is plain text; each mention is a span of it that starts with
  * "@" followed by the person's name. The server checks the spans again (inside the trimmed body, "@" + name, no overlap,
  * at most 10, the person can see the post). Offsets are JavaScript string indexes on both sides.
  */
@@ -17,6 +17,19 @@ export interface DraftMention {
 }
 
 const byStart = (a: DraftMention, b: DraftMention) => a.start - b.start;
+
+/** Reopen saved tags using the name in the body, even if the person has since renamed their profile. */
+export function fromPayload(body: string, mentions: MentionSpan[]): DraftMention[] {
+  return [...mentions]
+    .sort((a, b) => a.offset - b.offset)
+    .filter((m, i, all) =>
+      Number.isInteger(m.offset) && Number.isInteger(m.length) && m.offset >= 0 && m.length >= 2 &&
+      m.offset + m.length <= body.length && body[m.offset] === '@' &&
+      (i === 0 || all[i - 1].offset + all[i - 1].length <= m.offset),
+    )
+    .slice(0, MAX_MENTIONS)
+    .map((m) => ({ userId: m.userId, name: body.slice(m.offset + 1, m.offset + m.length), start: m.offset, length: m.length }));
+}
 
 /**
  * Keep mentions in step with an edit of the box: mentions before the changed part stay, mentions after it move, and a
@@ -101,12 +114,12 @@ export interface Segment {
   userId?: string;
 }
 
-/** A posted comment split into plain text and mentions (overlapping or out-of-range spans are ignored). */
+/** A posted body split into plain text and mentions (invalid spans stay plain text). */
 export function segments(body: string, mentions: MentionSpan[]): Segment[] {
   const out: Segment[] = [];
   let pos = 0;
   for (const m of [...mentions].sort((a, b) => a.offset - b.offset)) {
-    if (m.offset < pos || m.offset + m.length > body.length) continue;
+    if (!Number.isInteger(m.offset) || !Number.isInteger(m.length) || m.length < 2 || m.offset < pos || m.offset + m.length > body.length || body[m.offset] !== '@') continue;
     if (m.offset > pos) out.push({ text: body.slice(pos, m.offset) });
     out.push({ text: body.slice(m.offset, m.offset + m.length), userId: m.userId });
     pos = m.offset + m.length;

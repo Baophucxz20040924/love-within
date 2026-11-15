@@ -22,6 +22,31 @@
   line-height: 1.65;
 }
 .composer--form .composer__text--big { font-size: 20px; }
+.composer--form .mention-field--composer { display: block; margin-block: var(--space-4, 16px); }
+.composer--form .mention-field--composer .composer__text { display: block; margin: 0; background: transparent; }
+.composer--form .mention-field--composer .mention-field__mirror {
+  bottom: auto;
+  height: 100%;
+  padding: 12px;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  background: transparent;
+  font-size: 16px;
+  line-height: 1.65;
+}
+.composer--form .mention-field--big .mention-field__mirror { font-size: 20px; }
+.composer--form .mention-field--composer .mention-picker {
+  position: relative;
+  inset: auto;
+  max-height: 220px;
+  margin-top: 8px;
+  border: 1px solid var(--border);
+  box-shadow: none;
+}
+.mention-field__editor { position: relative; flex: 1; min-width: 0; }
+.mention-field__status { position: absolute; bottom: calc(100% + 8px); margin: 0; padding: 8px 12px; border-radius: 10px; background: var(--surface); color: var(--text-muted); font-size: 13px; }
+.composer--form .mention-field--composer .mention-field__status { position: relative; inset: auto; padding: 8px 0 0; }
+
 .composer--form .composer__text:focus-visible,
 .composer--form .letter-title-input:focus-visible { outline: 2px solid var(--focus, var(--brand-700)); outline-offset: 2px; }
 .composer--form .composer__text[readonly],

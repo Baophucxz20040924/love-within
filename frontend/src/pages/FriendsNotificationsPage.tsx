@@ -19,6 +19,7 @@ const ICON: Record<FriendNotificationType, IconName> = {
   invite_joined: 'users',
   comment_reply: 'cornerDownRight',
   mention: 'atSign',
+  post_mention: 'atSign',
   poll_closed: 'list',
   event_invite: 'calendar',
   event_rsvp: 'check',
@@ -103,6 +104,12 @@ function Sentence({ n }: { n: FriendNotification }): ReactNode {
       return (
         <>
           <Names n={n} /> đã nhắc đến bạn trong một bình luận{quote}
+        </>
+      );
+    case 'post_mention':
+      return (
+        <>
+          <Names n={n} /> đã nhắc đến bạn trong một bài viết{quote}
         </>
       );
     case 'poll_closed':

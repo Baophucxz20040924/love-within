@@ -1,5 +1,12 @@
 import { Schema, model, type Document, type Types } from 'mongoose';
 import { MAX_STORY_BODY, REACTION_TYPES, type ReactionType, type StoryPhoto } from './Story.js';
+import type { CommentMention } from './FriendStoryComment.js';
+
+const mentionSchema = new Schema<CommentMention>({
+  userId: { type: Schema.Types.ObjectId, ref: 'User', required: true },
+  offset: { type: Number, required: true, min: 0 },
+  length: { type: Number, required: true, min: 2 },
+}, { _id: false });
 
 /** Poll in a post (BB6, plan/ENGINEERING_WORKFLOW.md): 2–4 options of ≤ 80 characters; the post body is the question. */
 export const POLL_MIN_OPTIONS = 2;
@@ -34,6 +41,9 @@ export interface FriendStoryDoc extends Document {
   _id: Types.ObjectId;
   authorId: Types.ObjectId;
   body: string;
+  mentions: CommentMention[];
+  /** Only content edits increment this; legacy documents without it are revision zero. */
+  contentRevision: number;
   /** key: friends/<authorId>/stories/<YYYY-MM>/<uuid>.<ext> */
   photos: StoryPhoto[];
   /** userId → reaction (any friend of the author). */
@@ -82,6 +92,8 @@ const friendStorySchema = new Schema<FriendStoryDoc>(
   {
     authorId: { type: Schema.Types.ObjectId, ref: 'User', required: true },
     body: { type: String, default: '', maxlength: MAX_STORY_BODY },
+    mentions: { type: [mentionSchema], default: [] },
+    contentRevision: { type: Number, default: 0, min: 0 },
     photos: { type: [photoSchema], default: [] },
     reactions: { type: Map, of: { type: String, enum: REACTION_TYPES }, default: () => new Map() },
     commentCount: { type: Number, default: 0, min: 0 },

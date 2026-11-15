@@ -71,6 +71,8 @@ function friendsPush(n: FriendsNotifyInput): PushContent {
           : (name: string) => `${name} đã trả lời bình luận của bạn`;
       return { body, url, tag: postId ? `post:${postId}` : 'friends' };
     }
+    case 'post_mention':
+      return { body: (name) => `${name} đã nhắc đến bạn trong một bài viết`, url: `/friends/posts/${post}`, tag: `post:${post}` };
     case 'poll_closed':
       return { body: 'Bình chọn của bạn đã kết thúc', url: `/friends/posts/${post}`, tag: `post:${post}` };
     // BB5: entityId = the event. Never the title, the place or a comment (same as posts: only who did what).
@@ -127,7 +129,11 @@ export const notificationService = {
     let newActor = true;
     try {
       if (actorId && (await friendBlockRepository.isBlockedBetween(input.to, actorId))) return;
-      if (actorId && entityId && GROUPED_NOTIFICATION_TYPES.has(input.type)) {
+      if (input.type === 'post_mention') {
+        if (!actorId || !entityId) return;
+        // An existing row must not be bumped, invalidated, or pushed again.
+        if (!(await friendNotificationRepository.addPostMentionOnce(input.to, actorId, entityId))) return;
+      } else if (actorId && entityId && GROUPED_NOTIFICATION_TYPES.has(input.type)) {
         newActor = await friendNotificationRepository.addGrouped(input.to, input.type, actorId, entityId);
       } else {
         await friendNotificationRepository.add(input.to, input.type, actorId, entityId);
@@ -146,7 +152,7 @@ export const notificationService = {
       type: input.type,
       // Generic outing push never needs to load the actor's social profile.
       actorId: OUTING_NOTIFICATION_TYPES.has(input.type) ? null : actorId,
-      content: OUTING_NOTIFICATION_TYPES.has(input.type) ? friendsPush(input) : input.push ?? friendsPush(input),
+      content: OUTING_NOTIFICATION_TYPES.has(input.type) || input.type === 'post_mention' ? friendsPush(input) : input.push ?? friendsPush(input),
       timed: rule.timed,
       urgent: rule.urgent,
     });

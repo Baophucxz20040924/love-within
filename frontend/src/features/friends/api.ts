@@ -99,6 +99,8 @@ export const friendStoriesApi = {
   /** removed = 1, or 1 + its replies for a root comment. */
   deleteComment: (id: string, commentId: string) =>
     apiRequest<{ ok: true; removed: number }>(`/friends/stories/${enc(id)}/comments/${enc(commentId)}`, { method: 'DELETE' }),
+  /** Draft post picker: accepted, unblocked friends of the author. */
+  draftMentionable: (q: string) => apiRequest<FriendUser[]>(`/friends/stories/mentionable?q=${enc(q)}`),
   /** "@" picker: up to 10 people who can see the post. */
   mentionable: (id: string, q: string) => apiRequest<FriendUser[]>(`/friends/stories/${enc(id)}/mentionable?q=${enc(q)}`),
   /** Poll (BB6): my whole choice (one id for a single-choice poll); unvote takes it back. */

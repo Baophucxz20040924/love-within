@@ -9,7 +9,9 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "test:realtime": "node tests/realtime/realtime.cjs",
-    "test:realtime:browser": "node tests/realtime/browser.mjs"
+    "test:realtime:browser": "node tests/realtime/browser.mjs",
+    "test:mentions": "node tests/post-mentions/mentions.cjs",
+    "test:mentions:browser": "node tests/post-mentions/browser.mjs"
   },
   "dependencies": {
     "@fontsource/be-vietnam-pro": "^5.3.0",

@@ -10,6 +10,7 @@
     "start": "node dist/server.js",
     "typecheck": "tsc --noEmit",
     "test:realtime": "node tests/realtime/run.cjs",
+    "test:mentions": "node tests/post-mentions/story.test.cjs && node tests/post-mentions/repository.test.cjs && node tests/post-mentions/notification.test.cjs",
     "test:ai": "tsx scripts/test-ai.ts",
     "seed:couple": "tsx scripts/seed-couple.ts",
     "reports": "tsx scripts/reports.ts"

@@ -117,6 +117,23 @@ async function openableComments(me: UserDoc, ids: Types.ObjectId[], blocked: Rea
   return out;
 }
 
+/** A mention does not grant access: recheck the post and its author's current relationship. */
+async function openablePostMentions(me: UserDoc, ids: Types.ObjectId[], blocked: ReadonlySet<string>, excerpts: boolean) {
+  const out = new Map<string, string>();
+  if (!ids.length) return out;
+  const fields = '_id authorId hiddenByReportsAt mentions';
+  const stories = await FriendStory.find({ _id: { $in: uniqueIds(ids) }, deletedAt: null })
+    .select(excerpts ? `${fields} body` : fields)
+    .lean<{ _id: Types.ObjectId; authorId: Types.ObjectId; hiddenByReportsAt: Date | null; mentions?: { userId: Types.ObjectId }[]; body?: string }[]>().exec();
+  const eligible = stories.filter((s) => !s.authorId.equals(me._id) && !s.hiddenByReportsAt &&
+    !blocked.has(s.authorId.toString()) && (s.mentions ?? []).some((m) => m.userId.equals(me._id)));
+  const authors = [...new Set(eligible.map((s) => s.authorId.toString()))];
+  const rows = authors.length ? await friendshipRepository.listBetween(me._id, authors) : [];
+  const friends = new Set(rows.filter((r) => r.status === 'accepted').map((r) => otherOf(r, me._id).toString()));
+  for (const story of eligible) if (friends.has(story.authorId.toString())) out.set(story._id.toString(), story.body ?? '');
+  return out;
+}
+
 async function openableEvents(me: UserDoc, ids: Types.ObjectId[], blocked: ReadonlySet<string>, excerpts: boolean) {
   const out = new Map<string, string>();
   if (ids.length === 0) return out;
@@ -142,13 +159,14 @@ async function visible(me: UserDoc, docs: NotificationCandidate[], blocked: Read
   const storyIds = idsFor((d) => STORY_TYPES.has(d.type));
   const requestIds = idsFor((d) => d.type === 'friend_request');
   const outingIds = idsFor((d) => OUTING_NOTIFICATION_TYPES.has(d.type));
-  const [stories, pending, events, comments, outings] = await Promise.all([
+  const [stories, pending, events, comments, outings, postMentions] = await Promise.all([
     storyIds.length ? FriendStory.find({ _id: { $in: storyIds }, authorId: me._id, deletedAt: null })
       .select(excerpts ? '_id body' : '_id').lean<{ _id: Types.ObjectId; body?: string }[]>().exec() : [],
     requestIds.length ? friendshipRepository.pendingIncomingIds(me._id, requestIds, blocked) : new Set<string>(),
     openableEvents(me, idsFor((d) => EVENT_NOTIFICATION_TYPES.has(d.type)), blocked, excerpts),
     openableComments(me, idsFor((d) => COMMENT_TYPES.has(d.type)), blocked, excerpts),
     outingIds.length ? friendOutingService.notificationVisibility(me._id.toString(), outingIds.map(String)) : new Map<string, { visible: boolean; restricted: boolean }>(),
+    openablePostMentions(me, idsFor((d) => d.type === 'post_mention'), blocked, excerpts),
   ]);
   const bodyById = new Map(stories.map((s) => [s._id.toString(), s.body ?? '']));
   const allowed = (ids: Types.ObjectId[]) => uniqueIds(ids).filter((id) => !blocked.has(id.toString()));
@@ -164,6 +182,11 @@ async function visible(me: UserDoc, docs: NotificationCandidate[], blocked: Read
     let restricted: boolean | undefined;
     if (STORY_TYPES.has(doc.type)) {
       const body = entityKey ? bodyById.get(entityKey) : undefined;
+      if (body === undefined) continue;
+      if (excerpts) excerpt = excerptOf(body);
+    }
+    if (doc.type === 'post_mention') {
+      const body = entityKey ? postMentions.get(entityKey) : undefined;
       if (body === undefined) continue;
       if (excerpts) excerpt = excerptOf(body);
     }
@@ -199,7 +222,7 @@ async function toViews(items: Visible[]): Promise<FriendNotificationView[]> {
   return items.map(({ doc, actorIds, recent, excerpt, storyId, restricted }) => {
     const entityId = doc.entityId?.toString();
     let entity: NotificationEntity = null;
-    if (STORY_TYPES.has(doc.type) && entityId) entity = { kind: 'story', id: entityId, excerpt };
+    if ((STORY_TYPES.has(doc.type) || doc.type === 'post_mention') && entityId) entity = { kind: 'story', id: entityId, excerpt };
     else if (COMMENT_TYPES.has(doc.type) && entityId && storyId) entity = { kind: 'comment', id: entityId, storyId, excerpt };
     else if (EVENT_NOTIFICATION_TYPES.has(doc.type) && entityId) entity = { kind: 'event', id: entityId, excerpt };
     else if (OUTING_NOTIFICATION_TYPES.has(doc.type) && entityId) entity = { kind: 'outing', id: entityId, restricted: restricted ?? false };

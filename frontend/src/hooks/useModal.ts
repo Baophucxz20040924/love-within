@@ -102,6 +102,8 @@ function syncStack() {
 function onKeyDown(event: KeyboardEvent) {
   const top = stack[stack.length - 1];
   if (!top || privacyPaused || event.isComposing) return;
+  // An open inline picker consumes Escape before the enclosing dialog closes.
+  if (event.key === 'Escape' && event.target instanceof HTMLElement && event.target.getAttribute('aria-expanded') === 'true') return;
   if (event.key === 'Escape') {
     event.preventDefault();
     event.stopImmediatePropagation();

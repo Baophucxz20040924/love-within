@@ -664,6 +664,8 @@ export interface FriendStory {
   author: FriendUser;
   isMine: boolean;
   body: string;
+  /** Named friends; blocked people remain plain text. */
+  mentions: MentionSpan[];
   photos: StoryPhotoView[];
   /** total = everyone's reactions; top = up to 3 most used types. */
   reactions: { mine: ReactionType | null; total: number; top: ReactionType[] };
@@ -714,7 +716,7 @@ export interface FriendStoryPage {
   nextCursor: string | null;
 }
 
-/** "@Tên" inside a comment body: body.slice(offset, offset + length) (JavaScript string indexes). */
+/** "@Tên" inside a trimmed post/comment body: body.slice(offset, offset + length) (JavaScript string indexes). */
 export interface MentionSpan {
   userId: string;
   offset: number;
@@ -756,6 +758,7 @@ export interface FriendSuggestion {
 
 export interface FriendStoryInput {
   body: string;
+  mentions?: MentionSpan[];
   photos: { key: string; width: number; height: number }[];
   /** Create: a poll or nothing. Edit: left out = keep; null = remove (only without votes). */
   poll?: FriendPollInput | null;
@@ -822,6 +825,7 @@ export type FriendNotificationType =
   | 'invite_joined'
   | 'comment_reply'
   | 'mention'
+  | 'post_mention'
   | 'poll_closed'
   | 'event_invite'
   | 'event_rsvp'

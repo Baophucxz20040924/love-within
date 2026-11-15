@@ -45,6 +45,11 @@ const photoSchema = z.object({
 const contentSchema = z.object({
   body: z.string().max(MAX_STORY_BODY, 'Bài viết quá dài').default(''),
   photos: z.array(photoSchema).max(MAX_STORY_PHOTOS, `Tối đa ${MAX_STORY_PHOTOS} ảnh`).default([]),
+  mentions: z.array(z.object({
+    userId: objectId,
+    offset: z.number().int().min(0).max(MAX_STORY_BODY),
+    length: z.number().int().min(2).max(MAX_STORY_BODY),
+  })).max(MAX_MENTIONS, `Nhắc tối đa ${MAX_MENTIONS} người`).optional(),
   /** BB6. Edit: left out = keep the poll; null = remove it (only without votes). `durationDays` left out on edit = keep the deadline. */
   poll: z
     .object({
@@ -114,6 +119,16 @@ friendStoryRouter.post(
   friendStoryCreateLimiter,
   validate({ body: contentSchema }),
   asyncHandler(async (req, res) => ok(res, await friendStoryService.create(req.friendsMember!, req.body), 201)),
+);
+
+/** Draft composer picker, before the dynamic post route. */
+friendStoryRouter.get(
+  '/mentionable', expensiveReadLimiter, friendMentionLimiter,
+  validate({ query: mentionableQuery }),
+  asyncHandler(async (req, res) => {
+    const q = typeof req.query.q === 'string' ? req.query.q : '';
+    ok(res, await friendStoryService.draftMentionable(req.friendsMember!, q));
+  }),
 );
 
 friendStoryRouter.get(

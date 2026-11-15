@@ -83,6 +83,7 @@ export const FRIENDS_PUSH_RULES: Record<FriendNotificationType, PushRule<Friends
   // BB8: every reply and every mention pushes once (like comments).
   comment_reply: { group: 'social' },
   mention: { group: 'social' },
+  post_mention: { group: 'social' },
   // BB6: to the post author once, when the deadline has passed (job polls.closed). No push per vote (too noisy).
   poll_closed: { group: 'social' },
   // BB5 "Lên kèo": settings group "Kèo". A new "sẽ đi" pushes once per person; taking "Đi" back takes them off the row,

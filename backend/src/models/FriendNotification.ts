@@ -12,6 +12,7 @@ export const FRIEND_NOTIFICATION_TYPES = [
   'invite_joined',
   'comment_reply',
   'mention',
+  'post_mention',
   'poll_closed',
   'event_invite',
   'event_rsvp',
@@ -76,11 +77,11 @@ export interface FriendNotificationDoc extends Document {
   userId: Types.ObjectId;
   type: FriendNotificationType;
   /**
-   * Post (story_*, poll_closed), friend request (friend_request), root comment (comment_reply), comment with the mention
+   * Post (story_*, post_mention, poll_closed), friend request (friend_request), root comment (comment_reply), comment with the mention
    * (mention), event (event_*) or null.
    */
   entityId: Types.ObjectId | null;
-  /** `${type}:${entityId}` for grouped types, null otherwise. */
+  /** `${type}:${entityId}` for grouped types and insert-once post mentions, null otherwise. */
   groupKey: string | null;
   /** Everyone who acted, without duplicates (for "và N người khác"). Empty for SYSTEM_NOTIFICATION_TYPES. */
   actorIds: Types.ObjectId[];

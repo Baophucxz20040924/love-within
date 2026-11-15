@@ -4,7 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Avatar } from '../../components/Avatar';
 import type { FriendUser } from '../../lib/types';
 import { friendMentionableKey } from './api';
-import { activeQuery, insertMention, reconcile, type DraftMention } from './mentions';
+import { MAX_MENTIONS, activeQuery, insertMention, reconcile, type DraftMention } from './mentions';
 
 /** Who can be named in this discussion: `id` keys the cache (the post id), `fn` asks the server. */
 export interface MentionSearch {
@@ -21,7 +21,15 @@ interface Props {
   inputRef: RefObject<HTMLTextAreaElement>;
   placeholder: string;
   /** Keys the picker does not use (Enter to send on desktop). */
-  onKeyDown: (e: ReactKeyboardEvent<HTMLTextAreaElement>) => void;
+  onKeyDown?: (e: ReactKeyboardEvent<HTMLTextAreaElement>) => void;
+  variant?: 'comment' | 'composer';
+  big?: boolean;
+  rows?: number;
+  maxLength?: number;
+  readOnly?: boolean;
+  label?: string;
+  invalid?: boolean;
+  describedBy?: string;
   /** After every change, e.g. to grow the box. */
   onInput?: (el: HTMLTextAreaElement) => void;
 }
@@ -57,15 +65,23 @@ function mirror(text: string, mentions: DraftMention[]): ReactNode[] {
  * Comment box with "@" names (BB8). Typing "@" and a few letters lists up to 10 people who can see the post (no diacritics
  * needed); choosing one inserts "@Tên", shown tinted. Editing inside a name turns it back into plain text.
  */
-export function MentionField({ search, text, mentions, onChange, inputRef, placeholder, onKeyDown, onInput }: Props) {
+export function MentionField({
+  search, text, mentions, onChange, inputRef, placeholder, onKeyDown, onInput,
+  variant = 'comment', big = false, rows = 1, maxLength = 2000, readOnly = false,
+  label = 'Viết bình luận', invalid, describedBy,
+}: Props) {
   const listId = useId();
+  const statusId = `${listId}-status`;
+  const composing = useRef(false);
   const mirrorRef = useRef<HTMLDivElement>(null);
   const [caret, setCaret] = useState(0);
   const [closedAt, setClosedAt] = useState<number | null>(null);
   const [hi, setHi] = useState(0);
 
-  const active = search ? activeQuery(text, caret, mentions) : null;
-  const open = active !== null && closedAt !== active.start;
+  const [pickError, setPickError] = useState<string | null>(null);
+  const active = search && !readOnly ? activeQuery(text, caret, mentions) : null;
+  const atLimit = mentions.length >= MAX_MENTIONS;
+  const open = active !== null && closedAt !== active.start && !atLimit;
   const q = useDebounced(active?.query ?? '', 200);
   const people = useQuery({
     queryKey: friendMentionableKey(search?.id ?? '', q),
@@ -74,8 +90,13 @@ export function MentionField({ search, text, mentions, onChange, inputRef, place
     staleTime: 30_000,
     placeholderData: (previous) => previous,
   });
-  const options = open ? (people.data ?? []) : [];
+  // Do not let Enter choose a result for an earlier query while the new name is loading.
+  const options = open && q === active?.query && !people.isPlaceholderData ? (people.data ?? []) : [];
   const showList = options.length > 0;
+  const feedback = pickError ?? (active && atLimit ? `Nhắc tối đa ${MAX_MENTIONS} người.` :
+    open && q === active?.query ? people.isError ? 'Chưa tìm được bạn bè. Gõ lại để thử nhé.' :
+      people.isFetching && !options.length ? 'Đang tìm bạn bè…' :
+        !people.isFetching && !options.length ? 'Không có bạn bè phù hợp.' : null : null);
 
   useEffect(() => setHi(0), [q]);
   // A new "@" opens the list again after Escape.
@@ -86,8 +107,13 @@ export function MentionField({ search, text, mentions, onChange, inputRef, place
   function pick(index: number) {
     const user = options[index];
     const el = inputRef.current;
-    if (!user || !active || !el) return;
+    if (!user || !active || !el || readOnly || composing.current || atLimit) return;
     const next = insertMention(text, mentions, active, caret, user);
+    if (next.text.length > maxLength) {
+      setPickError('Nội dung đã quá dài để thêm tên này.');
+      return;
+    }
+    setPickError(null);
     onChange(next.text, next.mentions);
     requestAnimationFrame(() => {
       el.focus();
@@ -98,6 +124,7 @@ export function MentionField({ search, text, mentions, onChange, inputRef, place
   }
 
   function keyDown(e: ReactKeyboardEvent<HTMLTextAreaElement>) {
+    if (composing.current || e.nativeEvent.isComposing || e.keyCode === 229 || readOnly) return;
     if (showList) {
       if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
         e.preventDefault();
@@ -107,47 +134,61 @@ export function MentionField({ search, text, mentions, onChange, inputRef, place
       }
       if (e.key === 'Enter' || e.key === 'Tab') {
         e.preventDefault();
-        pick(hi);
-        return;
-      }
-      if (e.key === 'Escape') {
-        e.preventDefault();
-        if (active) setClosedAt(active.start);
+        pick(Math.min(hi, options.length - 1));
         return;
       }
     }
-    onKeyDown(e);
+    if (e.key === 'Escape' && open) {
+      e.preventDefault();
+      if (active) setClosedAt(active.start);
+      return;
+    }
+    onKeyDown?.(e);
   }
 
   return (
-    <div className="mention-field">
-      <div ref={mirrorRef} className="mention-field__mirror" aria-hidden="true">
-        {mirror(text, mentions)}
-        {'\u200b'}
+    <div className={`mention-field${variant === 'composer' ? ' mention-field--composer' : ''}${big ? ' mention-field--big' : ''}`}>
+      <div className="mention-field__editor">
+        <div ref={mirrorRef} className="mention-field__mirror" aria-hidden="true">
+          {mirror(text, mentions)}
+          {'\u200b'}
+        </div>
+        <textarea
+          ref={inputRef}
+          className={`${variant === 'composer' ? `composer__text${big ? ' composer__text--big' : ''}` : 'comment-bar__input'} mention-field__input`}
+          rows={rows}
+          value={text}
+          maxLength={maxLength}
+          readOnly={readOnly}
+          placeholder={placeholder}
+          aria-label={label}
+          aria-invalid={invalid}
+          aria-describedby={[describedBy, feedback ? statusId : null].filter(Boolean).join(' ') || undefined}
+          aria-autocomplete={search ? 'list' : undefined}
+          aria-expanded={search ? open : undefined}
+          aria-controls={showList ? listId : undefined}
+          aria-activedescendant={showList ? `${listId}-${Math.min(hi, options.length - 1)}` : undefined}
+          onCompositionStart={() => { composing.current = true; }}
+          onCompositionEnd={(e) => {
+            composing.current = false;
+            setCaret(e.currentTarget.selectionStart ?? 0);
+          }}
+          onChange={(e) => {
+            if (readOnly) return;
+            setPickError(null);
+            const next = e.target.value;
+            onChange(next, reconcile(text, next, mentions));
+            setCaret(e.target.selectionStart ?? next.length);
+            onInput?.(e.target);
+          }}
+          onSelect={(e) => setCaret(e.currentTarget.selectionStart ?? 0)}
+          onScroll={(e) => {
+            if (mirrorRef.current) mirrorRef.current.scrollTop = e.currentTarget.scrollTop;
+          }}
+          onKeyDown={keyDown}
+        />
       </div>
-      <textarea
-        ref={inputRef}
-        className="comment-bar__input mention-field__input"
-        rows={1}
-        value={text}
-        maxLength={2000}
-        placeholder={placeholder}
-        aria-label="Viết bình luận"
-        aria-autocomplete={search ? 'list' : undefined}
-        aria-controls={showList ? listId : undefined}
-        aria-activedescendant={showList ? `${listId}-${hi}` : undefined}
-        onChange={(e) => {
-          const next = e.target.value;
-          onChange(next, reconcile(text, next, mentions));
-          setCaret(e.target.selectionStart ?? next.length);
-          onInput?.(e.target);
-        }}
-        onSelect={(e) => setCaret(e.currentTarget.selectionStart ?? 0)}
-        onScroll={(e) => {
-          if (mirrorRef.current) mirrorRef.current.scrollTop = e.currentTarget.scrollTop;
-        }}
-        onKeyDown={keyDown}
-      />
+      {feedback && <p id={statusId} className="mention-field__status" role="status">{feedback}</p>}
       {showList && (
         <ul id={listId} className="mention-picker" role="listbox" aria-label="Nhắc tên">
           {options.map((u, i) => (

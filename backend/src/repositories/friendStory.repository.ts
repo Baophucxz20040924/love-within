@@ -6,6 +6,7 @@ import type { ReactionType, StoryPhoto } from '../models/Story.js';
 export interface FriendStoryContent {
   body: string;
   photos: StoryPhoto[];
+  mentions: CommentMention[];
 }
 
 /** A poll as written on create or when the author replaces it (votes always start empty). */
@@ -72,14 +73,17 @@ export const friendStoryRepository = {
    * Body and photos; with `poll` (a new poll or null to remove it) only while nobody has voted, checked in the same update,
    * so a vote landing at the same moment wins and the edit returns null. Without `poll` the votes are never touched.
    */
-  updateContent(id: string, authorId: Types.ObjectId, content: FriendStoryContent, poll?: NewPoll | null): Promise<FriendStoryDoc | null> {
-    const filter: Record<string, unknown> = { _id: id, authorId, ...alive };
+  updateContent(id: string, authorId: Types.ObjectId, content: FriendStoryContent, revision: number, poll?: NewPoll | null): Promise<FriendStoryDoc | null> {
+    const filter: Record<string, unknown> = {
+      _id: id, authorId, ...alive,
+      ...(revision === 0 ? { $or: [{ contentRevision: 0 }, { contentRevision: { $exists: false } }] } : { contentRevision: revision }),
+    };
     const set: Record<string, unknown> = { ...content, editedAt: new Date() };
     if (poll !== undefined) {
       Object.assign(filter, noVotes);
       set.poll = storedPoll(poll);
     }
-    return FriendStory.findOneAndUpdate(filter, { $set: set }, { new: true }).exec();
+    return FriendStory.findOneAndUpdate(filter, { $set: set, $inc: { contentRevision: 1 } }, { new: true }).exec();
   },
 
   /**

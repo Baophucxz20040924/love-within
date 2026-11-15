@@ -15,6 +15,10 @@ import { formatDateTime, shortName } from '../../lib/format';
 import type { FriendPollInput, FriendStory, PollDurationDays } from '../../lib/types';
 import { friendStoriesApi, uploadFriendPhoto } from './api';
 import { prependFriendStoryToFeed, replaceFriendStoryInCache } from './cache';
+import { MentionField } from './MentionField';
+import { fromPayload, toPayload, type DraftMention } from './mentions';
+
+const mentionSearch = { id: 'draft-post', fn: friendStoriesApi.draftMentionable };
 
 const MAX_PHOTOS = 10;
 /** Poll (BB6): 2–4 options of ≤ 80 characters. */
@@ -79,6 +83,7 @@ function ComposerDialog({
   const authorName = me?.user.displayName ?? '';
 
   const [body, setBody] = useState(editing?.body ?? initialBody);
+  const [mentions, setMentions] = useState<DraftMention[]>(() => editing ? fromPayload(editing.body, editing.mentions ?? []) : []);
   const [photos, setPhotos] = useState<LocalPhoto[]>(() => {
     const existing: LocalPhoto[] = (editing?.photos ?? []).map((p) => ({ id: nextId(), kind: 'existing', ...p }));
     return [...existing, ...fromFiles(initialFiles.slice(0, MAX_PHOTOS - existing.length))];
@@ -145,13 +150,15 @@ function ComposerDialog({
       editing
         ? JSON.stringify([
             editing.body,
+            toPayload(editing.body, fromPayload(editing.body, editing.mentions ?? [])).mentions,
             editing.photos.map((p) => p.key),
             editing.poll ? [locked ? 'locked' : editing.poll.options.map((o) => o.text), editing.poll.multi, 'keep'] : null,
           ])
         : '',
     [editing, locked],
   );
-  const current = JSON.stringify([body.trim(), photos.map((p) => (p.kind === 'existing' ? p.key : p.id)), pollSig]);
+  const payload = toPayload(body, mentions);
+  const current = JSON.stringify([payload.body, payload.mentions, photos.map((p) => (p.kind === 'existing' ? p.key : p.id)), pollSig]);
   const hasContent = body.trim().length > 0 || photos.length > 0;
   const changed = editing ? current !== original : hasContent || pollOn;
   const canSubmit = !busy && hasContent && !pollProblem && (!editing || changed);
@@ -237,7 +244,7 @@ function ComposerDialog({
         out.push(up);
       }
       setStatus(editing ? 'Đang lưu…' : 'Đang đăng…');
-      const input = { body: body.trim(), photos: out, poll: pollInput() };
+      const input = { ...payload, photos: out, poll: pollInput() };
       const story = editing ? await friendStoriesApi.update(editing.id, input) : await friendStoriesApi.create(input);
       if (editing) replaceFriendStoryInCache(qc, story);
       else prependFriendStoryToFeed(qc, story);
@@ -279,17 +286,20 @@ function ComposerDialog({
           </div>
         </div>
 
-        <textarea
-          ref={textRef}
-          className={`composer__text${big ? ' composer__text--big' : ''}`}
+        <MentionField
+          search={mentionSearch}
+          inputRef={textRef}
+          variant="composer"
+          big={big}
           readOnly={busy}
-          aria-invalid={pollOn && !body.trim()}
-          aria-describedby={`${hintId}${error ? ` ${errorId}` : ''}${pollProblem ? ' poll-editor-problem' : ''}`}
-          value={body}
-          onChange={(e) => setBody(e.target.value)}
+          invalid={pollOn && !body.trim()}
+          describedBy={`${hintId}${error ? ` ${errorId}` : ''}${pollProblem ? ' poll-editor-problem' : ''}`}
+          text={body}
+          mentions={mentions}
+          onChange={(text, spans) => { setBody(text); setMentions(spans); }}
           maxLength={20_000}
           rows={3}
-          aria-label={pollOn ? 'Câu hỏi bình chọn' : 'Nội dung bài viết'}
+          label={pollOn ? 'Câu hỏi bình chọn' : 'Nội dung bài viết'}
           placeholder={
             pollOn
               ? 'Đặt câu hỏi, ví dụ: Cuối tuần đi đâu?'
@@ -433,7 +443,7 @@ function ComposerDialog({
           </p>
         )}
         {error && <p ref={errorRef} id={errorId} className="form-feedback" role="alert" tabIndex={-1}>{error}</p>}
-        <p id={hintId} className="composer__hint">Chia sẻ với bạn bè. Thêm tối đa 10 ảnh hoặc bình chọn.</p>
+        <p id={hintId} className="composer__hint">Gõ @ để nhắc tên bạn bè. Thêm tối đa 10 ảnh hoặc bình chọn.</p>
         <div className="composer__tools">
           <span className="composer__tools-label">Thêm vào bài viết</span>
           <button

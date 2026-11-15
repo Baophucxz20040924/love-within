@@ -1,0 +1,28 @@
+'use strict';
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const vm = require('node:vm');
+const ts = require('typescript');
+const filename = path.resolve(__dirname, '../../src/repositories/friendStory.repository.ts');
+const code = ts.transpileModule(fs.readFileSync(filename, 'utf8'), { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } }).outputText;
+let captured;
+const model = { findOneAndUpdate: (...args) => { captured = args; return { exec: async () => null }; } };
+const mocks = { mongoose: { Types: {} }, '../models/FriendStory.js': { FriendStory: model }, '../models/FriendStoryComment.js': {} };
+const mod = { exports: {} };
+vm.runInNewContext(code, { module: mod, exports: mod.exports, require(name) { assert.ok(Object.hasOwn(mocks, name)); return mocks[name]; } }, { filename });
+(async () => {
+  const repo = mod.exports.friendStoryRepository;
+  await repo.updateContent('post', 'author', {body:'x', photos:[], mentions:[]}, 0, null);
+  const [filter, update] = captured;
+  assert.equal(filter.$or[0].contentRevision, 0);
+  assert.equal(filter.$or[1].contentRevision.$exists, false);
+  assert.ok(filter.$expr, 'poll changes retain atomic no-votes guard');
+  assert.equal(update.$inc.contentRevision, 1);
+  assert.equal(update.$set.poll, null);
+  await repo.updateContent('post', 'author', {body:'x', photos:[], mentions:[]}, 2);
+  assert.equal(captured[0].contentRevision, 2);
+  assert.equal(captured[0].$expr, undefined);
+  assert.equal(captured[1].$set.poll, undefined);
+  console.log('PASS post mentions revision CAS repository');
+})().catch((error) => { console.error(error); process.exitCode = 1; });

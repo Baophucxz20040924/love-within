@@ -43,6 +43,7 @@ import { STORY_IMAGE_TYPES } from './story.service.js';
 export interface FriendStoryInput {
   body: string;
   photos: StoryPhoto[];
+  mentions?: MentionView[];
   /** BB6. Create: a poll or nothing. Edit: left out = keep the poll as it is; null = remove it; a poll = replace it (only without votes). */
   poll?: FriendPollInput | null;
 }
@@ -52,6 +53,7 @@ export interface FriendStoryView {
   author: PublicProfile;
   isMine: boolean;
   body: string;
+  mentions: MentionView[];
   photos: { key: string; url: string; width: number; height: number }[];
   /** total = everyone's reactions; top = up to 3 most used types (most first). */
   reactions: { mine: ReactionType | null; total: number; top: ReactionType[] };
@@ -147,6 +149,8 @@ async function toView(s: FriendStoryDoc, userId: string, ctx: ViewCtx): Promise<
     author: profileOf(profiles, s.authorId),
     isMine: s.authorId.toString() === userId,
     body: s.body,
+    mentions: (s.mentions ?? []).filter((m) => !ctx.blocked.has(m.userId.toString()))
+      .map((m) => ({ userId: m.userId.toString(), offset: m.offset, length: m.length })),
     photos,
     reactions: { mine, total, top },
     commentCount: s.commentCount ?? 0,
@@ -158,7 +162,8 @@ async function toView(s: FriendStoryDoc, userId: string, ctx: ViewCtx): Promise<
 
 /** One query for the blocks (only when a poll is shown) and one for every face on these posts. */
 async function viewCtx(me: UserDoc, stories: FriendStoryDoc[]): Promise<ViewCtx> {
-  const blocked = stories.some((s) => s.poll) ? await friendBlockRepository.blockedIdsFor(me._id) : new Set<string>();
+  const blocked = stories.some((s) => s.poll || (s.mentions?.length ?? 0) > 0)
+    ? await friendBlockRepository.blockedIdsFor(me._id) : new Set<string>();
   const profiles = await profileService.load([...stories.map((s) => s.authorId), ...previewIdsOf(stories, blocked)]);
   return { profiles, blocked };
 }
@@ -205,20 +210,26 @@ async function canSeeStory(userId: Types.ObjectId, story: FriendStoryDoc): Promi
  * Mentions of a new comment (BB8): sorted, inside the trimmed body, each starting with "@" followed by the person's name,
  * no overlap, at most 10. The person must be able to see the post and must not block (or be blocked by) the writer.
  */
+function checkedSpans(body: string, raw: MentionView[]): MentionView[] {
+  if (raw.length > MAX_MENTIONS) throw badMention();
+  const sorted = [...raw].sort((a, b) => a.offset - b.offset);
+  let end = 0;
+  for (const m of sorted) {
+    if (!Types.ObjectId.isValid(m.userId) || !Number.isInteger(m.offset) || !Number.isInteger(m.length) ||
+        m.length < 2 || m.offset < end || m.offset + m.length > body.length || body[m.offset] !== '@') throw badMention();
+    end = m.offset + m.length;
+  }
+  return sorted;
+}
+
 async function validateMentions(
   story: FriendStoryDoc,
   body: string,
   raw: MentionView[],
   blocked: ReadonlySet<string>,
 ): Promise<CommentMention[]> {
-  if (raw.length === 0) return [];
-  if (raw.length > MAX_MENTIONS) throw badMention();
-  const sorted = [...raw].sort((a, b) => a.offset - b.offset);
-  let end = 0;
-  for (const m of sorted) {
-    if (m.length < 2 || m.offset < end || m.offset + m.length > body.length || body[m.offset] !== '@') throw badMention();
-    end = m.offset + m.length;
-  }
+  const sorted = checkedSpans(body, raw);
+  if (sorted.length === 0) return [];
   const ids = [...new Set(sorted.map((m) => m.userId))];
   const profiles = await userRepository.findProfiles(toObjectIds(ids));
   for (const m of sorted) {
@@ -240,6 +251,59 @@ async function validateMentions(
     if (others.some((id) => !friends.has(id))) throw mentionNotAllowed();
   }
   return sorted.map((m) => ({ userId: new Types.ObjectId(m.userId), offset: m.offset, length: m.length }));
+}
+
+/** Existing spans may move, but only the same number of occurrences with the same user and literal text are retained.
+ * This permits photo-only edits after renames/blocks, without allowing newly added tags to bypass eligibility checks. */
+async function postMentions(authorId: Types.ObjectId, body: string, raw: MentionView[], current?: FriendStoryDoc): Promise<CommentMention[]> {
+  const sorted = checkedSpans(body, raw.map((m) => ({ ...m, userId: m.userId.toLowerCase() })));
+  const remaining = (current?.mentions ?? []).map((m) => ({
+    userId: m.userId.toString(), text: current!.body.slice(m.offset, m.offset + m.length),
+  }));
+  const added: MentionView[] = [];
+  for (const m of sorted) {
+    const text = body.slice(m.offset, m.offset + m.length);
+    const index = remaining.findIndex((old) => old.userId === m.userId && old.text === text);
+    if (index >= 0) remaining.splice(index, 1);
+    else added.push(m);
+  }
+  if (added.length) {
+    const ids = [...new Set(added.map((m) => m.userId))];
+    const [profiles, rows, blocked] = await Promise.all([
+      userRepository.findProfiles(toObjectIds(ids)),
+      friendshipRepository.listBetween(authorId, ids),
+      friendBlockRepository.blockedIdsFor(authorId),
+    ]);
+    const friends = new Set(rows.filter((r) => r.status === 'accepted')
+      .map((r) => otherOf(r, authorId).toString()));
+    for (const m of added) {
+      const profile = profiles.get(m.userId);
+      if (!profile || m.userId === authorId.toString() || blocked.has(m.userId) || !friends.has(m.userId)) throw mentionNotAllowed();
+      if (body.slice(m.offset + 1, m.offset + m.length) !== profile.displayName) throw badMention();
+    }
+  }
+  return sorted.map((m) => ({ userId: new Types.ObjectId(m.userId), offset: m.offset, length: m.length }));
+}
+
+async function notifyPostMentions(story: FriendStoryDoc, old: CommentMention[]): Promise<void> {
+  const previous = new Set(old.map((m) => m.userId.toString()));
+  const added = [...new Set((story.mentions ?? []).map((m) => m.userId.toString()))]
+    .filter((id) => id !== story.authorId.toString() && !previous.has(id));
+  if (!added.length) return;
+  // An edit, delete, report or friendship change may have happened after persistence.
+  const latest = await friendStoryRepository.findById(story._id);
+  if (!latest || latest.hiddenByReportsAt) return;
+  const stillTagged = new Set((latest.mentions ?? []).map((m) => m.userId.toString()));
+  const [rows, blocked] = await Promise.all([
+    friendshipRepository.listBetween(story.authorId, added),
+    friendBlockRepository.blockedIdsFor(story.authorId),
+  ]);
+  const friends = new Set(rows.filter((r) => r.status === 'accepted').map((r) => otherOf(r, story.authorId).toString()));
+  for (const id of added) {
+    if (stillTagged.has(id) && friends.has(id) && !blocked.has(id)) {
+      await notificationService.emit({ space: 'friends', to: new Types.ObjectId(id), type: 'post_mention', actorId: story.authorId, entityId: story._id });
+    }
+  }
 }
 
 /**
@@ -276,7 +340,7 @@ async function toPage(docs: FriendStoryDoc[], limit: number, me: UserDoc) {
   return { items: await Promise.all(page.map((s) => toView(s, userId, ctx))), nextCursor };
 }
 
-function normalize(input: FriendStoryInput): FriendStoryContent {
+function normalize(input: FriendStoryInput): Omit<FriendStoryContent, 'mentions'> {
   const body = input.body.trim();
   if (!body && input.photos.length === 0) throw Errors.badRequest('Hãy viết gì đó hoặc thêm ít nhất một ảnh');
   return { body, photos: input.photos.map((p) => ({ key: p.key, width: p.width, height: p.height })) };
@@ -305,7 +369,10 @@ async function validatePhotos(me: UserDoc, photos: StoryPhoto[], alreadyAttached
 }
 
 function sameContent(a: FriendStoryContent, b: FriendStoryDoc): boolean {
-  return a.body === b.body && a.photos.length === b.photos.length && a.photos.every((p, i) => p.key === b.photos[i].key);
+  const old = b.mentions ?? [];
+  return a.body === b.body && a.photos.length === b.photos.length && a.photos.every((p, i) => p.key === b.photos[i].key) &&
+    a.mentions.length === old.length && a.mentions.every((m, i) =>
+      m.userId.equals(old[i].userId) && m.offset === old[i].offset && m.length === old[i].length);
 }
 
 /**
@@ -395,11 +462,15 @@ export const friendStoryService = {
   async create(me: UserDoc, input: FriendStoryInput): Promise<FriendStoryView> {
     // The body is the poll's question.
     if (input.poll && !input.body.trim()) throw pollErrors.noQuestion();
-    const content = normalize(input);
+    const normalized = normalize(input);
+    const mentions = await postMentions(me._id, normalized.body, input.mentions ?? []);
+    const content = { ...normalized, mentions };
     const poll = input.poll ? newPoll(input.poll) : null;
     await validatePhotos(me, content.photos, new Set());
     const story = await friendStoryRepository.create({ ...content, authorId: me._id, poll });
     await invalidateStory(story);
+    await notifyPostMentions(story, []).catch((err: Error) =>
+      logger.warn('Could not notify post mentions', { storyId: story._id.toString(), message: err.message }));
     logger.info('Friend story created', {
       userId: me._id.toString(),
       storyId: story._id.toString(),
@@ -419,18 +490,31 @@ export const friendStoryService = {
     const pollChange = pollEdit(current.poll, input.poll);
     const finalPoll = pollChange === undefined ? current.poll : pollChange;
     if (finalPoll && !input.body.trim()) throw pollErrors.noQuestion();
-    const content = normalize(input);
+    const normalized = normalize(input);
+    const mentions = input.mentions === undefined
+      ? (normalized.body === current.body ? current.mentions ?? [] : [])
+      : await postMentions(me._id, normalized.body, input.mentions, current);
+    const content = { ...normalized, mentions };
     const userId = me._id.toString();
     if (sameContent(content, current) && pollChange === undefined) return viewOne(me, current);
 
     await validatePhotos(me, content.photos, new Set(current.photos.map((p) => p.key)));
-    const updated = await friendStoryRepository.updateContent(id, me._id, content, pollChange);
+    const updated = await friendStoryRepository.updateContent(id, me._id, content, current.contentRevision ?? 0, pollChange);
     if (!updated) {
-      // Still there: someone voted between the check and the update.
-      if (pollChange !== undefined && (await friendStoryRepository.findById(id))) throw pollErrors.locked();
+      const latest = await friendStoryRepository.findById(id);
+      if (!latest) throw Errors.notFound(POST_NOT_FOUND);
+      if ((latest.contentRevision ?? 0) !== (current.contentRevision ?? 0)) {
+        throw new AppError(409, 'CONTENT_CONFLICT', 'Bài viết đã được chỉnh sửa. Hãy thử lại nhé.');
+      }
+      if (pollChange !== undefined) throw pollErrors.locked();
       throw Errors.notFound(POST_NOT_FOUND);
     }
     await invalidateStory(updated);
+    // Existing rows are insert-once: edits still change their excerpts and current-span visibility.
+    const recipients = new Set([...(current.mentions ?? []), ...(updated.mentions ?? [])].map((m) => m.userId.toString()));
+    await Promise.all([...recipients].map((recipient) => realtimeAudience.own(recipient, 'friends', ['friend-notifications']).catch(() => {})));
+    await notifyPostMentions(updated, current.mentions ?? []).catch((err: Error) =>
+      logger.warn('Could not notify post mentions', { storyId: updated._id.toString(), message: err.message }));
     // A replaced deadline will be announced again; the old "đã kết thúc" row would be wrong now.
     if (pollChange !== undefined && current.poll?.closedNotifiedAt && !pollChange?.closedNotifiedAt) {
       await notificationService.forgetEntity(updated._id, 'poll_closed');
@@ -609,6 +693,16 @@ export const friendStoryService = {
     await notificationService.forgetEntities(gone);
     logger.info('Friend story comment deleted', { userId: me._id.toString(), storyId, commentId, removed });
     return { removed };
+  },
+
+  /** Draft picker: accepted friends only, excluding the author and blocks in either direction. */
+  async draftMentionable(me: UserDoc, q: string): Promise<PublicProfile[]> {
+    const [friends, blocked] = await Promise.all([
+      friendshipRepository.friendIds(me._id), friendBlockRepository.blockedIdsFor(me._id),
+    ]);
+    const ids = friends.filter((id) => !id.equals(me._id) && !blocked.has(id.toString()));
+    const people = await userRepository.findMembersByName(ids, escapeRegex(searchNameOf(q)), MENTIONABLE_LIMIT);
+    return Promise.all(people.map((u) => profileService.of(u)));
   },
 
   /**
