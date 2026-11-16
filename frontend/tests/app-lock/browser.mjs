@@ -65,14 +65,16 @@ async function disable(page, user) {
   await page.getByRole('button', { name: 'Xác nhận tắt khóa', exact: true }).click();
   await page.getByText('Khóa ứng dụng: Đang tắt', { exact: true }).waitFor();
 }
-async function background(page) {
-  // Exercise the real visibility listeners, not OS/app-switcher behavior.
-  await page.evaluate(() => {
+async function background(page, elapsedMs = 10_000) {
+  // Exercise real visibility listeners. Most existing checks intentionally need
+  // long-resume PIN entry; advance wall time instead of repeatedly sleeping 10s.
+  await page.evaluate(elapsed => {
     Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' });
     document.dispatchEvent(new Event('visibilitychange'));
+    window.__appLockTestAdvanceClock(elapsed);
     Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'visible' });
     document.dispatchEvent(new Event('visibilitychange'));
-  });
+  }, elapsedMs);
 }
 async function locked(page) { await page.getByLabel('Nhập mã mở ứng dụng', { exact: true }).waitFor({ state: 'visible' }); }
 async function unlock(page, pin, target) {
@@ -93,6 +95,12 @@ try {
   await setup(`/pairing/invites/${invite.id}/accept`, {}, b.token);
   browser = await chromium.launch({ executablePath, headless: process.env.LW_HEADED !== '1' });
   context = await browser.newContext({ viewport: { width: 360, height: 780 }, locale: 'vi-VN', timezoneId: 'Asia/Ho_Chi_Minh', reducedMotion: 'reduce' });
+  await context.addInitScript(() => {
+    const now = Date.now.bind(Date);
+    let offset = 0;
+    Date.now = () => now() + offset;
+    window.__appLockTestAdvanceClock = elapsed => { offset += elapsed; };
+  });
   page = await context.newPage();
   page.setDefaultTimeout(15000);
   page.on('pageerror', () => errors.push('pageerror'));
@@ -138,6 +146,45 @@ try {
     await unlock(page, lovePin, '/');
     assert.equal(attempts, 2);
     page.off('request', countAttempt);
+  });
+  await check('short resume masks while checking then retains route and unsaved form', async () => {
+    await settings(page, 'couple');
+    await page.getByRole('button', { name: 'Đổi mã PIN', exact: true }).click();
+    await page.getByLabel('Mã PIN mới', { exact: true }).fill(wrongPin);
+    const originalURL = page.url();
+    let release, received;
+    const arrived = new Promise(resolve => { received = resolve; });
+    const hold = new Promise(resolve => { release = resolve; });
+    const handler = async route => {
+      const response = await route.fetch();
+      received(); await hold; await route.fulfill({ response });
+    };
+    await page.route('**/api/privacy-lock', handler);
+    try {
+      await background(page, 100);
+      await arrived;
+      assert.equal(await page.title(), 'Love Within');
+      assert.equal(await page.locator('#root').evaluate(root => getComputedStyle(root).display), 'none');
+      assert.equal(await page.getByLabel('Mã PIN mới', { exact: true }).isVisible(), false);
+      assert.equal(await page.getByLabel('Nhập mã mở ứng dụng', { exact: true }).count(), 0);
+      release();
+      await page.getByLabel('Mã PIN mới', { exact: true }).waitFor({ state: 'visible' });
+      assert.equal(page.url(), originalURL);
+      assert.equal(await page.getByLabel('Mã PIN mới', { exact: true }).inputValue(), wrongPin);
+      await shot(page, 'short-resume-draft');
+      await page.getByRole('button', { name: 'Hủy', exact: true }).click();
+    } finally {
+      release();
+      await page.unroute('**/api/privacy-lock', handler);
+    }
+  });
+  await check('long resume discards the unsaved form and PIN returns Home', async () => {
+    await settings(page, 'couple');
+    await page.getByRole('button', { name: 'Đổi mã PIN', exact: true }).click();
+    await page.getByLabel('Mã PIN mới', { exact: true }).fill(wrongPin);
+    await background(page, 10_000); await locked(page);
+    assert.equal(await page.getByLabel('Mã PIN mới', { exact: true }).count(), 0);
+    await unlock(page, lovePin, '/');
   });
   await check('recovery returns full password login and preserves configured PIN', async () => {
     await background(page); await locked(page);

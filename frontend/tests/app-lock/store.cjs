@@ -29,7 +29,11 @@ function load(file, mocks, globals) {
   }, { filename });
   return module.exports;
 }
-function fixture({ space = 'couple', generation = 'session-a', token = 'token-a', epoch = 0 } = {}) {
+function fixture({ space = 'couple', generation = 'session-a', token = 'token-a', epoch = 0, visibility = 'visible' } = {}) {
+  const clock = { wall: 1_700_000_000_000, monotonic: 123_000 };
+  class ClockDate extends Date { static now() { return clock.wall; } }
+  class Event { constructor(type, options = {}) { this.type = type; Object.assign(this, options); } }
+  class CustomEvent extends Event { constructor(type, options = {}) { super(type); this.detail = options.detail; } }
   const windowListeners = new Map(), documentListeners = new Map();
   const add = (map, type, fn) => { if (!map.has(type)) map.set(type, []); map.get(type).push(fn); };
   const dispatch = (map, type, event = {}) => { for (const fn of map.get(type) || []) fn(event); };
@@ -61,16 +65,20 @@ function fixture({ space = 'couple', generation = 'session-a', token = 'token-a'
   const video = new Media(), audio = new Media('AUDIO'), themeMeta = { content: '' };
   const document = {
     body: { children: [app, entry, bootstrap, script] }, documentElement: root,
-    activeElement: null, title: '', visibilityState: 'visible',
+    activeElement: null, title: '', visibilityState: visibility,
     querySelector: selector => selector === 'meta[name="theme-color"]' ? themeMeta : null,
     querySelectorAll: selector => { assert.equal(selector, 'video,audio'); return [video, audio]; },
     addEventListener: (type, fn) => add(documentListeners, type, fn),
+    dispatchEvent: event => dispatch(documentListeners, event.type, event),
   };
-  const window = { __lwAppLock: { epoch, protected: Boolean(token) }, addEventListener: (type, fn) => add(windowListeners, type, fn) };
+  const window = {
+    addEventListener: (type, fn) => add(windowListeners, type, fn),
+    dispatchEvent: event => dispatch(windowListeners, event.type, event),
+  };
   const current = { generation, space, token };
   const tokenStore = { get: () => current.token, generation: () => current.generation, isCurrent: value => value === current.generation, isSessionKey: key => key === 'session' };
   const spaceStore = { get: () => current.space, isSpaceKey: key => key === 'space' };
-  const requests = [], modalPauses = [], writes = [];
+  const requests = [], modalPauses = [], writes = [], accessEpochs = [];
   function apiRequest(url, options) {
     let resolve, reject;
     const promise = new Promise((yes, no) => { resolve = yes; reject = no; });
@@ -78,16 +86,26 @@ function fixture({ space = 'couple', generation = 'session-a', token = 'token-a'
     return promise;
   }
   const globals = { window, document, location: { pathname: '/' }, HTMLElement: Element, HTMLMediaElement: Media, MutationObserver: Observer,
+    Date: ClockDate, performance: { now: () => clock.monotonic }, Event, CustomEvent,
     localStorage: { setItem: (key, value) => writes.push([key, value]) }, crypto: { randomUUID: () => 'nonce' } };
+  const bootstrapFile = path.resolve(source, '../../../public/app-lock-bootstrap.js');
+  vm.runInNewContext(fs.readFileSync(bootstrapFile, 'utf8'), globals, { filename: bootstrapFile });
+  window.__lwAppLock.epoch = epoch;
   const mask = load('mask.ts', { '../../hooks/useModal': { setModalPrivacyPause: value => modalPauses.push(value) } }, globals);
-  const store = load('store.ts', { '../../lib/apiClient': { apiRequest }, '../../lib/tokenStore': { tokenStore }, '../../lib/spaceStore': { spaceStore }, './mask': mask }, globals);
+  const store = load('store.ts', { '../../lib/apiClient': { apiRequest, advanceAccessEpoch: () => accessEpochs.push(accessEpochs.length + 1) }, '../../lib/tokenStore': { tokenStore }, '../../lib/spaceStore': { spaceStore }, './mask': mask }, globals);
   return {
-    store, mask, current, document, window, root, app, entry, bootstrap, script, video, audio, themeMeta, modalPauses, writes, requests, Element, Media,
+    store, mask, current, clock, document, window, root, app, entry, bootstrap, script, video, audio, themeMeta, modalPauses, writes, requests, accessEpochs, Element, Media,
+    advance: (wall, monotonic = wall) => { clock.wall += wall; clock.monotonic += monotonic; },
     respond: async value => { const req = requests.shift(); assert.ok(req, 'expected a pending request'); req.resolve(value); await Promise.resolve(); await Promise.resolve(); },
     reject: async error => { const req = requests.shift(); assert.ok(req, 'expected a pending request'); req.reject(error); await Promise.resolve(); await Promise.resolve(); },
     storage: key => dispatch(windowListeners, 'storage', { key }),
-    conceal: () => dispatch(windowListeners, 'lw:app-lock'),
-    visible: () => { document.visibilityState = 'visible'; dispatch(documentListeners, 'visibilitychange'); },
+    // Low-level invalidation is retained for old race tests. Lifecycle tests below
+    // drive actual bootstrap listeners, including CustomEvent reason forwarding.
+    conceal: () => window.dispatchEvent(new CustomEvent('lw:app-lock', { detail: 'hidden' })),
+    hide: () => { document.visibilityState = 'hidden'; document.dispatchEvent(new Event('visibilitychange')); },
+    visible: () => { document.visibilityState = 'visible'; document.dispatchEvent(new Event('visibilitychange')); },
+    pagehide: () => window.dispatchEvent(new Event('pagehide')),
+    pageshow: (persisted = true) => window.dispatchEvent(new Event('pageshow', { persisted })),
     play: target => dispatch(documentListeners, 'play', { target }),
     append: node => { document.body.children.push(node); if (observer?.connected) observer.callback(); },
   };
@@ -99,6 +117,239 @@ function hidden(node) {
 }
 const status = (couple, friends, revision = 1) => ({ couple, friends, revision });
 async function initial(f, config) { const pending = f.store.refreshLockSettings(); await f.respond(config); await pending; }
+async function verified(f, config = status(true, true), method = 'pin') {
+  if (method === 'password') {
+    f.store.bindPasswordLogin(f.current.space, f.store.appLockEpoch());
+    await initial(f, config);
+  } else {
+    await initial(f, config);
+    const pending = f.store.unlockApp('1234');
+    await f.respond({ space: f.current.space, revision: config.revision });
+    assert.equal(await pending, f.current.space);
+    assert.equal(f.store.appLockState().phase, 'opening');
+    f.store.finishAppUnlock();
+  }
+  assert.equal(f.store.appLockState().phase, 'ready');
+  assert.equal(f.store.appLockState().discard, false);
+  f.store.appLockSurfaceReady();
+}
+function concealed(f, discard = false) {
+  assert.equal(f.store.isAppLocked(), true);
+  assert.equal(f.store.appLockState().discard, discard);
+  assert.equal(f.mask.isAppMasked(), true);
+  hidden(f.app);
+}
+
+for (const method of ['pin', 'password']) for (const space of ['couple', 'friends']) {
+  test(`${method} verified ${space} resumes under 10000ms only after current status`, async () => {
+    const f = fixture({ space }); await verified(f, status(true, true), method);
+    f.store.setAppTitle('Private draft'); f.store.setAppTheme(true);
+    const portal = new f.Element('DIV', 'draft-portal'); f.append(portal);
+    f.document.activeElement = portal;
+    const epoch = f.store.appLockEpoch();
+    // Grace starts on departure, not on login or the last PIN verification.
+    f.advance(60_000); f.hide();
+    assert.equal(f.store.appLockState().phase, 'concealed'); concealed(f);
+    hidden(portal); assert.ok(portal.blurCount > 0);
+    assert.equal(f.root.getAttribute('data-app-shield'), '');
+    assert.equal(f.document.title, 'Love Within');
+    assert.equal(f.root.dataset.theme, undefined); assert.equal(f.themeMeta.content, '#faf7f8');
+    assert.equal(f.store.appLockEpoch(), epoch + 1);
+    assert.equal(f.accessEpochs.length, 1, 'hide invalidates in-flight API access even without discarding');
+    assert.equal(f.store.isAppLockCurrent(epoch), false);
+    assert.equal(f.video.pauseCount > 0, true);
+    f.advance(9_999); f.visible(); concealed(f);
+    assert.equal(f.requests.length, 1); assert.equal(f.requests[0].url, '/privacy-lock');
+    f.store.appLockSurfaceReady(); concealed(f);
+    await f.respond(status(true, true));
+    assert.equal(f.store.appLockState().phase, 'ready');
+    assert.equal(f.store.appLockState().discard, false); assert.equal(f.mask.isAppMasked(), false);
+    assert.equal(f.app.style.getPropertyValue('display'), '');
+    assert.equal(portal.style.getPropertyValue('display'), '');
+    assert.equal(f.document.title, 'Private draft'); assert.equal(f.root.dataset.theme, 'friends');
+    assert.equal(f.writes.length, 0, 'grace must remain in memory, never browser storage');
+  });
+}
+
+for (const elapsed of [10_000, 10_001, 60_000]) {
+  test(`verified resume at ${elapsed}ms discards before status and requires PIN`, async () => {
+    const f = fixture(); await verified(f);
+    f.hide(); concealed(f); f.advance(elapsed); f.visible(); concealed(f, true);
+    await f.respond(status(true, true));
+    assert.equal(f.store.appLockState().phase, 'locked'); concealed(f, true);
+  });
+}
+
+test('grace is checked again when status completes, not just when resume starts', async () => {
+  const f = fixture(); await verified(f);
+  f.hide(); f.advance(9_999); f.visible(); concealed(f);
+  f.advance(1); await f.respond(status(true, true));
+  assert.equal(f.store.appLockState().phase, 'locked'); concealed(f, true);
+});
+
+for (const [wall, monotonic] of [[10_000, 1], [1, 10_000], [-1, 1], [1, -1], [NaN, 1], [1, Infinity]]) {
+  test(`clock divergence fails closed: wall=${wall}, monotonic=${monotonic}`, async () => {
+    const f = fixture(); await verified(f);
+    f.hide(); f.advance(wall, monotonic); f.visible(); concealed(f, true);
+    await f.respond(status(true, true));
+    assert.equal(f.store.appLockState().phase, 'locked');
+  });
+}
+
+for (const elapsed of [9_999, 10_000]) {
+  test(`repeated hide/pagehide preserve original ${elapsed}ms deadline`, async () => {
+    const f = fixture(); await verified(f);
+    f.hide(); f.advance(4_000); f.pagehide(); f.hide();
+    concealed(f); f.advance(4_000); f.pagehide();
+    assert.equal(f.requests.length, 0, 'departure cannot revalidate or reveal');
+    f.advance(elapsed - 8_000); f.visible();
+    concealed(f, elapsed >= 10_000);
+    const old = f.requests.shift(); assert.ok(old);
+    f.visible(); assert.equal(f.requests.length, 1);
+    old.resolve(status(false, false)); await Promise.resolve(); await Promise.resolve();
+    concealed(f, elapsed >= 10_000);
+    await f.respond(status(true, true));
+    assert.equal(f.store.appLockState().phase, elapsed < 10_000 ? 'ready' : 'locked');
+    assert.equal(f.store.appLockState().discard, elapsed >= 10_000);
+  });
+}
+
+for (const hiddenRestore of [false, true]) {
+  test(`persisted restore revokes even an unexpired grant (hidden=${hiddenRestore})`, async () => {
+    const f = fixture(); await verified(f);
+    f.hide(); f.advance(1); f.pagehide();
+    if (!hiddenRestore) f.document.visibilityState = 'visible';
+    f.pageshow(); concealed(f, true);
+    if (hiddenRestore) { assert.equal(f.requests.length, 0); f.visible(); }
+    await f.respond(status(true, true));
+    assert.equal(f.store.appLockState().phase, 'locked'); concealed(f, true);
+  });
+}
+
+for (const failure of [false, true]) {
+  test(`successful PIN supersedes an older status ${failure ? 'error' : 'response'}`, async () => {
+    const f = fixture(); await initial(f, status(true, true));
+    const refresh = f.store.refreshLockSettings(false); const older = f.requests.shift();
+    const unlock = f.store.unlockApp('1234');
+    await f.respond({ space: 'couple', revision: 1 }); assert.equal(await unlock, 'couple');
+    f.store.finishAppUnlock();
+    if (failure) older.reject(new Error('ACCESS_CHANGED'));
+    else older.resolve(status(true, true, 2));
+    await refresh;
+    assert.equal(f.store.appLockState().phase, 'ready'); assert.equal(f.store.appLockState().discard, false);
+    assert.equal(f.store.appLockState().settings.revision, 1);
+  });
+}
+
+test('second absence after a successful revalidation gets its own deadline', async () => {
+  const f = fixture(); await verified(f);
+  f.hide(); f.advance(9_000); f.visible(); await f.respond(status(true, true));
+  f.advance(60_000); f.hide(); f.advance(9_999); f.visible(); await f.respond(status(true, true));
+  assert.equal(f.store.appLockState().phase, 'ready'); assert.equal(f.store.appLockState().discard, false);
+});
+
+test('persisted restore without a recorded departure cannot invent grace', async () => {
+  const f = fixture(); await verified(f);
+  f.pageshow(false); assert.equal(f.requests.length, 0);
+  f.pageshow(); concealed(f, true); await f.respond(status(true, true));
+  assert.equal(f.store.appLockState().phase, 'locked');
+});
+
+test('reload uses only credentials and space, never the preceding memory grant', async () => {
+  const previous = fixture({ space: 'friends' }); await verified(previous);
+  previous.hide(); previous.advance(1);
+  const f = fixture({ ...previous.current });
+  concealed(f, true); await initial(f, status(true, true));
+  assert.equal(f.store.appLockState().phase, 'locked');
+  f.hide(); f.advance(1); f.visible(); await f.respond(status(true, true));
+  assert.equal(f.store.appLockState().phase, 'locked'); concealed(f, true);
+});
+
+test('incomplete PIN opening has no ready grant to retain', async () => {
+  const f = fixture(); await initial(f, status(true, true));
+  const pending = f.store.unlockApp('1234'); await f.respond({ space: 'couple', revision: 1 }); await pending;
+  assert.equal(f.store.appLockState().phase, 'opening');
+  f.hide(); f.store.finishAppUnlock(); concealed(f, true);
+  f.advance(1); f.visible(); await f.respond(status(true, true));
+  assert.equal(f.store.appLockState().phase, 'locked');
+});
+
+test('changed settings revision revokes a short-resume grant', async () => {
+  const f = fixture(); await verified(f);
+  f.hide(); f.advance(1); f.visible(); concealed(f);
+  await f.respond(status(true, true, 2));
+  assert.equal(f.store.appLockState().phase, 'locked'); concealed(f, true);
+});
+
+for (const change of ['settings', 'session', 'space', 'reset', 'navigation']) {
+  test(`${change} invalidation cannot reuse a pending short-resume grant`, async () => {
+    const f = fixture(); await verified(f);
+    f.hide(); f.advance(1); f.visible(); const stale = f.requests.shift();
+    if (change === 'settings') f.storage('lw.lockSettingsChanged');
+    if (change === 'session') { f.current.generation = 'session-b'; f.storage('session'); }
+    if (change === 'space') { f.current.space = 'friends'; f.storage('space'); }
+    if (change === 'reset') { f.store.resetAppLock(); void f.store.refreshLockSettings(false); }
+    if (change === 'navigation') f.store.lockForNavigation();
+    concealed(f, true);
+    stale.resolve(status(false, false)); await Promise.resolve(); await Promise.resolve(); concealed(f, true);
+    await f.respond(status(true, true));
+    assert.equal(f.store.appLockState().phase, 'locked'); concealed(f, true);
+  });
+}
+
+test('same-generation token rotation retains the short-resume grant', async () => {
+  const f = fixture(); await verified(f);
+  f.hide(); f.current.token = 'rotated'; f.storage('session');
+  f.advance(100); f.visible(); await f.respond(status(true, true));
+  assert.equal(f.store.appLockState().phase, 'ready'); assert.equal(f.store.appLockState().discard, false);
+});
+
+test('offline short resume discards protected state and retry cannot revive the grant', async () => {
+  const f = fixture(); await verified(f);
+  f.hide(); f.advance(1); f.visible(); await f.reject(new Error('offline'));
+  assert.equal(f.store.appLockState().phase, 'error'); concealed(f, true);
+  const retry = f.store.refreshLockSettings(); await f.respond(status(true, true)); await retry;
+  assert.equal(f.store.appLockState().phase, 'locked'); concealed(f, true);
+});
+
+test('status completing hidden cannot reveal and a later resume rechecks the original deadline', async () => {
+  const f = fixture(); await verified(f);
+  f.hide(); f.advance(1); f.visible();
+  // Simulate a delayed visibility event: response cannot rely only on event epochs.
+  f.document.visibilityState = 'hidden'; await f.respond(status(true, true)); concealed(f);
+  f.advance(9_999); f.visible(); await f.respond(status(true, true));
+  assert.equal(f.store.appLockState().phase, 'locked'); concealed(f, true);
+});
+
+test('cold status completing hidden never creates an authenticated entry', async () => {
+  const f = fixture({ visibility: 'hidden' }); await initial(f, status(true, true)); concealed(f, true);
+  f.visible(); await f.respond(status(true, true));
+  assert.equal(f.store.appLockState().phase, 'locked'); concealed(f, true);
+});
+
+test('real hide invalidates stale PIN and status responses before short resume', async () => {
+  const f = fixture(); await initial(f, status(true, true));
+  const unlock = f.store.unlockApp('1234'); const staleUnlock = f.requests.shift();
+  const refresh = f.store.refreshLockSettings(false); const staleStatus = f.requests.shift();
+  f.hide(); f.advance(1); f.visible();
+  staleUnlock.resolve({ space: 'couple', revision: 1 });
+  staleStatus.resolve(status(false, false)); await refresh;
+  assert.equal(await unlock, null); concealed(f, true);
+  await f.respond(status(true, true)); assert.equal(f.store.appLockState().phase, 'locked');
+});
+
+test('short-resume completion does not clear an independent verification mask', async () => {
+  const f = fixture(); await verified(f);
+  const host = new f.Element('DIV', 'verification'); f.append(host); f.mask.setVerificationHost(host);
+  f.mask.setAppMask('verification', true); hidden(f.app);
+  f.hide(); hidden(host); f.advance(1); f.visible(); await f.respond(status(true, true));
+  assert.equal(f.store.appLockState().phase, 'ready'); assert.equal(f.store.appLockState().discard, false);
+  assert.equal(f.mask.isAppMasked(), true); hidden(f.app);
+  assert.equal(host.style.getPropertyValue('display'), '');
+  const pauses = f.video.pauseCount; f.play(f.video); assert.equal(f.video.pauseCount, pauses + 1);
+  f.mask.setAppMask('verification', false);
+  assert.equal(f.mask.isAppMasked(), false); assert.equal(f.app.style.getPropertyValue('display'), '');
+});
 
 for (const couple of [false, true]) for (const friends of [false, true]) for (const space of ['couple', 'friends']) {
   test(`cold and resume: couple=${couple} friends=${friends} space=${space}`, async () => {
@@ -226,8 +477,9 @@ test('own configuration update publishes and subsequent resume enforces it', asy
   assert.equal(f.store.appLockState().settings.revision, 2);
   assert.equal(f.store.appLockState().phase, 'ready');
   assert.equal(f.writes.length, 1); assert.equal(f.writes[0][0], 'lw.lockSettingsChanged');
-  f.conceal(); assert.equal(f.store.appLockState().phase, 'locked');
-  f.visible(); await f.respond(status(true, false, 2)); assert.equal(f.store.appLockState().phase, 'locked');
+  f.hide(); f.advance(10_000); f.visible();
+  assert.equal(f.store.appLockState().discard, true);
+  await f.respond(status(true, false, 2)); assert.equal(f.store.appLockState().phase, 'locked');
 });
 
 test('missing or invalid status is an error, never an unprotected grant', async () => {

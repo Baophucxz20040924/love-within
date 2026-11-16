@@ -4,14 +4,15 @@ export const PUSH_SPACES = ['couple', 'friends'] as const;
 export type PushSpace = (typeof PUSH_SPACES)[number];
 
 /**
- * One browser/device that receives Web Push (plan/OPERATIONS.md, N4). A device (endpoint) belongs to one user and one
- * space at a time: the space of the session that turned notifications on. Turning them on in the other space, or as
- * another user, moves the endpoint there. Logging out deletes it.
+ * One browser/device that receives Web Push (plan/OPERATIONS.md, N4). An endpoint belongs to one user account across
+ * both spaces. Turning notifications on as another user transfers the endpoint. Logging out deletes it.
+ * Legacy space values are retained on existing rows but never scope subscription reads or delivery.
  */
 export interface PushSubscriptionDoc extends Document {
   _id: Types.ObjectId;
   userId: Types.ObjectId;
-  space: PushSpace;
+  /** Legacy metadata only; not written for new subscriptions. */
+  space?: PushSpace;
   /** Push service URL of the device; a capability, never logged or returned. */
   endpoint: string;
   keys: { p256dh: string; auth: string };
@@ -27,7 +28,7 @@ export interface PushSubscriptionDoc extends Document {
 const pushSubscriptionSchema = new Schema<PushSubscriptionDoc>(
   {
     userId: { type: Schema.Types.ObjectId, ref: 'User', required: true },
-    space: { type: String, enum: PUSH_SPACES, required: true },
+    space: { type: String, enum: PUSH_SPACES },
     endpoint: { type: String, required: true },
     keys: {
       p256dh: { type: String, required: true },
@@ -41,6 +42,8 @@ const pushSubscriptionSchema = new Schema<PushSubscriptionDoc>(
 );
 
 pushSubscriptionSchema.index({ endpoint: 1 }, { unique: true });
+// Keep the legacy index; rollout must not drop indexes or rewrite existing subscriptions.
 pushSubscriptionSchema.index({ userId: 1, space: 1, updatedAt: -1 });
+pushSubscriptionSchema.index({ userId: 1, updatedAt: -1 });
 
 export const PushSubscription = model<PushSubscriptionDoc>('PushSubscription', pushSubscriptionSchema);

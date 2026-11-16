@@ -95,6 +95,7 @@ export const FRIENDS_PUSH_RULES: Record<FriendNotificationType, PushRule<Friends
   // 2 hours before the start (job friend-events.remind): useless after the start, so TTL 4 h like the couple reminders.
   event_reminder: { group: 'events', timed: true },
   outing_invite: { group: 'events' },
+  outing_added: { group: 'events' },
   outing_changed: { group: 'events' },
   outing_review: { group: 'events' },
   outing_closed: { group: 'events' },

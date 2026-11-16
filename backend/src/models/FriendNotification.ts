@@ -21,6 +21,7 @@ export const FRIEND_NOTIFICATION_TYPES = [
   'event_comment',
   'event_reminder',
   'outing_invite',
+  'outing_added',
   'outing_changed',
   'outing_review',
   'outing_closed',
@@ -32,6 +33,7 @@ export type FriendNotificationType = (typeof FRIEND_NOTIFICATION_TYPES)[number];
 /** Outings have their own entity and ACL; never treat these as legacy event types. */
 export const OUTING_NOTIFICATION_TYPES: ReadonlySet<FriendNotificationType> = new Set<FriendNotificationType>([
   'outing_invite',
+  'outing_added',
   'outing_changed',
   'outing_review',
   'outing_closed',

@@ -11,7 +11,8 @@ export const outingsApi = {
   get: (id: string) => apiRequest<OutingView>(path(id)),
   create: (body: CreateOuting & MutationMeta) => apiRequest<OutingResult>(root, { method: 'POST', body }),
   membership: (id: string, action: 'accept' | 'decline', meta: MutationMeta) => post(id, `members/${action}`, meta),
-  invite: (id: string, userIds: string[], meta: MutationMeta) => post(id, 'members/invite', { ...meta, userIds }),
+  // The legacy endpoint name is retained; new members join immediately without financial consent.
+  addMembers: (id: string, userIds: string[], meta: MutationMeta) => post(id, 'members/invite', { ...meta, userIds }),
   expense: (id: string, input: ExpenseInput, meta: MutationMeta, expenseId?: string) => expenseId
     ? apiRequest<OutingResult>(`${path(id)}/expenses/${encodeURIComponent(expenseId)}`, { method: 'PATCH', body: { ...meta, ...input } })
     : post(id, 'expenses', { ...meta, ...input }),

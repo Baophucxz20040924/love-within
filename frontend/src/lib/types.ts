@@ -888,6 +888,7 @@ export type FriendNotificationType =
   | 'event_comment'
   | 'event_reminder'
   | 'outing_invite'
+  | 'outing_added'
   | 'outing_changed'
   | 'outing_review'
   | 'outing_closed'

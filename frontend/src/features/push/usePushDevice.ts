@@ -3,7 +3,6 @@ import { useQuery } from '@tanstack/react-query';
 import { useToast } from '../../components/Toast';
 import { useAuth } from '../auth/AuthContext';
 import { ApiRequestError } from '../../lib/apiClient';
-import type { PushSpace } from '../../lib/types';
 import { PUSH_CONFIG_KEY, pushApi } from './api';
 import {
   PushSetupError,
@@ -23,25 +22,25 @@ export interface PushDevice {
   serverEnabled: boolean | null;
 }
 
-/** This device's push state for the signed-in user in `space`; re-read after any switch and when the tab comes back. */
-export function usePushDevice(space: PushSpace): PushDevice {
+/** Account-wide device state, shared by both spaces; re-read when the device changes or the tab comes back. */
+export function usePushDevice(): PushDevice {
   const { me } = useAuth();
   const userId = me?.user.id ?? '';
   const version = useSyncExternalStore(subscribeDevice, deviceVersion);
-  const [state, setState] = useState<DeviceState | 'loading'>('loading');
+  const [result, setResult] = useState<{ userId: string; version: number; state: DeviceState } | null>(null);
   const config = useQuery({ queryKey: PUSH_CONFIG_KEY, queryFn: pushApi.config, staleTime: 5 * 60_000, enabled: Boolean(userId) });
 
   useEffect(() => {
     if (!userId) return undefined;
     let alive = true;
-    void readDeviceState(userId, space).then(
-      (s) => alive && setState(s),
-      () => alive && setState('unsupported'),
+    void readDeviceState(userId).then(
+      (state) => alive && setResult({ userId, version, state }),
+      () => alive && setResult({ userId, version, state: 'unsupported' }),
     );
     return () => {
       alive = false;
     };
-  }, [userId, space, version]);
+  }, [userId, version]);
 
   // The permission can be changed in the browser's settings while the app is in the background.
   useEffect(() => {
@@ -52,6 +51,7 @@ export function usePushDevice(space: PushSpace): PushDevice {
     return () => document.removeEventListener('visibilitychange', onVisible);
   }, []);
 
+  const state = result?.userId === userId && result.version === version ? result.state : 'loading';
   return { state, serverEnabled: config.data ? config.data.enabled : null };
 }
 
@@ -59,7 +59,7 @@ const errorText = (err: unknown) =>
   err instanceof PushSetupError || err instanceof ApiRequestError ? err.message : 'Không bật được thông báo trên máy này. Thử lại sau nhé.';
 
 /** Switch this device on / off with the toasts the settings page and the suggestion card share. */
-export function usePushSwitch(space: PushSpace) {
+export function usePushSwitch() {
   const { me } = useAuth();
   const toast = useToast();
   const [busy, setBusy] = useState(false);
@@ -69,7 +69,7 @@ export function usePushSwitch(space: PushSpace) {
     if (!me || busy) return false;
     setBusy(true);
     try {
-      await enableOnThisDevice(me.user.id, space);
+      await enableOnThisDevice(me.user.id);
       toast.success('Đã bật thông báo trên máy này');
       return true;
     } catch (err) {

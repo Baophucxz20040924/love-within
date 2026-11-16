@@ -1,5 +1,5 @@
 import type { Types } from 'mongoose';
-import { PushSubscription, type PushSpace, type PushSubscriptionDoc } from '../models/PushSubscription.js';
+import { PushSubscription, type PushSubscriptionDoc } from '../models/PushSubscription.js';
 
 function isDuplicateKey(err: unknown): boolean {
   return typeof err === 'object' && err !== null && (err as { code?: number }).code === 11000;
@@ -10,14 +10,14 @@ export type PushSubscriptionRow = Pick<PushSubscriptionDoc, '_id' | 'endpoint' |
 /** Web Push devices (N4). Reads and deletes by the owner's userId, except the sender's own bookkeeping by _id. */
 export const pushSubscriptionRepository = {
   /**
-   * Save the device for this user and space. The endpoint is unique: the same device turned on by another user or in
-   * the other space moves here (and starts with a clean fail count). Two first saves racing: the retry updates.
+   * Save the device for this account. The endpoint is unique: the same device turned on by another user moves here
+   * (and starts with a clean fail count). Two first saves racing: the retry updates. Legacy space metadata is ignored.
    */
-  async upsert(input: { userId: Types.ObjectId; space: PushSpace; endpoint: string; keys: { p256dh: string; auth: string }; userAgent: string }): Promise<PushSubscriptionDoc> {
+  async upsert(input: { userId: Types.ObjectId; endpoint: string; keys: { p256dh: string; auth: string }; userAgent: string }): Promise<PushSubscriptionDoc> {
     const run = () =>
       PushSubscription.findOneAndUpdate(
         { endpoint: input.endpoint },
-        { $set: { userId: input.userId, space: input.space, keys: input.keys, userAgent: input.userAgent, failCount: 0 } },
+        { $set: { userId: input.userId, keys: input.keys, userAgent: input.userAgent, failCount: 0 } },
         { upsert: true, new: true, setDefaultsOnInsert: true },
       ).exec();
     try {
@@ -28,16 +28,17 @@ export const pushSubscriptionRepository = {
     }
   },
 
-  /** Keep the `keep` most recently saved devices of a user in a space (bounds the fan-out of one push). */
-  async pruneOldest(userId: Types.ObjectId, space: PushSpace, keep: number): Promise<number> {
-    const old = await PushSubscription.find({ userId, space }).sort({ updatedAt: -1 }).skip(keep).select('_id').lean().exec();
+  /** Keep the `keep` most recently saved devices account-wide (bounds the fan-out of one push). */
+  async pruneOldest(userId: Types.ObjectId, keep: number): Promise<number> {
+    const old = await PushSubscription.find({ userId }).sort({ updatedAt: -1 }).skip(keep).select('_id').lean().exec();
     if (old.length === 0) return 0;
-    const res = await PushSubscription.deleteMany({ _id: { $in: old.map((o) => o._id) } }).exec();
+    // Recheck ownership in case an endpoint moved to another account after the read.
+    const res = await PushSubscription.deleteMany({ userId, _id: { $in: old.map((o) => o._id) } }).exec();
     return res.deletedCount;
   },
 
-  listFor(userId: Types.ObjectId, space: PushSpace): Promise<PushSubscriptionRow[]> {
-    return PushSubscription.find({ userId, space }).select('endpoint keys').lean<PushSubscriptionRow[]>().exec();
+  listFor(userId: Types.ObjectId): Promise<PushSubscriptionRow[]> {
+    return PushSubscription.find({ userId }).select('endpoint keys').lean<PushSubscriptionRow[]>().exec();
   },
 
   findOwn(userId: Types.ObjectId, endpoint: string): Promise<PushSubscriptionDoc | null> {

@@ -19,7 +19,7 @@ import { outingPayloadHash, type OutingCreateInput, type OutingMutationInput, ty
 export type { FriendOutingView, FriendOutingSummary } from './friendOuting.views.js';
 
 export interface OutingNotificationEvent {
-  type: 'outing_invite' | 'outing_changed' | 'outing_review' | 'outing_closed' | 'outing_settlement' | 'outing_completed';
+  type: 'outing_invite' | 'outing_added' | 'outing_changed' | 'outing_review' | 'outing_closed' | 'outing_settlement' | 'outing_completed';
   outingId: string; actorId: string; recipientIds: string[]; operationId: string;
 }
 let notificationHook: ((event: OutingNotificationEvent) => Promise<void>) | undefined;
@@ -47,7 +47,8 @@ function receiptFor(doc: FriendOutingRecord, actorId: string, operationId: strin
 async function result(doc: FriendOutingRecord, me: UserDoc, receipt: OutingReceipt, replayed: boolean) {
   return { outing: await outingView(doc, me), outcome: { operationId: receipt.operationId, kind: receipt.kind, resultId: receipt.resultId, committedRevision: receipt.revision, replayed } };
 }
-/** Checks current creator friendship AND blocks independently, including blocks between invitees. Not a cross-collection transaction. */
+/** Legacy invite endpoint: new people join directly; existing pending/declined rows are never reactivated.
+ * Checks current creator friendship AND blocks independently, including blocks between new members. Not a cross-collection transaction. */
 async function invitedParticipants(creatorId: string, ids: string[], current: OutingParticipant[]): Promise<OutingParticipant[]> {
   if (ids.some((id) => id === creatorId || current.some((p) => p.userId === id))) throw Errors.badRequest('Thành viên đã có trong sổ');
   const rows = await friendshipRepository.listBetween(creatorId, ids);
@@ -55,12 +56,12 @@ async function invitedParticipants(creatorId: string, ids: string[], current: Ou
   const activeIds = [...current.filter((p) => p.status === 'accepted').map((p) => p.userId), ...ids];
   if (await friendOutingRepository.groupHasBlock(activeIds)) throw outingRestrictedError();
   const profiles = await profileService.load(ids.map((id) => new Types.ObjectId(id)));
-  return ids.map((userId) => ({ userId, displayName: (profiles.get(userId)?.displayName || 'Người dùng').slice(0, 100), status: 'pending', consent: null }));
+  return ids.map((userId) => ({ userId, displayName: (profiles.get(userId)?.displayName || 'Người dùng').slice(0, 100), status: 'accepted', consent: null }));
 }
 function notificationFor(doc: FriendOutingRecord, actorId: string, kind: OutingMutationKind, input: OutingMutationInput, resultId: string): OutingNotificationEvent {
   let type: OutingNotificationEvent['type'] = 'outing_changed';
   let recipients = doc.participants.filter((p) => p.status === 'accepted').map((p) => p.userId);
-  if (kind === 'invite') { type = 'outing_invite'; recipients = input.userIds!; }
+  if (kind === 'invite') { type = 'outing_added'; recipients = input.userIds!; }
   else if (kind === 'close_review' || kind === 'object') type = 'outing_review';
   else if (kind === 'approve' && doc.phase === 'settling') type = 'outing_closed';
   else if (kind.startsWith('settlement_')) {
@@ -137,7 +138,7 @@ export const friendOutingService = {
       throw outcomeUnknown();
     }
     await invalidateOuting(doc);
-    await notify({ type: 'outing_invite', outingId: id.toString(), actorId, recipientIds: input.inviteeIds, operationId: input.operationId });
+    await notify({ type: 'outing_added', outingId: id.toString(), actorId, recipientIds: input.inviteeIds, operationId: input.operationId });
     return result(doc, me, receipt, false);
   },
   async get(me: UserDoc, id: string) { return outingView(await required(id, me), me); },

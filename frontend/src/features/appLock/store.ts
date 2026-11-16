@@ -1,10 +1,10 @@
-import { apiRequest } from '../../lib/apiClient';
+import { advanceAccessEpoch, apiRequest } from '../../lib/apiClient';
 import { tokenStore } from '../../lib/tokenStore';
 import { spaceStore, type Space } from '../../lib/spaceStore';
 import { setAppMask } from './mask';
 
 export interface LockSettings { couple: boolean; friends: boolean; revision: number }
-type Phase = 'loading' | 'ready' | 'locked' | 'error' | 'opening';
+type Phase = 'loading' | 'ready' | 'locked' | 'error' | 'opening' | 'concealed';
 declare global { interface Window { __lwAppLock: { protected: boolean; epoch: number } } }
 const boot = window.__lwAppLock;
 let epoch = boot.epoch;
@@ -15,6 +15,17 @@ let discard = Boolean(tokenStore.get());
 let version = 0;
 let flight = 0;
 let passwordGrant: { generation: string; epoch: number; space: Space } | null = null;
+const REENTRY_MS = 10_000;
+interface ReentryGrant { generation: string; space: Space; revision: number; wall: number; monotonic: number }
+let reentry: ReentryGrant | null = null;
+let absent = false;
+let enteredSpace: Space | null = null;
+function withinGrace(grant: ReentryGrant): boolean {
+  const wall = Date.now() - grant.wall, monotonic = performance.now() - grant.monotonic;
+  return Number.isFinite(wall) && Number.isFinite(monotonic) && wall >= 0 && monotonic >= 0 &&
+    Math.max(wall, monotonic) < REENTRY_MS && tokenStore.isCurrent(grant.generation) &&
+    spaceStore.get() === grant.space && settings?.revision === grant.revision;
+}
 let title = 'Love Within';
 let friendsTheme = false;
 const listeners = new Set<() => void>();
@@ -44,32 +55,39 @@ function publish() {
 export function appLockSurfaceReady(): void { document.documentElement.removeAttribute('data-app-shield'); }
 export function resetAppLock(): void {
   epoch += 1; flight += 1; generation = tokenStore.generation();
-  passwordGrant = null; settings = null; title = 'Love Within'; friendsTheme = false;
+  passwordGrant = null; reentry = null; absent = false; enteredSpace = null; settings = null; title = 'Love Within'; friendsTheme = false;
   discard = Boolean(tokenStore.get()); phase = tokenStore.get() ? 'loading' : 'ready'; publish();
 }
 export function bindPasswordLogin(target: Space, expected: number): void {
-  generation = tokenStore.generation(); settings = null; flight += 1;
+  generation = tokenStore.generation(); settings = null; reentry = null; absent = false; flight += 1;
   passwordGrant = isAuthAttemptCurrent(expected) ? { generation, epoch, space: target } : null;
   discard = true; phase = 'loading'; publish();
 }
 export async function refreshLockSettings(preserveEntry = true): Promise<void> {
-  const id = ++flight, currentGeneration = tokenStore.generation(), expected = epoch;
+  reentry = null;
+  await checkLockSettings(preserveEntry);
+}
+async function checkLockSettings(preserveEntry: boolean, grant: ReentryGrant | null = null): Promise<void> {
+  const id = ++flight, currentGeneration = tokenStore.generation(), expected = epoch, target = spaceStore.get();
   if (!tokenStore.get()) { resetAppLock(); return; }
   const old = settings;
   try {
     const next = await apiRequest<LockSettings>('/privacy-lock');
-    if (id !== flight || expected !== epoch || !tokenStore.isCurrent(currentGeneration)) return;
+    if (id !== flight || expected !== epoch || !tokenStore.isCurrent(currentGeneration) || spaceStore.get() !== target) return;
     if (!next || typeof next.couple !== 'boolean' || typeof next.friends !== 'boolean' || !Number.isSafeInteger(next.revision) || next.revision < 0) throw new Error('Invalid lock configuration');
+    const resumed = grant !== null && reentry === grant && withinGrace(grant) && next.revision === grant.revision;
     generation = currentGeneration; settings = next;
-    const target = spaceStore.get();
+    if (document.visibilityState !== 'visible') return;
     const authenticated = passwordGrant?.generation === generation && passwordGrant.epoch === epoch && passwordGrant.space === target;
-    const existingEntry = preserveEntry && phase === 'ready' && old?.revision === next.revision;
-    passwordGrant = null;
-    if (!next[target] || authenticated || existingEntry) { phase = 'ready'; discard = false; }
-    else { phase = 'locked'; discard = true; }
+    const existingEntry = preserveEntry && phase === 'ready' && enteredSpace === target && old?.revision === next.revision;
+    passwordGrant = null; reentry = null; absent = false;
+    if (!next[target] || authenticated || existingEntry || resumed) { phase = 'ready'; discard = false; enteredSpace = target; }
+    else { phase = 'locked'; discard = true; enteredSpace = null; }
     publish();
   } catch {
-    if (id === flight && expected === epoch && tokenStore.isCurrent(currentGeneration)) { phase = 'error'; publish(); }
+    if (id === flight && expected === epoch && tokenStore.isCurrent(currentGeneration)) {
+      reentry = null; absent = false; phase = 'error'; discard = settings?.[spaceStore.get()] !== false; publish();
+    }
   }
 }
 export async function unlockApp(pin: string): Promise<Space | null> {
@@ -82,16 +100,17 @@ export async function unlockApp(pin: string): Promise<Space | null> {
   if (settings?.revision !== revision) return null;
   if (result.revision !== revision) { await refreshLockSettings(false); return null; }
   if (!settings?.[result.space]) return null;
+  flight += 1; reentry = null; absent = false;
   phase = 'opening'; discard = true; title = 'Love Within'; publish();
   return result.space;
 }
 export function finishAppUnlock(): void {
   if (phase !== 'opening' || document.visibilityState !== 'visible') return;
-  phase = 'ready'; discard = false; publish();
+  phase = 'ready'; discard = false; enteredSpace = spaceStore.get(); publish();
 }
 export function lockForNavigation(): void {
   if (!tokenStore.get()) return;
-  epoch += 1; passwordGrant = null; phase = 'loading'; discard = true; publish();
+  epoch += 1; flight += 1; passwordGrant = null; reentry = null; absent = false; phase = 'loading'; discard = true; publish();
   void refreshLockSettings(false);
 }
 export function applyOwnLockSettings(next: LockSettings): void {
@@ -104,20 +123,38 @@ export function notifyLockSettingsChanged(): void {
   // Only a nonce, never PINs or configuration, crosses tabs.
   localStorage.setItem('lw.lockSettingsChanged', crypto.randomUUID());
 }
-function conceal() {
+function conceal(event: Event) {
+  const restoring = (event as CustomEvent<string>).detail === 'restore';
+  if (restoring) reentry = null;
+  if (!absent && !restoring && phase === 'ready' && !discard && settings && enteredSpace === spaceStore.get() && tokenStore.isCurrent(generation)) {
+    reentry = { generation, space: spaceStore.get(), revision: settings.revision, wall: Date.now(), monotonic: performance.now() };
+  } else if (!absent) reentry = null;
+  absent = true;
   epoch = Math.max(epoch + 1, boot.epoch); flight += 1; passwordGrant = null;
+  advanceAccessEpoch();
   if (tokenStore.get()) {
     const enabled = settings?.[spaceStore.get()];
-    discard = discard || enabled !== false;
-    phase = enabled ? 'locked' : 'loading';
+    if (reentry && withinGrace(reentry)) { phase = 'concealed'; discard = false; }
+    else { reentry = null; discard = discard || enabled !== false; phase = enabled ? 'locked' : 'loading'; }
   }
   publish();
 }
+function resume() {
+  if (document.visibilityState !== 'visible') return;
+  if (!tokenStore.get()) { reentry = null; absent = false; return; }
+  const grant = reentry && withinGrace(reentry) ? reentry : null;
+  if (!grant) {
+    reentry = null;
+    if (settings?.[spaceStore.get()] !== false) discard = true;
+  }
+  // Keep both routes and portals concealed until the current status response is authoritative.
+  if (phase === 'ready') phase = 'loading';
+  publish();
+  void checkLockSettings(false, grant);
+}
 window.addEventListener('lw:app-lock', conceal);
-document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible' && tokenStore.get()) void refreshLockSettings(false);
-});
-window.addEventListener('pageshow', event => { if (event.persisted && tokenStore.get()) void refreshLockSettings(false); });
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') resume(); });
+window.addEventListener('pageshow', event => { if (event.persisted) resume(); });
 window.addEventListener('storage', event => {
   if (event.key === null || (event.key && tokenStore.isSessionKey(event.key) && generation !== tokenStore.generation())) { resetAppLock(); void refreshLockSettings(false); }
   else if (event.key === 'lw.lockSettingsChanged' || (event.key && spaceStore.isSpaceKey(event.key))) lockForNavigation();

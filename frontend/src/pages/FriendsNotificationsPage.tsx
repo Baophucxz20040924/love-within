@@ -28,6 +28,7 @@ const ICON: Record<FriendNotificationType, IconName> = {
   event_comment: 'messageCircle',
   event_reminder: 'bell',
   outing_invite: 'calendar',
+  outing_added: 'userPlus',
   outing_changed: 'clock',
   outing_review: 'messageCircle',
   outing_closed: 'x',
@@ -149,6 +150,8 @@ function Sentence({ n }: { n: FriendNotification }): ReactNode {
     // Outing history is intentionally generic; restricted rows have no actors or private excerpts.
     case 'outing_invite':
       return <>Bạn có lời mời mới cho một buổi đi chơi.</>;
+    case 'outing_added':
+      return <>Bạn đã được thêm vào một buổi chia tiền. Tham gia không phải đồng ý chốt nợ.</>;
     case 'outing_changed':
       return <>Buổi đi chơi có cập nhật mới.</>;
     case 'outing_review':

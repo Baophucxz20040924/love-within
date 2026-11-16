@@ -47,6 +47,8 @@ export function applyOutingMutation(doc: FriendOutingRecord, actorId: string, ki
       if (!invited.length) throw Errors.badRequest('Không có thành viên mới');
       if (doc.participants.length + invited.length > OUTING_LIMITS.participants) throw outingCapacityError();
       doc.participants.push(...invited); doc.editCount++;
+      // New members join immediately, but membership never implies financial approval.
+      financeChanged(doc);
       break;
     }
     case 'accept': case 'decline': {

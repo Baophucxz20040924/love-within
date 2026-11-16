@@ -123,17 +123,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     let previous = appLockState().discard;
+    let previousEpoch = appLockEpoch();
+    let previousPhase = appLockState().phase;
     return subscribeAppLock(() => {
       const next = appLockState().discard;
-      if (next && !previous) {
+      const nextEpoch = appLockEpoch();
+      if (nextEpoch !== previousEpoch || (next && !previous)) {
         meEpoch.current += 1;
-        advanceAccessEpoch();
         void qc.cancelQueries();
+      }
+      if (next && !previous) {
+        advanceAccessEpoch();
         qc.clear();
       }
+      const resumed = appLockState().phase === 'ready' && previousPhase !== 'ready';
       previous = next;
+      previousEpoch = nextEpoch;
+      previousPhase = appLockState().phase;
+      if (resumed && tokenStore.get()) void refreshMe();
     });
-  }, [qc]);
+  }, [qc, refreshMe]);
 
   const switchSpace = useCallback((target: Space) => {
     meEpoch.current += 1;
@@ -155,8 +164,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
     const onStorage = (e: StorageEvent) => {
       const currentGeneration = tokenStore.generation();
-      if (e.key && tokenStore.isSessionKey(e.key) && observedGeneration.current === currentGeneration) return;
-      observedGeneration.current = currentGeneration;
+      // A queued unrelated storage event must not mark a newly observed session as handled;
+      // only the session-generation event itself can acknowledge it.
+      const sessionEvent = e.key === null || (e.key && tokenStore.isSessionKey(e.key));
+      if (sessionEvent && observedGeneration.current === currentGeneration) return;
+      if (sessionEvent) observedGeneration.current = currentGeneration;
       if (e.key === null || (e.key && tokenStore.isSessionKey(e.key)) ||
           (e.key && tokenStore.isTokenKey(e.key) && e.newValue === null)) {
         // Follow shared storage, never write a clear back and invalidate another tab's newer login.

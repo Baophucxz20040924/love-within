@@ -1,4 +1,5 @@
 export type OutingPhase = 'collecting' | 'review' | 'settling' | 'completed';
+// Pending/declined are preserved for historical invitations; new members are accepted with null consent.
 export type Membership = 'pending' | 'accepted' | 'declined';
 export interface OutingCommon {
   access: 'invited' | 'declined' | 'full' | 'restricted';

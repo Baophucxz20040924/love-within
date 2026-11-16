@@ -14,13 +14,13 @@ import { logger } from '../utils/logger.js';
 // point and passes the push here. Sending runs in the background (not awaited by the request or the job), so a slow or
 // failing push service never slows or fails the action that caused it. Notification text is never logged.
 
-/** What the lock screen shows for one event (the friends space hides it unless "Hiện nội dung" is on). */
+/** Legacy event input. Content, deep links and tags never reach Web Push; only expiry is used. */
 export interface PushContent {
-  /** Text under the title. A function receives the actor's name: given name in the couple app ("Hà"), full name for friends. */
+  /** Accepted for compatibility; formatters are never invoked. */
   body: string | ((actorName: string) => string);
-  /** Same-origin path opened on tap, e.g. `/stories/<id>`. */
+  /** Accepted for compatibility; notification taps always open the neutral root. */
   url: string;
-  /** Same tag = the new notification replaces the older one on the device (e.g. `story:<id>`). */
+  /** Accepted for compatibility; deliveries use a single generic tag. */
   tag?: string;
   /** Absolute ISO cutoff for time-sensitive capture invitations. */
   expiresAt?: string;
@@ -58,25 +58,20 @@ export interface PushSettingsView {
   quiet: PushSettings['quiet'];
 }
 
-const APP_NAME = 'Look Within';
-/** Shown instead of the content when "Hiện nội dung" is off (default in the friends space). Never names a space. */
-export const HIDDEN_BODY = 'Bạn có thông báo mới';
+const APP_NAME = 'Love Within';
+/** Every Web Push is generic, regardless of space or legacy preview settings. */
+export const HIDDEN_BODY = 'Bạn có một thông báo mới';
 const TTL_TIMED_SEC = 4 * 3600;
 const TTL_DEFAULT_SEC = 24 * 3600;
-/** Devices of one user in one space reached in parallel. */
+/** Devices of one account reached in parallel. */
 const PER_USER_PARALLEL = 5;
 /** Deliveries running at once in this process; more wait their turn in RAM (bounded). */
 const MAX_IN_FLIGHT = 10;
 const MAX_PENDING = 2000;
 /** Failed sends in a row (not 404/410) before a device is dropped. */
 export const MAX_FAILS = 5;
-/** Devices kept per user and space (oldest dropped first). */
+/** Devices kept account-wide (oldest dropped first). */
 const MAX_DEVICES = 10;
-const MAX_TITLE = 60;
-const MAX_BODY = 180;
-const MAX_URL = 300;
-/** Web Push allows about 4 KB of encrypted payload; stay well under it. */
-const MAX_PAYLOAD_BYTES = 3000;
 
 /**
  * Hosts of the browsers' push services (Chrome/Samsung/Opera/Brave, Firefox, Safari, Edge). Anything else is refused (no SSRF).
@@ -85,7 +80,6 @@ const MAX_PAYLOAD_BYTES = 3000;
 const PUSH_HOSTS = ['fcm.googleapis.com', 'jmt17.google.com', 'updates.push.services.mozilla.com', 'web.push.apple.com'];
 const PUSH_HOST_SUFFIXES = ['.push.services.mozilla.com', '.push.apple.com', '.notify.windows.com'];
 
-const SETTINGS_URL: Record<PushSpace, string> = { couple: '/profile/notifications', friends: '/friends/me/notifications' };
 const GROUPS: Record<PushSpace, readonly string[]> = { couple: COUPLE_PUSH_GROUPS, friends: FRIENDS_PUSH_GROUPS };
 
 const disabled = () => new AppError(503, 'PUSH_DISABLED', 'Máy chủ chưa bật thông báo.');
@@ -162,44 +156,9 @@ export function inQuietHours(quiet: PushSettings['quiet'], timezone: string | un
   return quiet.from < quiet.to ? t >= quiet.from && t < quiet.to : t >= quiet.from || t < quiet.to;
 }
 
-function clip(text: string, max: number): string {
-  const s = text.replace(/\s+/g, ' ').trim();
-  return s.length > max ? `${s.slice(0, max - 1)}…` : s;
-}
-
-/** Only a same-origin path ever reaches the service worker. */
-function safePath(url: string, space: PushSpace): string {
-  return url.startsWith('/') && !url.startsWith('//') && url.length <= MAX_URL ? url : space === 'friends' ? '/friends' : '/';
-}
-
-/** Payload as JSON, at most MAX_PAYLOAD_BYTES (the body is cut further if needed). */
-function encode(p: PushPayload): string {
-  let json = JSON.stringify(p);
-  if (Buffer.byteLength(json, 'utf8') > MAX_PAYLOAD_BYTES) json = JSON.stringify({ ...p, body: clip(p.body, 60), tag: p.tag?.slice(0, 64) });
-  return json;
-}
-
-function shortName(displayName: string): string {
-  const parts = displayName.trim().split(/\s+/);
-  return parts[parts.length - 1] || displayName;
-}
-
-async function actorName(actorId: Types.ObjectId, space: PushSpace): Promise<string> {
-  const name = (await userRepository.findDisplayNames([actorId])).get(actorId.toString());
-  if (!name) return space === 'couple' ? 'Người ấy' : 'Một người bạn';
-  return space === 'couple' ? shortName(name) : name;
-}
-
-async function buildPayload(job: PushJob, preview: boolean): Promise<PushPayload> {
-  if (!preview) {
-    // One collapsed "Bạn có thông báo mới" per space. Friends: the list page, so nothing about the event is in the payload.
-    return job.space === 'friends'
-      ? { title: APP_NAME, body: HIDDEN_BODY, url: '/friends/notifications', tag: 'friends' }
-      : { title: APP_NAME, body: HIDDEN_BODY, url: safePath(job.content.url, job.space), tag: job.content.expiresAt ? job.content.tag?.slice(0, 100) : 'couple' };
-  }
-  const raw = job.content.body;
-  const body = typeof raw === 'function' ? raw(job.actorId ? await actorName(job.actorId, job.space) : '') : raw;
-  return { title: clip(APP_NAME, MAX_TITLE), body: clip(body, MAX_BODY), url: safePath(job.content.url, job.space), tag: job.content.tag?.slice(0, 100) };
+/** The same privacy-safe envelope is used for ordinary events and device tests. */
+function buildPayload(): PushPayload {
+  return { title: APP_NAME, body: HIDDEN_BODY, url: '/', tag: 'notification' };
 }
 
 interface SendStats {
@@ -249,7 +208,7 @@ async function sendOne(sub: PushSubscriptionRow, payload: string, opts: PushSend
 }
 
 async function sendToAll(subs: PushSubscriptionRow[], payload: PushPayload, opts: PushSendOptions, ctx: { userId: string; type: string }): Promise<SendStats> {
-  const json = encode(payload);
+  const json = JSON.stringify(payload);
   const stats: SendStats = { ok: 0, gone: 0, failed: 0 };
   for (let i = 0; i < subs.length; i += PER_USER_PARALLEL) {
     await Promise.all(subs.slice(i, i + PER_USER_PARALLEL).map((s) => sendOne(s, json, opts, ctx, stats, payload.expiresAt)));
@@ -257,10 +216,10 @@ async function sendToAll(subs: PushSubscriptionRow[], payload: PushPayload, opts
   return stats;
 }
 
-/** One event to one user: devices of that space, settings group, quiet hours, preview, then send. */
+/** One event to one account's devices, gated by the event's space/group and shared quiet hours. */
 async function deliver(job: PushJob): Promise<void> {
   if (pushTtl(job.content.expiresAt, TTL_DEFAULT_SEC) === null) return;
-  const subs = await pushSubscriptionRepository.listFor(job.userId, job.space);
+  const subs = await pushSubscriptionRepository.listFor(job.userId);
   if (subs.length === 0) return;
   const profile = await userRepository.findPushProfile(job.userId);
   if (!profile) return;
@@ -275,7 +234,7 @@ async function deliver(job: PushJob): Promise<void> {
     logger.debug('Push skipped: quiet hours', ctx);
     return;
   }
-  const payload = await buildPayload(job, own.preview === true);
+  const payload = buildPayload();
   payload.expiresAt = job.content.expiresAt;
   const stats = await sendToAll(subs, payload, { ttlSec: job.timed ? TTL_TIMED_SEC : TTL_DEFAULT_SEC, urgency: job.urgent ? 'high' : 'normal' }, ctx);
   logger.debug('Push sent', { ...ctx, devices: subs.length, ...stats });
@@ -344,17 +303,16 @@ export const pushService = {
     return { enabled: p.enabled, publicKey: p.enabled ? p.publicKey : null };
   },
 
-  /** Save this device for the caller in the session's space (moves it from another user or space). */
-  async subscribe(userId: string, input: { endpoint: string; keys: { p256dh: string; auth: string }; space: PushSpace }, userAgent: string | undefined) {
+  /** Save this device account-wide. Legacy `space` input is accepted but ignored. */
+  async subscribe(userId: string, input: { endpoint: string; keys: { p256dh: string; auth: string }; space?: PushSpace }, userAgent: string | undefined) {
     if (!getPush().enabled) throw disabled();
     if (!isPushEndpoint(input.endpoint)) throw new AppError(400, 'BAD_ENDPOINT', 'Địa chỉ nhận thông báo không hợp lệ');
-    await requireSpaceAccess(userId, input.space);
     const uid = new Types.ObjectId(userId);
     const device = shortUserAgent(userAgent);
-    await pushSubscriptionRepository.upsert({ userId: uid, space: input.space, endpoint: input.endpoint, keys: input.keys, userAgent: device });
-    const pruned = await pushSubscriptionRepository.pruneOldest(uid, input.space, MAX_DEVICES);
-    logger.info('Push device saved', { userId, space: input.space, device, pruned });
-    return { space: input.space, device };
+    await pushSubscriptionRepository.upsert({ userId: uid, endpoint: input.endpoint, keys: input.keys, userAgent: device });
+    const pruned = await pushSubscriptionRepository.pruneOldest(uid, MAX_DEVICES);
+    logger.info('Push device saved', { userId, device, pruned });
+    return { device };
   },
 
   /** Logout or switch off: forget this device. Idempotent; another user's endpoint is never touched. */
@@ -395,12 +353,7 @@ export const pushService = {
     const uid = new Types.ObjectId(userId);
     const sub = await pushSubscriptionRepository.findOwn(uid, endpoint);
     if (!sub) throw new AppError(404, 'PUSH_NOT_SUBSCRIBED', 'Máy này chưa bật thông báo');
-    const payload: PushPayload = {
-      title: APP_NAME,
-      body: 'Thông báo thử: máy này đã nhận được thông báo ✅',
-      url: SETTINGS_URL[sub.space],
-      tag: 'test',
-    };
+    const payload = buildPayload();
     const stats = await sendToAll([sub], payload, { ttlSec: 600, urgency: 'normal' }, { userId, type: 'test' });
     if (stats.gone) throw new AppError(410, 'PUSH_GONE', 'Máy này không còn nhận được thông báo. Hãy bật lại.');
     if (stats.failed) throw new AppError(502, 'PUSH_FAILED', 'Chưa gửi được thông báo thử, thử lại sau nhé.');

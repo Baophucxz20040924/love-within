@@ -37,7 +37,8 @@ async function main() {
     ['lw.sessionGeneration', 'old'], ['lw.accessToken', 'old-access'], ['lw.refreshToken', 'old-refresh'],
   ]);
   const calls = { get: 0, clear: 0, cancel: 0, cacheClear: 0, requests: [], logins: 0 };
-  let epoch = 0, visible = true;
+  let epoch = 0, visible = true, lockPhase = 'loading';
+  let lockSubscriber;
   const tokenStore = {
     generation: () => values.get('lw.sessionGeneration') ?? 'legacy',
     isCurrent: (generation) => generation === tokenStore.generation(),
@@ -98,7 +99,7 @@ async function main() {
     '../../lib/spaceStore': { spaceStore: { get: () => 'couple', set: () => {}, isSpaceKey: () => false } },
     '../../lib/tokenStore': { tokenStore },
     '../push/device': { forgetThisDevice: () => { throw new Error('unexpected device operation'); } },
-    '../appLock/store': { appLockEpoch: () => epoch, appLockState: () => ({ discard: false }), bindPasswordLogin() {}, isAuthAttemptCurrent: expected => expected === epoch && visible, refreshLockSettings: async () => {}, resetAppLock() {}, subscribeAppLock: () => () => {} },
+    '../appLock/store': { appLockEpoch: () => epoch, appLockState: () => ({ discard: false, phase: lockPhase }), bindPasswordLogin() {}, isAuthAttemptCurrent: expected => expected === epoch && visible, refreshLockSettings: async () => {}, resetAppLock() {}, subscribeAppLock: fn => { lockSubscriber = fn; return () => {}; } },
     '../../components/StatusViews': { ErrorState: 'error', Loading: 'loading' },
   };
   const module = { exports: {} };
@@ -117,9 +118,22 @@ async function main() {
   assert.equal(typeof storage, 'function', 'storage effect registers a handler');
   assert.equal(calls.requests.length, 1, 'mount requests old identity');
   const oldRequest = calls.requests[0];
+  // Interrupt the initial /me while a no-PIN session is still bootstrapping.
+  epoch++; visible = false; lockPhase = 'concealed'; lockSubscriber();
+  visible = true; lockPhase = 'ready'; lockSubscriber();
+  assert.equal(calls.requests.length, 2, 'ready transition restarts an interrupted bootstrap');
+  const resumedIdentity = { id: 'resumed-user' };
+  calls.requests[1].resolve(resumedIdentity);
+  await new Promise(setImmediate);
+  assert.equal(render().me, resumedIdentity);
+  calls.requests.splice(1, 1);
+  calls.cancel = 0;
 
   // The generation event can arrive before either new token has been written.
   values.set('lw.sessionGeneration', 'new');
+  // An older unrelated event can be delivered after shared storage has already changed.
+  // It must not acknowledge the session event or suppress the identity/cache reset below.
+  storage({ key: 'lw.lockSettingsChanged', newValue: 'nonce' });
   values.delete('lw.accessToken');
   values.delete('lw.refreshToken');
   const getsBeforeGeneration = calls.get;

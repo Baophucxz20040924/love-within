@@ -17,8 +17,8 @@ interface Props {
  */
 export function PushSuggestCard({ space, text }: Props) {
   const suggest = usePushSuggest(space);
-  const { state, serverEnabled } = usePushDevice(space);
-  const { busy, enable } = usePushSwitch(space);
+  const { state, serverEnabled } = usePushDevice();
+  const { busy, enable } = usePushSwitch();
 
   if (suggest !== 'shown' || serverEnabled !== true) return null;
   if (state !== 'off' && state !== 'ios-install' && state !== 'denied') return null;
@@ -42,6 +42,7 @@ export function PushSuggestCard({ space, text }: Props) {
         <div className="push-suggest__body">
           <p className="strong">{title}</p>
           <p className="text-sm text-muted">{body}</p>
+          {state === 'off' && <p className="text-sm text-muted">Áp dụng cho tài khoản trên máy này, không đổi khi chuyển không gian. Thông báo luôn ẩn tên người và nội dung.</p>}
         </div>
         <button type="button" className="icon-btn push-suggest__close" aria-label="Ẩn gợi ý này" onClick={dismiss}>
           <Icon name="x" size={20} />

@@ -51,7 +51,8 @@ test('expiry rechecked before each batch; hidden payload still carries expiry fo
   h.provider.send=async(sub,payload,opts)=>{h.calls.push({payload:JSON.parse(payload),opts});if(h.calls.length===5)h.setNow('2026-11-15T09:30Z');return {status:'ok'};};
   h.pushService.enqueue(h.job('2026-11-15T09:30Z'));await h.drain();assert.equal(h.calls.length,5);
   assert.equal(h.calls[0].opts.ttlSec,1800);assert.equal(h.calls[0].payload.expiresAt,'2026-11-15T09:30Z');
-  assert.equal(h.calls[0].payload.body,'Bạn có thông báo mới');assert.equal(h.calls[0].payload.tag,'moment:test');
+  assert.equal(h.calls[0].payload.title,'Love Within');assert.equal(h.calls[0].payload.body,'Bạn có một thông báo mới');
+  assert.equal(h.calls[0].payload.url,'/');assert.equal(h.calls[0].payload.tag,'notification');
 });
 test('backlogged invitation expires before dequeue; other notification TTL remains four hours',async()=>{
   const h=harness(),gate=deferred();let lookups=0;

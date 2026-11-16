@@ -84,7 +84,7 @@ try {
   await request(b, 'POST', `/friends/requests/${pending.requestId}/accept`, {});
   browser = await chromium.launch({ executablePath: path.join(process.env.LOCALAPPDATA, 'ms-playwright/chromium-1243/chrome-win64/chrome.exe'), headless: true });
   await session(a); await session(b); await session(c);
-  // A and B are friends; C is unrelated. Keep B's list query warm before the invitation exists.
+  // A and B are friends; C is unrelated. Keep B's list query warm before membership exists.
   await b.page.goto(`${ui}/friends/outings`);
   await visible(b.page, 'Chia tiền');
   await c.page.goto(`${ui}/friends/outings`);
@@ -93,27 +93,35 @@ try {
   let outingId;
   let cMark = await mark(c.page), bMark = await mark(b.page);
   activePage = b.page;
-  await measured('Create and invitation appear in another live list without polling', async () => {
-    const created = await request(a, 'POST', '/friends/outings', { operationId: op(), expectedRevision: 0, title, outingDate: '2026-11-15', inviteeIds: [b.id] });
-    outingId = created.outing.id;
+  await measured('Create a ledger without a minimum member selection in UI', async () => {
+    await a.page.goto(`${ui}/friends/outings`);
+    await a.page.getByRole('button', { name: 'Tạo buổi chia tiền', exact: true }).click();
+    const sheet = a.page.getByRole('dialog', { name: 'Tạo buổi chia tiền', exact: true });
+    await sheet.getByLabel('Tên buổi', { exact: true }).fill(title);
+    await sheet.getByLabel('Ngày đi chơi', { exact: true }).fill('2026-11-15');
+    await sheet.getByRole('button', { name: 'Tạo buổi chia tiền', exact: true }).click();
+    await a.page.waitForURL(url => /\/friends\/outings\/[^/]+$/.test(url.pathname));
+    outingId = new URL(a.page.url()).pathname.split('/').at(-1);
+    await visible(a.page, title);
+  });
+  await measured('Add member in UI; joined ledger appears live without an invitation acceptance', async () => {
+    await a.page.getByRole('button', { name: 'Thành viên', exact: true }).click();
+    await a.page.getByRole('button', { name: 'Thêm thành viên', exact: true }).click();
+    const sheet = a.page.getByRole('dialog', { name: 'Thêm thành viên', exact: true });
+    await sheet.getByRole('checkbox', { name: b.name }).check();
+    await sheet.getByRole('button', { name: 'Thêm thành viên', exact: true }).click();
+    await sheet.waitFor({ state: 'hidden', timeout: 4000 });
     await waitDomain(b.page, bMark, 'friend-outings');
     await visible(b.page, title);
+    assert.equal(await b.page.getByText('Chờ bạn nhận lời', { exact: true }).count(), 0);
+    await b.page.getByRole('link').filter({ hasText: title }).click();
+    await visible(b.page, 'Chưa có khoản chi nào');
+    assert.equal(await b.page.getByRole('button', { name: 'Nhận lời tham gia', exact: true }).count(), 0);
+    const joined = await detail(b, outingId);
+    assert.equal(joined.access, 'full');
+    assert.equal(joined.myMembership, 'accepted');
+    assert.equal(joined.participants.find(member => member.userId === b.id).consent, null, 'membership must not consent to debt');
   });
-  await a.page.goto(`${ui}/friends/outings/${outingId}`);
-  await visible(a.page, title);
-  await a.page.getByRole('button', { name: 'Thành viên', exact: true }).click();
-  await visible(a.page, 'Chờ nhận lời');
-  await b.page.goto(`${ui}/friends/outings/${outingId}`);
-  await visible(b.page, 'BẠN CÓ MỘT LỜI MỜI');
-  let aMark = await mark(a.page);
-  activePage = a.page;
-  await measured('Invitee accepts in UI; creator sees membership live', async () => {
-    await b.page.getByRole('button', { name: 'Nhận lời tham gia', exact: true }).click();
-    await b.page.locator('.outing-form').getByRole('button', { name: 'Nhận lời tham gia', exact: true }).click();
-    await waitDomain(a.page, aMark, 'friend-outings');
-    await visible(a.page, 'Đã tham gia');
-  });
-  await b.page.getByText('Chưa có khoản chi nào', { exact: true }).waitFor({ timeout: 4000 });
   bMark = await mark(b.page); activePage = b.page;
   await measured('Expense and financial revision update other ledger live', async () => {
     const current = await detail(a, outingId);

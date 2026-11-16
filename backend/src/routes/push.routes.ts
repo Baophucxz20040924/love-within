@@ -10,7 +10,7 @@ import { ok } from '../utils/response.js';
 
 /**
  * Web Push (plan/OPERATIONS.md, N4). Login needed, no couple: mounted before the '/api' routers that require one.
- * `space` is the session's space; 'friends' needs a member of the friends space (403 FRIENDS_NOT_JOINED).
+ * Subscriptions are account-wide. Settings remain per space; friends settings require friends membership.
  */
 export const pushRouter = Router();
 pushRouter.use(requireAuth);
@@ -21,7 +21,8 @@ const endpoint = z.string().min(1).max(1000);
 const subscribeSchema = z.object({
   endpoint,
   keys: z.object({ p256dh: base64Url.min(80).max(100), auth: base64Url.min(16).max(32) }),
-  space,
+  // Accepted for older clients only; subscription ownership is account-wide.
+  space: space.optional(),
 });
 const endpointSchema = z.object({ endpoint });
 const hhmm = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Giờ phải có dạng HH:mm');
@@ -55,7 +56,7 @@ pushRouter.get('/config', (_req, res) => {
   ok(res, pushService.config());
 });
 
-/** POST /api/push/subscriptions { endpoint, keys: { p256dh, auth }, space } — this device, upsert by endpoint. */
+/** POST /api/push/subscriptions { endpoint, keys: { p256dh, auth }, space? } — account-wide device, upsert by endpoint. */
 pushRouter.post(
   '/subscriptions',
   pushSubscribeLimiter,

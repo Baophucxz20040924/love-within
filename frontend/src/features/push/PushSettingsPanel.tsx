@@ -23,8 +23,6 @@ export interface PushGroupRow {
 interface Props {
   space: PushSpace;
   groups: PushGroupRow[];
-  /** "Hiện nội dung" explained in this space's words. */
-  previewText: { on: string; off: string };
   /** What still works during quiet hours, in this space's words. */
   quietHint: string;
 }
@@ -50,15 +48,15 @@ const DEVICE_META: Record<string, string> = {
   unsupported: 'Trình duyệt này chưa hỗ trợ',
 };
 
-/** Shared body of "Thông báo" (Hồ sơ) and "Cài đặt thông báo" (Tôi): this device, groups, preview, quiet hours, test. */
-export function PushSettingsPanel({ space, groups, previewText, quietHint }: Props) {
+/** Account-wide device switch, fixed notification privacy, and this space's groups / quiet hours. */
+export function PushSettingsPanel({ space, groups, quietHint }: Props) {
   const qc = useQueryClient();
   const toast = useToast();
   const { me } = useAuth();
   const key = pushSettingsKey(space);
   const settings = useQuery({ queryKey: key, queryFn: () => pushApi.settings(space) });
-  const { state, serverEnabled } = usePushDevice(space);
-  const device = usePushSwitch(space);
+  const { state, serverEnabled } = usePushDevice();
+  const device = usePushSwitch();
 
   const update = useMutation({
     mutationFn: (patch: PushSettingsPatch) => pushApi.updateSettings(patch),
@@ -154,6 +152,7 @@ export function PushSettingsPanel({ space, groups, previewText, quietHint }: Pro
             </button>
           )}
         </div>
+        <p className="text-sm text-muted">Bật hoặc tắt cho tài khoản đang đăng nhập trên máy này, không đổi khi chuyển không gian. Không ảnh hưởng các máy khác.</p>
         <PushDeviceHelp state={state} serverEnabled={serverEnabled} />
       </div>
 
@@ -179,28 +178,14 @@ export function PushSettingsPanel({ space, groups, previewText, quietHint }: Pro
                 </label>
               ))}
             </div>
-            <p className="text-sm text-muted">Áp dụng cho mọi máy bạn đã bật thông báo.</p>
+            <p className="text-sm text-muted">Các loại thông báo này chỉ áp dụng cho không gian hiện tại, trên mọi máy bạn đã bật thông báo.</p>
           </div>
 
           <div className="section">
             <h2 className="section__title">Màn hình khóa</h2>
-            <div className="list">
-              <label className="list__item">
-                <span className="icon-tile icon-tile--neutral" aria-hidden="true">
-                  <Icon name={s.preview ? 'eye' : 'eyeOff'} size={20} />
-                </span>
-                <span className="list__body">
-                  <span className="list__label">Hiện nội dung</span>
-                  <span className="list__meta" style={{ display: 'block' }}>
-                    {s.preview ? 'Đang bật' : 'Đang tắt'}
-                  </span>
-                </span>
-                <Switch checked={s.preview} onChange={(on) => update.mutate({ space, preview: on })} />
-              </label>
-            </div>
             <p className="callout push-preview">
-              <Icon name={s.preview ? 'eye' : 'lock'} size={16} />
-              <span>{s.preview ? previewText.on : previewText.off}</span>
+              <Icon name="lock" size={16} />
+              <span>Thông báo luôn chỉ hiện “Love Within · Bạn có một thông báo mới”, không hiện tên người, nội dung hay không gian. Chạm để mở app; mã PIN vẫn được yêu cầu nếu bạn đã bật khóa cho không gian đó.</span>
             </p>
           </div>
 

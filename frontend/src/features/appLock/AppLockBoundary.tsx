@@ -45,7 +45,7 @@ export function AppLockCover() {
   </main>, host);
 }
 
-/** Unmount only a protected space; a no-PIN space keeps its draft during status revalidation. */
+/** Retain drafts behind the mask during short re-entry checks; discard them when a PIN is required. */
 export function AppLockBoundary({ children }: { children: ReactNode }) {
   const state = useAppLock();
   const { bootstrapError, retryBootstrap, space } = useAuth();

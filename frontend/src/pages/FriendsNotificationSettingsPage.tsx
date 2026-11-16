@@ -10,7 +10,7 @@ const GROUPS: PushGroupRow[] = [
   { key: 'events', icon: 'calendar', label: 'Kèo', hint: 'Lời mời đi kèo, người sẽ đi, đổi giờ hoặc địa điểm, hủy kèo, thảo luận, nhắc 2 giờ trước giờ hẹn' },
 ];
 
-/** /friends/me/notifications — Tôi → "Cài đặt thông báo". Content is hidden on the lock screen by default. */
+/** /friends/me/notifications — Tôi → "Cài đặt thông báo". Lock-screen content is always generic. */
 export function FriendsNotificationSettingsPage() {
   return (
     <Page title="Cài đặt thông báo" back="/friends/me">
@@ -18,10 +18,6 @@ export function FriendsNotificationSettingsPage() {
       <PushSettingsPanel
         space="friends"
         groups={GROUPS}
-        previewText={{
-          on: 'Màn hình khóa hiện tên người và việc họ vừa làm, ví dụ “Long đã bình luận về bài viết của bạn”. Ai cầm điện thoại của bạn cũng đọc được.',
-          off: 'Đang ẩn: màn hình khóa chỉ hiện “Love Within · Bạn có thông báo mới”, không có tên ai hay nội dung gì. Người khác nhìn thấy điện thoại của bạn cũng không biết là gì. Chạm vào để mở trang Thông báo.',
-        }}
         quietHint="Trong giờ yên lặng máy không báo. Trang Thông báo trong app vẫn có đủ."
       />
     </Page>

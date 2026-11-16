@@ -90,6 +90,7 @@ function friendsPush(n: FriendsNotifyInput): PushContent {
       return { body: 'Còn khoảng 2 giờ nữa là tới kèo của bạn', url: `/friends/events/${post}`, tag: `event:${post}` };
     // Outing lock-screen text is intentionally generic: no names, amounts, notes or group details.
     case 'outing_invite':
+    case 'outing_added':
     case 'outing_changed':
     case 'outing_review':
     case 'outing_closed':

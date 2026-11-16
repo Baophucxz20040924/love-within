@@ -2,7 +2,7 @@
 
 The previous mandatory secret-gesture resume cover has been removed. One account can optionally configure a six-digit PIN for each space. Only the current space's enabled flag causes a resume challenge; when both are enabled, either PIN selects its own Home. PINs must differ and are verified by the backend. No PIN or verifier is persisted in browser storage.
 
-Settings: `/profile/app-lock` and `/friends/me/app-lock`. Configuration requires the account password. Explicit recovery logs out locally and returns to the full email/password form; server PINs remain configured. Full password login permits the selected space for that entry. Cold/resume status failures stay covered until retry or logout. PIN unlock always goes Home, not the original deep link; actual locks discard mounted drafts. No-PIN resume retains mounted content.
+Settings: `/profile/app-lock` and `/friends/me/app-lock`. Configuration requires the account password. Explicit recovery logs out locally and returns to the full email/password form; server PINs remain configured. Full password login permits the selected space for that entry. A verified ready view is immediately concealed on departure, but may retain its route/draft for less than 10 seconds. It becomes visible only after current settings revalidate with the same session, space and revision, still before the deadline. At 10 seconds or later, cold/reloaded entry, invalidation, or a failed check, a protected space discards the draft and requires PIN again. The grant exists only in memory; duplicate departure events cannot restart its deadline, and persisted BFCache restoration conservatively revokes it. Cold/resume status failures stay covered until retry or logout. PIN unlock always goes Home, not the original deep link. No-PIN resume retains mounted content.
 
 ## Isolated checks
 
@@ -16,7 +16,7 @@ The unlock screen uses six masked dots and a touch keypad. Six digits submit aut
 
 `pin-entry.cjs` exercises the actual component with mocked hooks/timers: leading zero, keypad/delete, partial input, duplicate/Enter guards, invalid feedback, countdown, cleanup and stale epoch/session continuations.
 
-`store.cjs` exercises actual controller/mask source with deterministic DOM and API mocks: configuration matrix, epochs/generations/revisions, invalid responses, independent masks, late portals and media. `tokens.cjs` checks atomic publication of session identity and credential pair, rotation and logout. Auth regression covers stale join completions. These are not device tests.
+`store.cjs` exercises actual controller, bootstrap lifecycle and mask source with deterministic DOM/API mocks: the preserved configuration matrix plus verified short (<10s) and long (>=10s) resumes, threshold crossing while status is pending, wall/monotonic clock failures, repeated hide/pagehide/persisted restore, cold/reload/no-grant/offline paths, settings/session/space invalidation, stale unlock/status completion, hidden completion, and independent verification masks. The fixture imports the real bootstrap script and dispatches its `CustomEvent` lifecycle events; clocks are advanced without real ten-second sleeps. `tokens.cjs` checks atomic publication of session identity and credential pair, rotation and logout. Auth regression covers stale join completions. These are not device tests.
 
 ## Mongo integration
 
@@ -37,7 +37,7 @@ Read `scripts/browser/README.md`. Inspect ports 4000/4001/5173 plus 4002/5175; n
 node frontend/tests/app-lock/browser.mjs --local-mock-runtime
 ```
 
-External Playwright tooling only; no frontend dependency. Synthetic accounts and pairing are API setup; login, configure/change/disable and unlock run through UI. The suite simulates visibility events and captures credential-masked screenshots and sanitized result JSON under the external tooling directory. No storage state, traces or HAR. Synthetic accounts remain in the local dev DB. Review images manually; a passing assertion is not visual review.
+External Playwright tooling only; no frontend dependency. Synthetic accounts and pairing are API setup; login, configure/change/disable and unlock run through UI. The suite simulates visibility events and captures credential-masked screenshots and sanitized result JSON under the external tooling directory. Its default synthetic background advances a test-only wall-clock offset by 10 seconds so the existing PIN checks explicitly exercise long resume without repeated real sleeps. A separate short-resume check holds the status response, asserts neutral masking, then confirms the route and unsaved settings form survive revalidation; the long-resume companion checks that the form is discarded and PIN returns Home. Browser time simulation is not proof of real OS timing. No storage state, traces or HAR. Synthetic accounts remain in the local dev DB. Review images manually; a passing assertion is not visual review.
 
 ## Scope
 
