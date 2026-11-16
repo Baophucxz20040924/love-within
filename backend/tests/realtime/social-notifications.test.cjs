@@ -39,6 +39,10 @@ const { notificationService } = load('notification.service.ts', {
   '../utils/logger.js': { logger: { warn() {} } },
   './push.service.js': { pushService: { enqueue: () => calls.push('push') } },
   './realtimeAudience.service.js': { realtimeAudience: { own } },
+  '../repositories/coupleNotification.repository.js': { coupleNotificationRepository: {} },
+  '../repositories/couple.repository.js': { coupleRepository: {} },
+  '../repositories/user.repository.js': { userRepository: {} },
+  './coupleNotifications.service.js': { invalidateCoupleNotifications: async () => {} },
 });
 (async () => {
   const input = { space: 'friends', to, type: 'story_reaction', actorId: actor, entityId: entity };

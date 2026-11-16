@@ -49,6 +49,10 @@ function harness() {
     'repositories/friendSafety.repository.ts': { friendBlockRepository },
     'repositories/friendNotification.repository.ts': { friendNotificationRepository },
     'repositories/user.repository.ts': { userRepository: {} },
+    // Couple-only imports of the shared notification entry point stay inert in Friends tests.
+    'repositories/coupleNotification.repository.ts': { coupleNotificationRepository: {} },
+    'repositories/couple.repository.ts': { coupleRepository: {} },
+    'services/coupleNotifications.service.ts': { invalidateCoupleNotifications: async () => {} },
     'models/FriendEvent.ts': { FriendEvent: {} }, 'models/FriendStory.ts': { FriendStory: {} }, 'models/FriendStoryComment.ts': { FriendStoryComment: {} },
     'services/friendEvent.service.ts': { friendEventService: { visibleEvent: async () => {
       if (!state.event) throw load('utils/errors.ts').Errors.notFound();

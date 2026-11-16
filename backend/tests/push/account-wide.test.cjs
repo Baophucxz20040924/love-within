@@ -53,6 +53,7 @@ function repositoryHarness() {
   }
   const { pushSubscriptionRepository: repo } = load('repositories/pushSubscription.repository.ts', {
     '../models/PushSubscription.js': { PushSubscription: model },
+    '../utils/errors.js': load('utils/errors.ts', {}),
   });
   return { repo, calls, setResult: value => result = value, setFailures: value => failures = value };
 }
@@ -76,7 +77,7 @@ test('repository reads all account devices and prunes account-wide with ownershi
   await h.repo.listFor(userId);
   assert.deepEqual(plain(h.calls), [
     { method: 'find', args: [{ userId: String(userId) }] },
-    { method: 'select', args: ['endpoint keys'] },
+    { method: 'select', args: ['userId credentialVersion endpoint keys'] },
     { method: 'lean', args: [] },
   ]);
   h.calls.length = 0;
@@ -101,17 +102,17 @@ test('upsert stays endpoint-unique, ignores legacy space, and retries duplicate 
   const userId = new Types.ObjectId();
   h.setResult({ userId, endpoint });
   h.setFailures([{ code: 11000 }]);
-  await h.repo.upsert({ userId, endpoint, keys, userAgent: 'iPhone', space: 'friends' });
+  await h.repo.upsert({ userId, credentialVersion: 0, endpoint, keys, userAgent: 'iPhone', space: 'friends' });
   assert.equal(h.calls.length, 2);
-  for (const call of h.calls) {
+  for (const [index, call] of h.calls.entries()) {
     assert.deepEqual(plain(call.args), [
-      { endpoint },
-      { $set: { userId: String(userId), keys, userAgent: 'iPhone', failCount: 0 } },
-      { upsert: true, new: true, setDefaultsOnInsert: true },
+      { endpoint, $or: [{ userId: { $ne: String(userId) } }, { credentialVersion: { $lte: 0 } }, { credentialVersion: { $exists: false } }] },
+      { $set: { userId: String(userId), credentialVersion: 0, keys, userAgent: 'iPhone', failCount: 0 } },
+      index === 0 ? { upsert: true, new: true, setDefaultsOnInsert: true } : { new: true },
     ]);
   }
   h.setFailures([new Error('storage unavailable')]);
-  await assert.rejects(() => h.repo.upsert({ userId, endpoint, keys, userAgent: '' }), /storage unavailable/);
+  await assert.rejects(() => h.repo.upsert({ userId, credentialVersion: 0, endpoint, keys, userAgent: '' }), /storage unavailable/);
 });
 
 test('findOwn and deleteOwn always qualify endpoint with authenticated owner', async () => {
@@ -135,11 +136,12 @@ function serviceHarness() {
   const userId = new Types.ObjectId();
   const state = {
     settings: structuredClone(defaults), member: true, membershipChecks: 0, actorLookups: 0,
+    credentialVersion: 0, mustChangePassword: false, credentialChecks: 0,
     clock: Date.parse('2026-11-15T09:00:00Z'), timezone: 'UTC',
     devices: [
-      { _id: new Types.ObjectId(), endpoint, keys, space: 'couple' },
-      { _id: new Types.ObjectId(), endpoint: `${endpoint}-friends`, keys, space: 'friends' },
-      { _id: new Types.ObjectId(), endpoint: `${endpoint}-new`, keys },
+      { _id: new Types.ObjectId(), userId, endpoint, keys, space: 'couple' },
+      { _id: new Types.ObjectId(), userId, endpoint: `${endpoint}-friends`, keys, space: 'friends' },
+      { _id: new Types.ObjectId(), userId, endpoint: `${endpoint}-new`, keys },
     ],
   };
   const calls = { send: [], list: [], upsert: [], prune: [], find: [], remove: [], settings: [], success: [], gone: [] };
@@ -185,6 +187,12 @@ function serviceHarness() {
     '../utils/date.js': load('utils/date.ts', {}),
     '../utils/errors.js': load('utils/errors.ts', {}),
     '../utils/logger.js': { logger: { debug() {}, info() {}, warn() {} } },
+    './credential.service.js': { credentialService: { async assertApp(id, version) {
+      state.credentialChecks++;
+      if (id !== String(userId) || version !== state.credentialVersion || state.mustChangePassword) {
+        const error = new Error('revoked'); error.status = 401; throw error;
+      }
+    } } },
   }, { Date: Clock });
   const service = exports.pushService;
   const job = space => ({
@@ -265,12 +273,12 @@ test('subscribe accepts omitted or legacy space without membership checks; setti
   const h = serviceHarness();
   h.state.member = false;
   for (const space of [undefined, 'couple', 'friends']) {
-    const result = await h.service.subscribe(String(h.userId), { endpoint, keys, ...(space ? { space } : {}) }, 'iPhone Safari/');
+    const result = await h.service.subscribe(String(h.userId), { endpoint, keys, ...(space ? { space } : {}) }, 'iPhone Safari/', 0);
     assert.deepEqual(plain(result), { device: 'iPhone · Safari' });
   }
   assert.equal(h.state.membershipChecks, 0);
   for (const input of h.calls.upsert) {
-    assert.deepEqual(plain(input), { userId: String(h.userId), endpoint, keys, userAgent: 'iPhone · Safari' });
+    assert.deepEqual(plain(input), { userId: String(h.userId), credentialVersion: 0, endpoint, keys, userAgent: 'iPhone · Safari' });
   }
   for (const args of h.calls.prune) assert.deepEqual(plain(args), [String(h.userId), 10]);
   await assert.rejects(() => h.service.getSettings(String(h.userId), 'friends'), error => error.status === 403);
@@ -315,6 +323,40 @@ test('timed and urgent jobs retain TTL/urgency while expiry is the only optional
     assert.deepEqual(call.payload, { ...generic, expiresAt });
     assert.deepEqual(call.opts, { ttlSec: 1800, urgency: 'high' });
   }
+});
+
+test('reset stops delivery to legacy registrations and rejects stale subscribe', async () => {
+  const h = serviceHarness();
+  h.state.credentialVersion = 1;
+  h.state.mustChangePassword = true;
+  h.service.enqueue(h.job('couple'));
+  await h.drain();
+  assert.equal(h.calls.send.length, 0);
+  await assert.rejects(() => h.service.subscribe(String(h.userId), { endpoint, keys }, undefined, 0), e => e.status === 401);
+  assert.equal(h.calls.upsert.length, 0);
+  h.state.mustChangePassword = false;
+  h.service.enqueue(h.job('friends'));
+  await h.drain();
+  assert.equal(h.calls.send.length, 0);
+  h.state.devices[0].credentialVersion = 1;
+  h.service.enqueue(h.job('couple'));
+  await h.drain();
+  assert.equal(h.calls.send.length, 1);
+});
+
+test('a reset during the first device batch blocks all later batches', async () => {
+  const h = serviceHarness();
+  h.state.devices = Array.from({ length: 8 }, (_, i) => ({ _id: new Types.ObjectId(), userId: h.userId, credentialVersion: 0, endpoint: `${endpoint}-${i}`, keys }));
+  h.provider.send = async (sub) => {
+    h.calls.send.push(sub);
+    h.state.credentialVersion = 1;
+    h.state.mustChangePassword = true;
+    return { status: 'ok' };
+  };
+  h.service.enqueue(h.job('couple'));
+  await h.drain();
+  assert.equal(h.calls.send.length, 5, 'only the already-authorized parallel batch can finish');
+  await assert.rejects(() => h.service.test(String(h.userId), h.state.devices[0].endpoint), e => e.code === 'PUSH_STALE');
 });
 
 test('subscription route accepts no space and both legacy spaces; settings still require valid space', () => {

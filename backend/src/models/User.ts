@@ -26,6 +26,12 @@ export interface UserDoc extends Document {
   _id: Types.ObjectId;
   email: string;
   passwordHash: string;
+  /** Only the explicit operator bootstrap can create an admin. Missing legacy roles are users. */
+  role: 'user' | 'admin';
+  /** Incremented atomically whenever credentials change. Missing legacy values mean zero. */
+  credentialVersion: number;
+  mustChangePassword: boolean;
+  temporaryPasswordExpiresAt: Date | null;
   displayName: string;
   coupleId: Types.ObjectId | null;
   timezone: string;
@@ -63,6 +69,10 @@ const userSchema = new Schema<UserDoc>(
   {
     email: { type: String, required: true, unique: true, lowercase: true, trim: true },
     passwordHash: { type: String, required: true },
+    role: { type: String, enum: ['user', 'admin'], default: 'user' },
+    credentialVersion: { type: Number, default: 0, min: 0, max: Number.MAX_SAFE_INTEGER, validate: Number.isSafeInteger },
+    mustChangePassword: { type: Boolean, default: false },
+    temporaryPasswordExpiresAt: { type: Date, default: null },
     displayName: { type: String, required: true, trim: true },
     coupleId: { type: Schema.Types.ObjectId, ref: 'Couple', default: null },
     timezone: { type: String, default: 'Asia/Ho_Chi_Minh' },

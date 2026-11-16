@@ -155,7 +155,7 @@ function WaterQuestCard({ quest }: { quest: Quest | undefined }) {
               : 'Hai bạn chưa có mục tiêu nước. Thống nhất một con số để bắt đầu nhiệm vụ.'}
           </p>
           {w.pendingGoalProposal ? (
-            <Link to="/approvals" className="btn btn-outline btn-block">
+            <Link to="/notifications?filter=approvals" className="btn btn-outline btn-block">
               Xem đề xuất
             </Link>
           ) : (
@@ -184,7 +184,7 @@ function WaterQuestCard({ quest }: { quest: Quest | undefined }) {
           </Link>
 
           {incomingWater > 0 && (
-            <Link to="/approvals" className="callout callout--water" style={{ textDecoration: 'none' }}>
+            <Link to="/notifications?filter=approvals" className="callout callout--water" style={{ textDecoration: 'none' }}>
               <Icon name="bell" size={16} />
               <span>
                 Có <strong>{incomingWater}</strong> lượt uống nước của người yêu đang chờ bạn xác nhận

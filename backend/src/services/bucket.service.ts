@@ -311,7 +311,8 @@ export const bucketService = {
     const title = done.title;
     await notificationService.toPartner(couple, uid, {
       type: 'bucket_done',
-      entityId: done._id,
+      entityId: done._id, eventKey: `${done._id}:${done.doneAt!.toISOString()}`,
+      target: { kind: 'bucket', id: String(done._id) },
       push: {
         body: `Hai bạn đã làm xong “${title}” 🎉`,
         url: story ? `/stories/${story.id}` : '/quests/bucket?tab=done',

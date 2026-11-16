@@ -15,7 +15,7 @@ export const FRIENDS_PUSH_GROUPS = ['social', 'events', 'messages'] as const;
 export type CouplePushGroup = (typeof COUPLE_PUSH_GROUPS)[number];
 export type FriendsPushGroup = (typeof FRIENDS_PUSH_GROUPS)[number];
 
-/** Couple events are not stored (no couple notification list): they only push. */
+/** Couple events are persisted in the Love inbox, independently of their optional push channel. */
 export const COUPLE_NOTIFICATION_TYPES = [
   'water_pending',
   'proposal_created',

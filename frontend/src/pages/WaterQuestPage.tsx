@@ -86,7 +86,7 @@ export function WaterQuestPage() {
           <PushSuggestCard space="couple" text={`Biết ngay khi ${partnerName} xác nhận, gửi nước cho bạn duyệt, đăng bài hay trả lời câu hỏi.`} />
 
           {incomingWater > 0 && (
-            <Link to="/approvals" className="attention">
+            <Link to="/notifications?filter=approvals" className="attention">
               <span className="icon-tile icon-tile--warning" aria-hidden="true">
                 <Icon name="bell" />
               </span>
@@ -134,7 +134,7 @@ export function WaterQuestPage() {
 
           <div className="list">
             {today.data.pendingGoalProposal ? (
-              <Link to="/approvals" className="list__item">
+              <Link to="/notifications?filter=approvals" className="list__item">
                 <span className="icon-tile icon-tile--water" aria-hidden="true">
                   <Icon name="droplet" size={20} />
                 </span>

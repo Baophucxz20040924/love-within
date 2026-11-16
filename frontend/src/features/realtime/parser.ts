@@ -2,7 +2,7 @@ export const DOMAINS = [
   'account', 'couple', 'pairing', 'quests', 'wallet', 'water', 'market', 'proposals',
   'stories', 'story-unread', 'questions', 'events', 'letters', 'moods', 'bucket', 'moments', 'savings',
   'finance', 'assistant', 'friends', 'friend-posts', 'friend-events', 'friend-outings',
-  'friend-notifications', 'friend-profile',
+  'friend-notifications', 'friend-profile', 'couple-notifications', 'couple-notification-unread',
 ] as const;
 export type Domain = typeof DOMAINS[number];
 export type RealtimeEvent = { type: 'ready' | 'dirty' | 'access'; domains: Domain[] };

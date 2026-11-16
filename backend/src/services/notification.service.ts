@@ -7,6 +7,11 @@ import { friendBlockRepository } from '../repositories/friendSafety.repository.j
 import { logger } from '../utils/logger.js';
 import { pushService, type PushContent } from './push.service.js';
 import { realtimeAudience } from './realtimeAudience.service.js';
+import type { CoupleNotificationTarget } from '../models/CoupleNotification.js';
+import { coupleNotificationRepository } from '../repositories/coupleNotification.repository.js';
+import { coupleRepository } from '../repositories/couple.repository.js';
+import { userRepository } from '../repositories/user.repository.js';
+import { invalidateCoupleNotifications } from './coupleNotifications.service.js';
 
 const invalidateNotifications = (userId: Types.ObjectId) => realtimeAudience.own(userId.toString(), 'friends', ['friend-notifications']).catch(() => {});
 
@@ -31,12 +36,15 @@ export interface FriendsNotifyInput extends NotifyBase {
   push?: PushContent;
 }
 
-/** Couple app: nothing is stored (Home cards and the approvals bell cover it); push only. */
+/** Durable Love inbox first, optional push second. Origin and event identity must come from the saved source. */
 export interface CoupleNotifyInput extends NotifyBase {
   space: 'couple';
+  coupleId: Types.ObjectId;
   type: CoupleNotificationType;
-  /** Who did it (no self-push); null for timed reminders. */
   actorId: Types.ObjectId | null;
+  /** Stable per actual event, including comment IDs, reminder occurrence/slot, or lifecycle identity. */
+  eventKey: string;
+  target: CoupleNotificationTarget;
   push: PushContent;
 }
 
@@ -104,7 +112,7 @@ function friendsPush(n: FriendsNotifyInput): PushContent {
  * Single entry point for notifications (plan/OPERATIONS.md, N3 + N4).
  * - friends: stored for the notifications page (reactions and comments grouped per post), then pushed to the
  *   recipient's friends-space devices only.
- * - couple: nothing is stored; pushed to the recipient's couple-app devices only.
+ * - couple: an insert-only, couple-scoped event row is stored independently of push preferences/devices.
  * Never pushes to the actor themself, nor between two people who block each other. Push goes through the recipient's
  * settings (group switch, "Hiện nội dung", quiet hours) and is sent in the background.
  * Never throws: a failed notification must not fail the action that caused it.
@@ -115,8 +123,25 @@ export const notificationService = {
     const entityId = input.entityId ?? null;
 
     if (input.space === 'couple') {
-      const rule = COUPLE_PUSH_RULES[input.type];
-      pushService.enqueue({ userId: input.to, space: 'couple', group: rule.group, type: input.type, actorId: input.actorId, content: input.push, timed: rule.timed, urgent: rule.urgent });
+      try {
+        // Never infer origin from the recipient's *new* couple after unpair/re-pair.
+        const [couple, recipient] = await Promise.all([
+          coupleRepository.findActiveById(input.coupleId), userRepository.findById(input.to),
+        ]);
+        if (!couple || !recipient?.coupleId?.equals(input.coupleId) || !couple.memberIds.some((id) => id.equals(input.to)) ||
+            (input.actorId && !couple.memberIds.some((id) => id.equals(input.actorId!)))) return;
+        const inserted = await coupleNotificationRepository.addOnce({
+          userId: input.to, coupleId: input.coupleId, type: input.type, actorId: input.actorId,
+          entityId, eventKey: `${input.type}:${input.eventKey}`, target: input.target,
+        });
+        if (!inserted) return; // A retry neither resets state nor pushes again.
+        await invalidateCoupleNotifications(input.to);
+        const rule = COUPLE_PUSH_RULES[input.type];
+        pushService.enqueue({ userId: input.to, space: 'couple', group: rule.group, type: input.type, actorId: input.actorId, content: input.push, timed: rule.timed, urgent: rule.urgent });
+      } catch (err) {
+        // A saved photo / approval / monetary action must survive any inbox or push failure.
+        logger.warn('Couple notification not delivered', { userId: String(input.to), type: input.type, message: (err as Error).message });
+      }
       return;
     }
 
@@ -166,12 +191,17 @@ export const notificationService = {
   async toPartner(
     couple: CoupleDoc,
     actorId: string | Types.ObjectId,
-    n: { type: CoupleNotificationType; entityId?: Types.ObjectId | null; push: PushContent },
+    n: Pick<CoupleNotifyInput, 'type' | 'entityId' | 'eventKey' | 'target' | 'push'>,
   ): Promise<void> {
-    const actor = typeof actorId === 'string' ? new Types.ObjectId(actorId) : actorId;
-    const to = couple.memberIds.find((m) => !m.equals(actor));
-    if (!to) return;
-    await notificationService.emit({ space: 'couple', to, actorId: actor, type: n.type, entityId: n.entityId ?? null, push: n.push });
+    try {
+      const actor = typeof actorId === 'string' ? new Types.ObjectId(actorId) : actorId;
+      if (!couple.memberIds.some((id) => id.equals(actor))) return;
+      const to = couple.memberIds.find((m) => !m.equals(actor));
+      if (!to) return;
+      await notificationService.emit({ ...n, space: 'couple', coupleId: couple._id, to, actorId: actor });
+    } catch (err) {
+      logger.warn('Couple notification not delivered', { coupleId: String(couple._id), type: n.type, message: (err as Error).message });
+    }
   },
 
   /** Unfriend or block: forget what each of the two did for the other. */

@@ -154,6 +154,9 @@ test('one daily photo/member, same-day unlock and late pair gets neutral complet
   const h = harness();
   await h.momentService.post(couple, String(uid), h.input());
   assert.equal(h.calls.notification[0][2].push.expiresAt, '2026-11-15T09:30:00.000Z');
+  assert.equal(h.calls.notification[0][2].type, 'moment_posted');
+  assert.equal(h.calls.notification[0][2].eventKey, `${h.day._id}:s1:${uid}`);
+  assert.deepEqual(JSON.parse(JSON.stringify(h.calls.notification[0][2].target)), { kind:'moment', dayId:String(h.day._id), localDate:'2026-11-15', sessionId:'s1' });
   await rejectsCode(h.momentService.post(couple, String(uid), h.input()), 'MOMENT_ALREADY_POSTED');
   const hidden = await h.momentService.today(couple, String(partner));
   assert.equal(hidden.sessions[0].partner.photo, null);
@@ -267,6 +270,9 @@ test('scheduler sends only CAS winner, uses reward expiry and skips delayed invi
   }, { Date: h.Clock });
   await Promise.all([job.run(new Date('2026-11-15T09:08Z')),job.run(new Date('2026-11-15T09:08Z'))]);
   assert.equal(calls.length,2); assert.equal(calls[0].push.expiresAt,'2026-11-15T09:30:00.000Z');
+  assert.equal(calls[0].coupleId,cid); assert.equal(calls[0].eventKey,`${h.day._id}:s1`);
+  assert.deepEqual(calls.map(c=>String(c.to)).sort(),[String(uid),String(partner)].sort());
+  assert.deepEqual(JSON.parse(JSON.stringify(calls[0].target)),{kind:'moment',dayId:String(h.day._id),localDate:'2026-11-15',sessionId:'s1'});
   assert.ok(calls[0].push.url.includes('session=s1')); assert.ok(PROMPT_BODY.includes('40 Xu')); assert.ok(!PROMPT_BODY.includes('30 phút'));
   claimed = false; h.setClock('2026-11-15T09:30Z'); await job.run(new Date('2026-11-15T09:29Z')); assert.equal(calls.length, 2);
 });

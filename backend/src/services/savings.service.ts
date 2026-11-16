@@ -83,7 +83,8 @@ export async function reconcileSavingsGoal(ctx: SavingsWriteContext, goal: Savin
         goal = claimed;
         if (notify) ctx.afterRelease.push(async () => {
           await Promise.all(ctx.couple.memberIds.map((to) => notificationService.emit({
-            space: 'couple', to, type: 'savings_reached', actorId: null, entityId: goal._id,
+            space: 'couple', coupleId: ctx.couple._id, to, type: 'savings_reached', actorId: null, entityId: goal._id,
+            eventKey: String(goal._id), target: { kind: 'savings', id: String(goal._id) },
             push: { body: `Quỹ “${goal.title}” đã đạt mục tiêu!`, url: `/savings/${goal.id}`, tag: `savings:${goal.id}` },
           })));
         });

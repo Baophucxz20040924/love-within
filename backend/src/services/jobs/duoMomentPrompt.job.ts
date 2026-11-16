@@ -55,7 +55,9 @@ async function announceDue(now: Date): Promise<number> {
     for (const to of couple.memberIds) {
       if (posted.has(to.toString()) || !session.rewardEndsAt || new Date() >= session.rewardEndsAt) continue;
       await notificationService.emit({
-        space: 'couple',
+        space: 'couple', coupleId: m.coupleId,
+        eventKey: `${m._id}:${sessionId}`,
+        target: { kind: 'moment', dayId: String(m._id), localDate: m.localDate, sessionId },
         to,
         actorId: null,
         type: 'moment_prompt',

@@ -14,6 +14,8 @@ const map: Record<Domain, readonly QueryKey[]> = {
   proposals: [['proposals'], ['couple'], ['water'], ['savings'], ['quests']],
   stories: [['stories'], ['couple']],
   'story-unread': [['stories', 'unread']],
+  'couple-notifications': [['couple-notifications']],
+  'couple-notification-unread': [['couple-notification-unread']],
   questions: [['questions'], ['quests'], ['couple']],
   events: [['events'], ['couple']],
   letters: [['letters'], ['couple']],

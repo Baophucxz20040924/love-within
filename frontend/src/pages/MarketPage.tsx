@@ -109,7 +109,7 @@ export function MarketPage() {
           <p className="text-sm text-muted">Món bạn đăng là phần thưởng bạn sẽ thực hiện cho {partnerName}. Chỉ {partnerName} đổi được.</p>
 
           {incomingMarket > 0 && (
-            <Link to="/approvals" className="attention">
+            <Link to="/notifications?filter=approvals" className="attention">
               <span className="icon-tile icon-tile--warning" aria-hidden="true">
                 <Icon name="bell" />
               </span>

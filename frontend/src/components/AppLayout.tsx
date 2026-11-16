@@ -3,12 +3,13 @@ import { Outlet } from 'react-router-dom';
 import { BottomNav } from './BottomNav';
 import { Loading } from './StatusViews';
 import { prefetchPages } from '../app/lazyPages';
-import { useApprovalSignals, useApprovals } from '../features/approvals/useApprovals';
+import { useApprovalSignals } from '../features/approvals/useApprovals';
+import { useCoupleNotificationUnread } from '../features/notifications/useCoupleNotifications';
 
 /** Mobile-first shell: page content + fixed bottom navigation. */
 export function AppLayout() {
-  const { count } = useApprovals();
-  useApprovalSignals(count);
+  const { data } = useCoupleNotificationUnread();
+  useApprovalSignals(data?.notifications ?? 0, 'Love Within', data?.notificationsSaturated ?? false);
 
   // Once the first screen is up, fetch the other pages' code while the browser is idle.
   useEffect(() => {

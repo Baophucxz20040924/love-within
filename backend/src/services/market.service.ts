@@ -140,7 +140,8 @@ async function recoverUnsettled(couple: CoupleDoc): Promise<void> {
 /** The seller answered: tell the buyer (never the response note). */
 function notifyAnswered(r: MarketRedemptionDoc, body: (name: string) => string): Promise<void> {
   return notificationService.emit({
-    space: 'couple',
+    space: 'couple', coupleId: r.coupleId,
+    eventKey: `${r._id}:${r.status}`, target: { kind: 'approval', category: 'redemption', id: String(r._id) },
     to: r.buyerUserId,
     actorId: r.sellerUserId,
     type: 'redemption_answered',
@@ -234,6 +235,7 @@ export const marketService = {
     }
     const result = await finishRequest(couple, userId, red);
     await notificationService.toPartner(couple, buyer, { type: 'redemption_requested', entityId: red._id,
+      eventKey: String(red._id), target: { kind: 'approval', category: 'redemption', id: String(red._id) },
       push: { body: (name) => `${name} muốn đổi ${item.emoji} ${item.title} (${numberVi.format(item.priceCoin)} Xu), chờ bạn trả lời`,
         url: '/approvals', tag: `redemption:${red._id}` } });
     return result;

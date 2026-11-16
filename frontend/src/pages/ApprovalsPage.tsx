@@ -1,4 +1,4 @@
-import { EmptyState, ErrorState, Page, Skeleton } from '../components/StatusViews';
+import { EmptyState, ErrorState, Skeleton } from '../components/StatusViews';
 import { useAuth } from '../features/auth/AuthContext';
 import { approvalKey, useApprovals, type ApprovalItem } from '../features/approvals/useApprovals';
 import { ProposalApprovalCard, WaterApprovalCard } from '../features/approvals/ApprovalCards';
@@ -11,7 +11,7 @@ function Item({ item, mode }: { item: ApprovalItem; mode: 'incoming' | 'outgoing
   return <ProposalApprovalCard proposal={item.proposal} mode={mode} />;
 }
 
-/** /approvals — the couple's inbox: what needs my approval and what waits on my partner. */
+/** Authoritative pending approvals, independent of notification read state. */
 export function ApprovalsPage() {
   const { me } = useAuth();
   const partner = me?.couple?.members.find((m) => m.id !== me.user.id);
@@ -19,7 +19,7 @@ export function ApprovalsPage() {
   const { incoming, outgoing, isLoading, isError, refetch } = useApprovals();
 
   return (
-    <Page title="Cần duyệt" back="/">
+    <>
       {isLoading && <Skeleton height={260} count={2} />}
       {isError && <ErrorState onRetry={() => void refetch()} />}
       {!isLoading && !isError && (
@@ -53,6 +53,6 @@ export function ApprovalsPage() {
           )}
         </>
       )}
-    </Page>
+    </>
   );
 }

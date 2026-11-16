@@ -252,7 +252,8 @@ export const eventService = {
     // Owner decision (10/11/2026): no dual approval, the partner is told. Date = the next occurrence.
     await notificationService.toPartner(couple, uid, {
       type: 'event_created',
-      entityId: doc._id,
+      entityId: doc._id, eventKey: String(doc._id),
+      target: { kind: 'event', id: String(doc._id) },
       push: {
         body: (name) => `${name} đã thêm sự kiện “${doc.title}” (${formatDayVi(view.nextDate)})`,
         url: '/events',

@@ -14,6 +14,20 @@ let phase: Phase = tokenStore.get() ? 'loading' : 'ready';
 let discard = Boolean(tokenStore.get());
 let version = 0;
 let flight = 0;
+let active = false;
+/** Personal shell lifetime. Stored account credentials must be inert in the separate admin shell. */
+export function activateAppLock(): () => void {
+  if (!active) { active = true; resetAppLock(); }
+  return () => {
+    active = false;
+    epoch += 1; flight += 1;
+    passwordGrant = null; reentry = null; absent = false; enteredSpace = null; settings = null;
+    phase = 'ready'; discard = false;
+    boot.protected = false;
+    setAppMask('lock', false);
+    document.documentElement.removeAttribute('data-app-shield');
+  };
+}
 let passwordGrant: { generation: string; epoch: number; space: Space } | null = null;
 const REENTRY_MS = 10_000;
 interface ReentryGrant { generation: string; space: Space; revision: number; wall: number; monotonic: number }
@@ -37,6 +51,7 @@ export function isAppLocked(): boolean { return phase !== 'ready'; }
 export function isAppLockCurrent(value: number): boolean { return epoch === value && !isAppLocked() && document.visibilityState === 'visible'; }
 export function isAuthAttemptCurrent(value: number): boolean { return epoch === value && document.visibilityState === 'visible'; }
 function presentation() {
+  if (!active) return;
   document.title = isAppLocked() ? 'Love Within' : title;
   if (friendsTheme && !isAppLocked()) document.documentElement.dataset.theme = 'friends';
   else delete document.documentElement.dataset.theme;
@@ -46,6 +61,7 @@ function presentation() {
 export function setAppTitle(value: string): void { title = value; presentation(); }
 export function setAppTheme(value: boolean): void { friendsTheme = value; presentation(); }
 function publish() {
+  if (!active) return;
   boot.protected = Boolean(tokenStore.get());
   setAppMask('lock', isAppLocked());
   presentation();
@@ -68,6 +84,7 @@ export async function refreshLockSettings(preserveEntry = true): Promise<void> {
   await checkLockSettings(preserveEntry);
 }
 async function checkLockSettings(preserveEntry: boolean, grant: ReentryGrant | null = null): Promise<void> {
+  if (!active) return;
   const id = ++flight, currentGeneration = tokenStore.generation(), expected = epoch, target = spaceStore.get();
   if (!tokenStore.get()) { resetAppLock(); return; }
   const old = settings;
@@ -124,6 +141,7 @@ export function notifyLockSettingsChanged(): void {
   localStorage.setItem('lw.lockSettingsChanged', crypto.randomUUID());
 }
 function conceal(event: Event) {
+  if (!active) return;
   const restoring = (event as CustomEvent<string>).detail === 'restore';
   if (restoring) reentry = null;
   if (!absent && !restoring && phase === 'ready' && !discard && settings && enteredSpace === spaceStore.get() && tokenStore.isCurrent(generation)) {
@@ -140,6 +158,7 @@ function conceal(event: Event) {
   publish();
 }
 function resume() {
+  if (!active) return;
   if (document.visibilityState !== 'visible') return;
   if (!tokenStore.get()) { reentry = null; absent = false; return; }
   const grant = reentry && withinGrace(reentry) ? reentry : null;
@@ -156,6 +175,7 @@ window.addEventListener('lw:app-lock', conceal);
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') resume(); });
 window.addEventListener('pageshow', event => { if (event.persisted) resume(); });
 window.addEventListener('storage', event => {
+  if (!active) return;
   if (event.key === null || (event.key && tokenStore.isSessionKey(event.key) && generation !== tokenStore.generation())) { resetAppLock(); void refreshLockSettings(false); }
   else if (event.key === 'lw.lockSettingsChanged' || (event.key && spaceStore.isSpaceKey(event.key))) lockForNavigation();
 });

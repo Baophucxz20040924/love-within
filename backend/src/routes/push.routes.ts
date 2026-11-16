@@ -61,7 +61,7 @@ pushRouter.post(
   '/subscriptions',
   pushSubscribeLimiter,
   validate({ body: subscribeSchema }),
-  asyncHandler(async (req, res) => ok(res, await pushService.subscribe(req.userId!, req.body, req.headers['user-agent']), 201)),
+  asyncHandler(async (req, res) => ok(res, await pushService.subscribe(req.userId!, req.body, req.headers['user-agent'], req.credentialVersion!), 201)),
 );
 
 /** DELETE /api/push/subscriptions { endpoint } — logout / switch off; only the caller's own device. */

@@ -29,7 +29,9 @@ export async function deliverLetterReady(letter: CoupleLetterDoc): Promise<void>
   logger.debug('Letter ready to open', ids);
   const id = letter._id.toString();
   await notificationService.emit({
-    space: 'couple',
+    space: 'couple', coupleId: letter.coupleId,
+    eventKey: `${letter._id}:${letter.openAt.toISOString()}:${letter.readyNotifiedAt!.toISOString()}`,
+    target: { kind: 'letter', id },
     to: letter.recipientId,
     actorId: letter.authorId,
     type: 'letter_ready',

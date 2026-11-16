@@ -88,7 +88,8 @@ export const nudgeService = {
     const sentToday = earlierToday + 1;
     await notificationService.toPartner(couple, me, {
       type: 'nudge',
-      entityId: doc._id,
+      entityId: doc._id, eventKey: String(doc._id),
+      target: { kind: 'nudge', id: String(doc._id) },
       push: { body: nudgePushBody(kind, sentToday), url: '/', tag: 'nudge' },
     });
     logger.debug('Nudge sent', { coupleId: couple._id.toString(), userId, kind, sentToday });

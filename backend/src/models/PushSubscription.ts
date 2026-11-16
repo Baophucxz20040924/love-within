@@ -11,6 +11,7 @@ export type PushSpace = (typeof PUSH_SPACES)[number];
 export interface PushSubscriptionDoc extends Document {
   _id: Types.ObjectId;
   userId: Types.ObjectId;
+  credentialVersion: number;
   /** Legacy metadata only; not written for new subscriptions. */
   space?: PushSpace;
   /** Push service URL of the device; a capability, never logged or returned. */
@@ -28,6 +29,7 @@ export interface PushSubscriptionDoc extends Document {
 const pushSubscriptionSchema = new Schema<PushSubscriptionDoc>(
   {
     userId: { type: Schema.Types.ObjectId, ref: 'User', required: true },
+    credentialVersion: { type: Number, default: 0, min: 0 },
     space: { type: String, enum: PUSH_SPACES },
     endpoint: { type: String, required: true },
     keys: {

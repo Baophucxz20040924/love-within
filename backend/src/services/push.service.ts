@@ -9,6 +9,7 @@ import { userRepository } from '../repositories/user.repository.js';
 import { getLocalTime } from '../utils/date.js';
 import { AppError } from '../utils/errors.js';
 import { logger } from '../utils/logger.js';
+import { credentialService } from './credential.service.js';
 
 // Web Push (plan/OPERATIONS.md, N4). Services never call this directly: notificationService.emit() is the single entry
 // point and passes the push here. Sending runs in the background (not awaited by the request or the job), so a slow or
@@ -175,6 +176,11 @@ export function pushTtl(expiresAt: string | undefined, defaultTtl: number, now =
   return Math.max(0, Math.floor((end - now) / 1000));
 }
 async function sendOne(sub: PushSubscriptionRow, payload: string, opts: PushSendOptions, ctx: { userId: string; type: string }, stats: SendStats, expiresAt?: string): Promise<void> {
+  // A saved endpoint belongs to the credential generation that registered it.
+  // Recheck for each device, including later batches after a password reset.
+  if (!sub.userId || sub.userId.toString() !== ctx.userId) return;
+  try { await credentialService.assertApp(ctx.userId, sub.credentialVersion ?? 0); }
+  catch { return; }
   const ttlSec = pushTtl(expiresAt, opts.ttlSec);
   if (ttlSec === null) return;
   opts = { ...opts, ttlSec };
@@ -304,12 +310,13 @@ export const pushService = {
   },
 
   /** Save this device account-wide. Legacy `space` input is accepted but ignored. */
-  async subscribe(userId: string, input: { endpoint: string; keys: { p256dh: string; auth: string }; space?: PushSpace }, userAgent: string | undefined) {
+  async subscribe(userId: string, input: { endpoint: string; keys: { p256dh: string; auth: string }; space?: PushSpace }, userAgent: string | undefined, credentialVersion: number) {
     if (!getPush().enabled) throw disabled();
     if (!isPushEndpoint(input.endpoint)) throw new AppError(400, 'BAD_ENDPOINT', 'Địa chỉ nhận thông báo không hợp lệ');
     const uid = new Types.ObjectId(userId);
     const device = shortUserAgent(userAgent);
-    await pushSubscriptionRepository.upsert({ userId: uid, endpoint: input.endpoint, keys: input.keys, userAgent: device });
+    await credentialService.assertApp(userId, credentialVersion);
+    await pushSubscriptionRepository.upsert({ userId: uid, credentialVersion, endpoint: input.endpoint, keys: input.keys, userAgent: device });
     const pruned = await pushSubscriptionRepository.pruneOldest(uid, MAX_DEVICES);
     logger.info('Push device saved', { userId, device, pruned });
     return { device };
@@ -357,6 +364,7 @@ export const pushService = {
     const stats = await sendToAll([sub], payload, { ttlSec: 600, urgency: 'normal' }, { userId, type: 'test' });
     if (stats.gone) throw new AppError(410, 'PUSH_GONE', 'Máy này không còn nhận được thông báo. Hãy bật lại.');
     if (stats.failed) throw new AppError(502, 'PUSH_FAILED', 'Chưa gửi được thông báo thử, thử lại sau nhé.');
+    if (!stats.ok) throw new AppError(409, 'PUSH_STALE', 'Hãy đăng nhập và bật lại thông báo trên máy này.');
     return { sent: true };
   },
 };

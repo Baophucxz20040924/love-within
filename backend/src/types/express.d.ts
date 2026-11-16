@@ -9,6 +9,10 @@ declare global {
       userId?: string;
       /** Verified effective access token deadline. */
       accessExpiresAtMs?: number;
+      /** Credential snapshot verified against User; never replace with a later version. */
+      credentialVersion?: number;
+      /** Admin and app tokens are deliberately not interchangeable. */
+      authKind?: 'app' | 'admin';
       /** Couple id for the authenticated user (set by requireCouple). */
       coupleId?: Types.ObjectId;
       /** Active couple document (set by requireCouple). */

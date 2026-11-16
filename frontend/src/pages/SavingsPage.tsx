@@ -18,7 +18,7 @@ export function SavingsPage() {
   const items = list.data?.pages.flatMap(page => page.items) ?? [];
   return <Page title="Quỹ chung" subtitle="Cùng góp cho điều hai bạn mong muốn" back="/finance">
     <p className="text-sm text-muted">App chỉ ghi lại, không giữ hay chuyển tiền. Không cần liên kết ngân hàng để góp thủ công.</p>
-    <div className="btn-row"><Link to="/approvals" className="btn btn-outline">Cần duyệt</Link><button type="button" className="btn btn-primary" onClick={() => setCreating(true)}><Icon name="plus" size={18} /> Tạo quỹ</button></div>
+    <div className="btn-row"><Link to="/notifications?filter=approvals" className="btn btn-outline">Cần duyệt</Link><button type="button" className="btn btn-primary" onClick={() => setCreating(true)}><Icon name="plus" size={18} /> Tạo quỹ</button></div>
     {suggestion.data?.suggestion && <aside className="card stack" aria-label="Gợi ý riêng cho bạn">
       <p className="card__title">Gợi ý riêng cho bạn</p>
       <p>{suggestion.data.suggestion.message}</p>

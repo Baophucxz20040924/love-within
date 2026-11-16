@@ -143,7 +143,8 @@ export async function deliverEventReminder(r: EventReminder): Promise<void> {
   const body = reminderBody(r);
   const entityId = !r.auto && Types.ObjectId.isValid(r.eventId) ? new Types.ObjectId(r.eventId) : null;
   for (const to of r.memberIds) {
-    await notificationService.emit({ space: 'couple', to, actorId: null, type: 'event_reminder', entityId, push: { body, url: '/events', tag: `event:${r.eventId}` } });
+    await notificationService.emit({ space: 'couple', coupleId: r.coupleId, to, actorId: null, type: 'event_reminder', entityId,
+      eventKey: r.key, target: { kind: 'event', id: r.eventId }, push: { body, url: '/events', tag: `event:${r.eventId}` } });
   }
 }
 

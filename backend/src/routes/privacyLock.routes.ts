@@ -34,6 +34,6 @@ privacyLockRouter.get('/', asyncHandler(async (req, res) => ok(res, await privac
 privacyLockRouter.post('/unlock', workLimiter, validate({ body: unlockBody }), asyncHandler(async (req, res) =>
   ok(res, await privacyLockService.unlock(req.userId!, req.body.pin))));
 privacyLockRouter.put('/:space', workLimiter, validate({ params, body: putBody }), asyncHandler(async (req, res) =>
-  ok(res, await privacyLockService.configure(req.userId!, space.parse(req.params.space), req.body.password, req.body.revision, req.body.pin))));
+  ok(res, await privacyLockService.configure(req.userId!, space.parse(req.params.space), req.body.password, req.body.revision, req.body.pin, req.credentialVersion!))));
 privacyLockRouter.delete('/:space', workLimiter, validate({ params, body: deleteBody }), asyncHandler(async (req, res) =>
-  ok(res, await privacyLockService.configure(req.userId!, space.parse(req.params.space), req.body.password, req.body.revision))));
+  ok(res, await privacyLockService.configure(req.userId!, space.parse(req.params.space), req.body.password, req.body.revision, undefined, req.credentialVersion!))));

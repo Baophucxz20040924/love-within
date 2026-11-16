@@ -205,6 +205,8 @@ export const momentService = {
     if (both || (savedPost.postedAt < rewardEndsAt && new Date() < rewardEndsAt)) {
       await notificationService.toPartner(couple, uid, {
         type: both ? 'moment_both' : 'moment_posted', entityId: updated._id,
+        eventKey: `${updated._id}:${s.id}:${uid}`,
+        target: { kind: 'moment', dayId: String(updated._id), localDate: m.localDate, sessionId: s.id },
         push: { body: both ? (name) => `${name} cũng đã chụp Khoảnh khắc. Xem ảnh của hai bạn` : (name) => `${name} đã chụp Khoảnh khắc. Chụp trước hạn thưởng để cùng nhận 40 Xu!`,
           url: `/moments?date=${m.localDate}&session=${s.id}`, tag: `moment:${m.localDate}:${s.id}`, expiresAt: both ? undefined : rewardEndsAt.toISOString() },
       });
@@ -231,7 +233,8 @@ export const momentService = {
       throw new AppError(409, 'MOMENT_STORY_EXISTS', 'Khoảnh khắc này đã có trên Story rồi.');
     }
     await realtimeAudience.couple(couple._id, ['moments']);
-    await notificationService.toPartner(couple, uid, { type: 'couple_story', entityId: new Types.ObjectId(story.id), push: {
+    await notificationService.toPartner(couple, uid, { type: 'couple_story', entityId: new Types.ObjectId(story.id),
+      eventKey: story.id, target: { kind: 'story', id: story.id }, push: {
       body: (name) => `${name} đã đăng Khoảnh khắc ngày ${formatDayVi(m.localDate)} lên Story`, url: `/stories/${story.id}`, tag: `story:${story.id}`,
     } });
     return { moment: (await viewsOf(couple, [linked], userId, new Date()))[0], story };

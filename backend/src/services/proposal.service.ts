@@ -80,7 +80,8 @@ async function createSavings(couple: CoupleDoc, userId: string, kind: ProposalKi
     }
     ctx.dirty.add('proposals');
     ctx.afterRelease.push(() => notificationService.toPartner(ctx.couple, userId, {
-      type: 'proposal_created', entityId: doc._id,
+      type: 'proposal_created', entityId: doc._id, eventKey: String(doc._id),
+      target: { kind: 'approval', category: 'proposal', id: String(doc._id) },
       push: { body: (name) => `${name} đề xuất ${handler.summary?.(prepared) ?? 'thay đổi quỹ chung'}. Chờ bạn duyệt`, url: '/approvals', tag: `proposal:${doc.id}` },
     }));
     return toView(doc);
@@ -147,7 +148,8 @@ export const proposalService = {
     }
     await notificationService.toPartner(couple, userId, {
       type: 'proposal_created',
-      entityId: doc._id,
+      entityId: doc._id, eventKey: String(doc._id),
+      target: { kind: 'approval', category: 'proposal', id: String(doc._id) },
       push: {
         body: (name) => (what ? `${name} đề xuất đổi ${what}. Chờ bạn duyệt` : `${name} vừa gửi một đề xuất, chờ bạn duyệt`),
         url: '/approvals',

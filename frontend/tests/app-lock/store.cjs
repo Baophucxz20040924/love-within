@@ -93,6 +93,7 @@ function fixture({ space = 'couple', generation = 'session-a', token = 'token-a'
   window.__lwAppLock.epoch = epoch;
   const mask = load('mask.ts', { '../../hooks/useModal': { setModalPrivacyPause: value => modalPauses.push(value) } }, globals);
   const store = load('store.ts', { '../../lib/apiClient': { apiRequest, advanceAccessEpoch: () => accessEpochs.push(accessEpochs.length + 1) }, '../../lib/tokenStore': { tokenStore }, '../../lib/spaceStore': { spaceStore }, './mask': mask }, globals);
+  store.activateAppLock();
   return {
     store, mask, current, clock, document, window, root, app, entry, bootstrap, script, video, audio, themeMeta, modalPauses, writes, requests, accessEpochs, Element, Media,
     advance: (wall, monotonic = wall) => { clock.wall += wall; clock.monotonic += monotonic; },
@@ -515,6 +516,30 @@ for (const firstClear of ['lock', 'verification']) {
     for (const node of [f.app, host, late, later]) { assert.equal(node.style.getPropertyValue('display'), ''); assert.equal(node.inert, false); assert.equal(node.getAttribute('aria-hidden'), null); }
   });
 }
+
+test('leaving the personal shell makes stored credentials inert until reactivation', async () => {
+  const f = fixture();
+  const deactivate = f.store.activateAppLock();
+  await verified(f);
+  const pending = f.store.refreshLockSettings(false);
+  const stale = f.requests.shift();
+  deactivate();
+  assert.equal(f.current.token, 'token-a', 'admin does not erase the stored account token');
+  assert.equal(f.mask.isAppMasked(), false);
+  f.hide(); f.visible(); f.pageshow();
+  f.storage('lw.lockSettingsChanged');
+  f.current.generation = 'other-tab'; f.storage('session');
+  f.current.space = 'friends'; f.storage('space');
+  await f.store.refreshLockSettings(false);
+  assert.equal(f.requests.length, 0, 'no personal queries from admin lifecycle events');
+  stale.resolve(status(true, true)); await pending;
+  assert.equal(f.mask.isAppMasked(), false, 'a late personal response cannot mask the admin shell');
+  const stop = f.store.activateAppLock();
+  assert.equal(f.store.appLockState().phase, 'loading');
+  await initial(f, status(true, true));
+  assert.equal(f.store.appLockState().phase, 'locked', 'return to personal shell cannot reuse earlier PIN entry');
+  stop();
+});
 
 test('media is paused on masking and play while either reason remains', () => {
   const f = fixture({ token: null }); f.play(f.video); assert.equal(f.video.pauseCount, 0);

@@ -25,7 +25,8 @@ function harness() {
   const {pushService,pushTtl}=load('services/push.service.ts',{
     mongoose:{Types},'../config/notificationTypes.js':{COUPLE_PUSH_GROUPS:['moments'],FRIENDS_PUSH_GROUPS:[]},
     '../integrations/index.js':{getPush:()=>provider},'../models/User.js':{DEFAULT_PUSH_SETTINGS:settings},
-    '../repositories/pushSubscription.repository.js':{pushSubscriptionRepository:{listFor:(...a)=>lookup(...a),markSuccess:async()=>{},deleteById:async()=>{},incFail:async()=>0}},
+    '../repositories/pushSubscription.repository.js':{pushSubscriptionRepository:{listFor:async(userId,...args)=>(await lookup(userId,...args)).map(sub=>({...sub,userId,credentialVersion:0})),markSuccess:async()=>{},deleteById:async()=>{},incFail:async()=>0}},
+    './credential.service.js':{credentialService:{assertApp:async(userId,version)=>{assert.ok(Types.ObjectId.isValid(userId));assert.equal(version,0);}}},
     '../repositories/user.repository.js':{userRepository:{findPushProfile:async()=>({pushSettings:settings,timezone:'UTC'}),findDisplayNames:async()=>new Map()}},
     '../utils/date.js':{getLocalTime:()=> '09:00'},'../utils/errors.js':{AppError:Error},'../utils/logger.js':{logger:{debug(){},warn(){},info(){}}},
   },{Date:Clock});
@@ -62,17 +63,24 @@ test('backlogged invitation expires before dequeue; other notification TTL remai
   assert.equal(lookups,10);h.setNow('2026-11-15T09:30Z');gate.resolve();await h.drain();
   assert.equal(lookups,10);assert.equal(h.calls.length,10);assert.equal(h.calls[0].opts.ttlSec,14400);
 });
-test('notification service forwards optional expiry unmodified',async()=>{
-  const calls=[];
+test('notification service stores the event and forwards optional expiry unmodified',async()=>{
+  const calls=[], stored=[];
+  const to=new Types.ObjectId(), coupleId=new Types.ObjectId();
   const {notificationService}=load('services/notification.service.ts',{
     mongoose:{Types},'../config/notificationTypes.js':{COUPLE_PUSH_RULES:{moment_prompt:{group:'moments',timed:true}},FRIENDS_PUSH_RULES:{}},
     '../models/FriendNotification.js':{GROUPED_NOTIFICATION_TYPES:new Set(),OUTING_NOTIFICATION_TYPES:new Set(),SYSTEM_NOTIFICATION_TYPES:new Set()},
     '../repositories/friendNotification.repository.js':{friendNotificationRepository:{}},'../repositories/friendSafety.repository.js':{friendBlockRepository:{}},
     '../utils/logger.js':{logger:{warn(){}}},'./push.service.js':{pushService:{enqueue:job=>calls.push(job)}},
     './realtimeAudience.service.js':{realtimeAudience:{own:async()=>{}}},
+    '../repositories/coupleNotification.repository.js':{coupleNotificationRepository:{addOnce:async input=>{stored.push(input);return true;}}},
+    '../repositories/couple.repository.js':{coupleRepository:{findActiveById:async()=>({_id:coupleId,memberIds:[to]})}},
+    '../repositories/user.repository.js':{userRepository:{findById:async()=>({coupleId})}},
+    './coupleNotifications.service.js':{invalidateCoupleNotifications:async()=>{}},
   });
   const push={body:'capture',url:'/moments',expiresAt:'2026-11-15T09:30Z'};
-  await notificationService.emit({space:'couple',to:new Types.ObjectId(),actorId:null,type:'moment_prompt',push});
+  const target={kind:'moment',dayId:String(new Types.ObjectId()),localDate:'2026-11-15',sessionId:'session'};
+  await notificationService.emit({space:'couple',coupleId,to,actorId:null,type:'moment_prompt',eventKey:'day:session',target,push});
+  assert.equal(stored.length,1);assert.equal(stored[0].target,target);assert.equal(stored[0].push,undefined);
   assert.equal(calls[0].content,push);assert.equal(calls[0].content.expiresAt,push.expiresAt);
 });
 test('service worker drops delayed/invalid capture pushes, retains ordinary notifications',async()=>{

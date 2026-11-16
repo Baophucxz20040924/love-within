@@ -20,6 +20,9 @@ function safeContext(context?: LogContext): Record<string, unknown> {
       safe[key] = typeof value === 'number' && Number.isFinite(value) ? value : '[REDACTED]';
     } else if (typeof value === 'number' && Number.isFinite(value) || typeof value === 'boolean' || value === null) {
       safe[key] = value;
+    } else if ((key === 'actorId' || key === 'targetId') && typeof value === 'string' && /^[a-f\d]{24}$/i.test(value)) {
+      // Credential audit identifiers only; never arbitrary client text or private profile fields.
+      safe[key] = value;
     } else if (key === 'routeTemplate' && typeof value === 'string' && /^(?:unmatched|\/[a-zA-Z0-9_:/.-]*)$/.test(value) && value.length <= 150) {
       safe[key] = value;
     } else if (SAFE_STRING.test(key) && typeof value === 'string' && /^[a-zA-Z0-9_.:-]{1,100}$/.test(value)) {

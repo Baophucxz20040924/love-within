@@ -3,6 +3,7 @@ import bcrypt from 'bcryptjs';
 import { PrivacyLock } from '../models/PrivacyLock.js';
 import { User } from '../models/User.js';
 import { AppError, Errors } from '../utils/errors.js';
+import { credentialService } from './credential.service.js';
 
 export type PrivacySpace = 'couple' | 'friends';
 type Budget = 'unlockBudget' | 'reauthBudget';
@@ -71,13 +72,16 @@ async function complete(userId: string, budget: Budget, leaseId: string, revisio
   return result.modifiedCount === 1;
 }
 
-async function verifyPassword(userId: string, password: string): Promise<void> {
+async function verifyPassword(userId: string, password: string, credentialVersion: number): Promise<void> {
   const { row, leaseId } = await reserve(userId, 'reauthBudget');
-  const user = await User.findById(userId).select('passwordHash').lean();
-  const valid = await bcrypt.compare(password, user?.passwordHash ?? await dummy());
-  const completed = await complete(userId, 'reauthBudget', leaseId, row.revision, !!user && valid);
+  const user = await User.findById(userId).select('passwordHash credentialVersion mustChangePassword role').lean();
+  const match = await bcrypt.compare(password, user?.passwordHash ?? await dummy());
+  const valid = !!user && match && !user.mustChangePassword && user.role !== 'admin' &&
+    (user.credentialVersion ?? 0) === credentialVersion;
+  const completed = await complete(userId, 'reauthBudget', leaseId, row.revision, valid);
   if (!completed) throw Errors.conflict('Cấu hình đã thay đổi, vui lòng tải lại.');
-  if (!user || !valid) throw new AppError(400, 'INVALID_PASSWORD', 'Mật khẩu không đúng.');
+  if (!valid) throw new AppError(400, 'INVALID_PASSWORD', 'Mật khẩu không đúng.');
+  await credentialService.assertApp(userId, credentialVersion);
 }
 
 export const privacyLockService = {
@@ -86,8 +90,8 @@ export const privacyLockService = {
     return { couple: row?.couple ?? false, friends: row?.friends ?? false, revision: row?.revision ?? 0 };
   },
 
-  async configure(userId: string, space: PrivacySpace, password: string, revision: number, pin?: string) {
-    await verifyPassword(userId, password);
+  async configure(userId: string, space: PrivacySpace, password: string, revision: number, pin: string | undefined, credentialVersion: number) {
+    await verifyPassword(userId, password, credentialVersion);
     const row = await PrivacyLock.findOne({ userId }).select('+coupleHash +friendsHash').lean();
     if (!row || row.revision !== revision) throw Errors.conflict('Cấu hình đã thay đổi, vui lòng tải lại.');
     if (pin !== undefined && space === 'friends') {
@@ -102,6 +106,7 @@ export const privacyLockService = {
       }
       hash = await bcrypt.hash(pin, ROUNDS);
     }
+    await credentialService.assertApp(userId, credentialVersion);
     const result = await PrivacyLock.updateOne({ userId, revision }, { $set: {
       [space]: pin !== undefined,
       [`${space}Hash`]: hash,

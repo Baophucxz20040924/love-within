@@ -68,7 +68,7 @@ export function SavingsDetailPage() {
       {closed ? <p className="card text-sm" role="status">Quỹ đã đóng, chỉ xem lại lịch sử. Không thể góp, rút hay xóa khoản.</p> : <>
         <div className="btn-row"><button type="button" className="btn btn-primary" onClick={() => setSheet('give')}>Góp tiền</button><button type="button" className="btn btn-outline" onClick={() => setSheet('withdraw')}>Rút tiền</button></div>
         <div className="savings-actions"><button type="button" className="btn btn-outline" disabled={pin.isPending} onClick={pinFromCurrentSession}>{goal.pinned ? 'Bỏ ghim' : 'Ghim lên Trang chủ'}</button><button type="button" className="btn btn-ghost" onClick={() => setSheet('update')}>Đổi mục tiêu / hạn</button><button type="button" className="btn btn-ghost" onClick={() => setSheet('close')}>Đóng quỹ</button></div>
-        <p className="text-sm text-muted">Đổi mục tiêu, hạn hoặc đóng quỹ cần cả hai đồng ý. <Link to="/approvals" className="text-link">Xem Cần duyệt</Link></p>
+        <p className="text-sm text-muted">Đổi mục tiêu, hạn hoặc đóng quỹ cần cả hai đồng ý. <Link to="/notifications?filter=approvals" className="text-link">Xem Cần duyệt</Link></p>
       </>}
       {goal.reachedAt && <section className="card stack" aria-label="Cột mốc của quỹ">
         <h2 className="card__title">Hai bạn đã từng chạm mục tiêu!</h2>

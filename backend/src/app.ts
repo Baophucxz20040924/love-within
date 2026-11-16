@@ -41,6 +41,8 @@ import { edgeLimiter } from './middleware/rateLimit.js';
 import { friendOutingRouter } from './routes/friendOuting.routes.js';
 import { registerFriendOutingNotifications } from './services/friendOutingNotifications.js';
 import { realtimeRouter } from './routes/realtime.routes.js';
+import { adminRouter } from './routes/admin.routes.js';
+import { coupleNotificationsRouter } from './routes/coupleNotifications.routes.js';
 
 export function createApp(): Express {
   // Validation errors are shown to users: give zod's built-in messages in Vietnamese (custom messages are unaffected).
@@ -72,6 +74,8 @@ export function createApp(): Express {
   // Routes
   app.use('/api', healthRouter);
   app.use('/api/auth', authRouter);
+  app.use('/api/admin', adminRouter);
+  app.use('/api/notifications', coupleNotificationsRouter);
   app.use('/api/realtime', realtimeRouter);
   app.use('/api/privacy-lock', privacyLockRouter);
   app.use('/api', meRouter);

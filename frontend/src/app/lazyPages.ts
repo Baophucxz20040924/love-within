@@ -8,7 +8,7 @@ const loaders = {
   pairing: () => import('../pages/PairingPage'),
   quests: () => import('../pages/QuestsPage'),
   water: () => import('../pages/WaterQuestPage'),
-  approvals: () => import('../pages/ApprovalsPage'),
+  notifications: () => import('../pages/CoupleNotificationsPage'),
   market: () => import('../pages/MarketPage'),
   profile: () => import('../pages/ProfilePage'),
   stories: () => import('../pages/StoriesPage'),
@@ -36,7 +36,9 @@ function page<K extends string, M extends Record<K, ComponentType>>(load: () => 
 export const PairingPage = page(loaders.pairing, 'PairingPage');
 export const QuestsPage = page(loaders.quests, 'QuestsPage');
 export const WaterQuestPage = page(loaders.water, 'WaterQuestPage');
-export const ApprovalsPage = page(loaders.approvals, 'ApprovalsPage');
+export const CoupleNotificationsPage = page(loaders.notifications, 'CoupleNotificationsPage');
+// Compatibility until the legacy route is replaced by the redirect.
+export const ApprovalsPage = page(() => import('../pages/ApprovalsPage'), 'ApprovalsPage');
 export const MarketPage = page(loaders.market, 'MarketPage');
 export const ProfilePage = page(loaders.profile, 'ProfilePage');
 export const StoriesPage = page(loaders.stories, 'StoriesPage');

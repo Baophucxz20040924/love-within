@@ -60,6 +60,10 @@ async function emissionTest() {
     '../repositories/friendSafety.repository.js': { friendBlockRepository: { isBlockedBetween: async () => blocked } },
     '../utils/logger.js': { logger: { warn() {} } }, './push.service.js': { pushService: { enqueue(j) { job = j; calls.push('push'); } } },
     './realtimeAudience.service.js': { realtimeAudience: { own: async () => calls.push('invalidate') } },
+    '../repositories/coupleNotification.repository.js': { coupleNotificationRepository: {} },
+    '../repositories/couple.repository.js': { coupleRepository: {} },
+    '../repositories/user.repository.js': { userRepository: {} },
+    './coupleNotifications.service.js': { invalidateCoupleNotifications: async () => {} },
   });
   const input = { space: 'friends', to: recipient, type: 'post_mention', actorId: author, entityId: post, push: { body: 'private content', url: '/wrong' } };
   await notificationService.emit(input);
@@ -81,17 +85,18 @@ async function preferencesTest() {
     mongoose: {}, '../config/notificationTypes.js': rules,
     '../integrations/index.js': { getPush: () => ({ enabled: true, send: async (_endpoint, payload) => { sent.push(JSON.parse(payload)); return { status: 'ok' }; } }) },
     '../models/User.js': { DEFAULT_PUSH_SETTINGS: defaults },
-    '../repositories/pushSubscription.repository.js': { pushSubscriptionRepository: { listFor: async () => [{ _id: id('device'), endpoint: 'mock', keys: {} }], markSuccess: async () => {} } },
+    '../repositories/pushSubscription.repository.js': { pushSubscriptionRepository: { listFor: async () => [{ _id: id('device'), userId: recipient, credentialVersion: 0, endpoint: 'mock', keys: {} }], markSuccess: async () => {} } },
     '../repositories/user.repository.js': { userRepository: { findPushProfile: async () => ({ pushSettings: { friends: { social, preview } } }), findDisplayNames: async () => new Map([['author', 'Lan']]) } },
+    './credential.service.js': { credentialService: { assertApp: async () => ({ credentialVersion: 0 }) } },
     '../utils/date.js': { getLocalTime: () => '12:00' }, '../utils/errors.js': { AppError: Error },
     '../utils/logger.js': { logger: { debug() {}, warn() {} } },
   });
   const job = { userId: recipient, space: 'friends', group: rules.FRIENDS_PUSH_RULES.post_mention.group, type: 'post_mention', actorId: author, content: { body: (name) => `${name} đã nhắc đến bạn trong một bài viết`, url: '/friends/posts/post' } };
   async function flush() { while (pushService.pendingCount()) await new Promise((resolve) => setImmediate(resolve)); }
   pushService.enqueue(job); await flush(); assert.equal(sent.length, 0, 'social preference suppresses push');
-  social = true; pushService.enqueue(job); await flush(); assert.equal(sent.length, 1); assert.equal(sent[0].url, '/friends/posts/post');
-  assert.equal(sent[0].body, 'Lan đã nhắc đến bạn trong một bài viết');
-  preview = false; pushService.enqueue(job); await flush(); assert.equal(sent[1].body, 'Bạn có thông báo mới'); assert.equal(sent[1].url, '/friends/notifications');
+  social = true; pushService.enqueue(job); await flush(); assert.equal(sent.length, 1); assert.equal(sent[0].url, '/');
+  assert.equal(sent[0].title, 'Love Within'); assert.equal(sent[0].body, 'Bạn có một thông báo mới');
+  preview = false; pushService.enqueue(job); await flush(); assert.equal(sent[1].body, 'Bạn có một thông báo mới'); assert.equal(sent[1].url, '/');
 }
 
 async function visibilityTest() {

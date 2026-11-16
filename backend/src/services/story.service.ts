@@ -269,7 +269,8 @@ export const storyService = {
     if (opts.notify !== false) {
       await notificationService.toPartner(couple, userId, {
         type: 'couple_story',
-        entityId: story._id,
+        entityId: story._id, eventKey: String(story._id),
+        target: { kind: 'story', id: String(story._id) },
         push: { body: (name) => `${name} vừa đăng một bài viết mới`, url: `/stories/${story._id.toString()}`, tag: `story:${story._id.toString()}` },
       });
     }
@@ -344,7 +345,8 @@ export const storyService = {
     const partnerIsAuthor = story.authorId.toString() !== userId;
     await notificationService.toPartner(couple, userId, {
       type: 'couple_comment',
-      entityId: story._id,
+      entityId: story._id, eventKey: String(comment._id),
+      target: { kind: 'story', id: String(story._id), commentId: String(comment._id) },
       push: {
         body: (name) => (partnerIsAuthor ? `${name} đã bình luận về bài viết của bạn` : `${name} đã bình luận thêm trong bài viết của mình`),
         url: `/stories/${story._id.toString()}`,

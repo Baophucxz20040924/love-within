@@ -19,8 +19,10 @@ export function RealtimeSync() {
   const userId = me?.user.id;
 
   useLayoutEffect(() => {
+    let active = true;
     let previous = eligible;
     const update = () => {
+      if (!active) return;
       const next = document.visibilityState === 'visible' && navigator.onLine;
       if (next === previous) return;
       previous = next;
@@ -33,6 +35,7 @@ export function RealtimeSync() {
     window.addEventListener('online', update);
     window.addEventListener('offline', update);
     return () => {
+      active = false;
       document.removeEventListener('visibilitychange', update);
       window.removeEventListener('online', update);
       window.removeEventListener('offline', update);
@@ -40,8 +43,11 @@ export function RealtimeSync() {
   }, [eligible, generation, isAuthenticated, userId]);
 
   useLayoutEffect(() => {
-    if (!isAuthenticated || !userId || !tokenStore.get()) { setVerification('clear'); return; }
-    if (locked || !eligible) { setVerification('checking'); return; }
+    // Every branch owns the document-level verification mask, including paused sessions.
+    // Cleanup runs before a replacement effect; an admin shell must never inherit this mask.
+    const clearVerification = () => setVerification('clear');
+    if (!isAuthenticated || !userId || !tokenStore.get()) { clearVerification(); return clearVerification; }
+    if (locked || !eligible) { setVerification('checking'); return clearVerification; }
     let active = true;
     let verificationId = 0;
     let verifying = false;
@@ -94,7 +100,12 @@ export function RealtimeSync() {
     // Resume/online resync does not depend on the streaming endpoint being reachable.
     reconcileAccess();
     stream.start();
-    return () => { active = false; verificationId++; if (retryTimer !== undefined) clearTimeout(retryTimer); batch.clear(); stream.stop(); };
+    return () => {
+      active = false; verificationId++;
+      if (retryTimer !== undefined) clearTimeout(retryTimer);
+      batch.clear(); stream.stop();
+      clearVerification();
+    };
   }, [eligible, locked, resumeVersion, generation, isAuthenticated, qc, refreshMe, revokeMe, verifyMe, space, userId]);
   return null;
 }

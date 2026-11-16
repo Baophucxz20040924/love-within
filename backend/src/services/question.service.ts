@@ -273,7 +273,8 @@ export const questionService = {
       const day = q.localDate === localDate ? 'câu hỏi hôm nay' : `câu hỏi ngày ${formatDayVi(q.localDate)}`;
       await notificationService.toPartner(couple, uid, {
         type: lockedNow ? 'question_both' : 'question_answered',
-        entityId: q._id,
+        entityId: q._id, eventKey: String(mine._id),
+        target: { kind: 'question', id: String(q._id) },
         push: {
           body: (name) => (lockedNow ? `${name} cũng đã trả lời ${day}. Xem câu trả lời của hai bạn` : `${name} đã trả lời ${day}. Đến lượt bạn!`),
           url: `/questions/${q._id.toString()}`,

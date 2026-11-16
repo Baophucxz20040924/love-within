@@ -21,7 +21,7 @@ realtimeRouter.get('/', requireAuth, async (req, res, next) => {
       'Cache-Control': 'no-store, no-transform',
       'X-Accel-Buffering': 'no',
     });
-    if (!realtimeService.subscribe(req.userId!, space as RealtimeSpace, res, req.accessExpiresAtMs!)) {
+    if (!realtimeService.subscribe(req.userId!, req.credentialVersion!, space as RealtimeSpace, res, req.accessExpiresAtMs!)) {
       res.removeHeader('Content-Type');
       res.set('Retry-After', '10');
       throw new AppError(429, 'REALTIME_LIMIT', 'Realtime connection limit reached');

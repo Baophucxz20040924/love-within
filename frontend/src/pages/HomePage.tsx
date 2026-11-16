@@ -202,7 +202,7 @@ export function HomePage() {
       {couple.data && <Hero couple={couple.data} myId={me?.user.id} pulse={pulse.data} />}
 
       {count > 0 && (
-        <Link to="/approvals" className="attention">
+        <Link to="/notifications?filter=approvals" className="attention">
           <span className="icon-tile icon-tile--warning" aria-hidden="true">
             <Icon name="bell" />
           </span>

@@ -1,13 +1,74 @@
 import { Types } from 'mongoose';
 import { User, type FinanceVisibility, type PushSettings, type UserDoc } from '../models/User.js';
 
+/** Missing pre-migration version is exactly zero, never a wildcard after a rotation. */
+function versionFilter(expected: number) {
+  if (!Number.isSafeInteger(expected) || expected < 0 || expected >= Number.MAX_SAFE_INTEGER) {
+    throw new Error('Invalid credential version');
+  }
+  return expected === 0
+    ? { $or: [{ credentialVersion: 0 }, { credentialVersion: { $exists: false } }] }
+    : { credentialVersion: expected };
+}
+
 export const userRepository = {
+  findCredentialsById(id: string | Types.ObjectId) {
+    return User.findById(id)
+      .select('_id email passwordHash role credentialVersion mustChangePassword temporaryPasswordExpiresAt')
+      .lean<Pick<UserDoc, '_id' | 'email' | 'passwordHash' | 'role' | 'credentialVersion' | 'mustChangePassword' | 'temporaryPasswordExpiresAt'>>()
+      .exec();
+  },
+
+  /** Atomic compare-and-swap: two administrators cannot silently reset the same observed version. */
+  resetPassword(id: string, expectedVersion: number, passwordHash: string, expiresAt: Date): Promise<UserDoc | null> {
+    return User.findOneAndUpdate({
+      _id: id,
+      email: { $ne: 'admin@phucxz.com' },
+      $and: [versionFilter(expectedVersion), { $or: [{ role: 'user' }, { role: { $exists: false } }] }],
+    }, {
+      $set: { passwordHash, credentialVersion: expectedVersion + 1, mustChangePassword: true, temporaryPasswordExpiresAt: expiresAt },
+    }, { new: true, runValidators: true }).exec();
+  },
+
+  completePasswordChange(id: string, expectedVersion: number, temporaryExpiresAt: Date, passwordHash: string, grantExpiresAt: Date): Promise<UserDoc | null> {
+    return User.findOneAndUpdate({
+      _id: id,
+      email: { $ne: 'admin@phucxz.com' },
+      mustChangePassword: true,
+      temporaryPasswordExpiresAt: temporaryExpiresAt,
+      // Checked on the database at commit time too, not only before slow bcrypt work.
+      $expr: { $and: [
+        { $gt: ['$temporaryPasswordExpiresAt', '$$NOW'] },
+        { $gt: [{ $literal: grantExpiresAt }, '$$NOW'] },
+      ] },
+      $and: [versionFilter(expectedVersion), { $or: [{ role: 'user' }, { role: { $exists: false } }] }],
+    }, {
+      $set: { passwordHash, credentialVersion: expectedVersion + 1, mustChangePassword: false, temporaryPasswordExpiresAt: null },
+    }, { new: true, runValidators: true }).exec();
+  },
+
+  changeAdminPassword(id: string, expectedVersion: number, passwordHash: string): Promise<UserDoc | null> {
+    return User.findOneAndUpdate({
+      _id: id, role: 'admin', email: 'admin@phucxz.com',
+      mustChangePassword: { $ne: true }, temporaryPasswordExpiresAt: null,
+      ...versionFilter(expectedVersion),
+    }, {
+      $set: { passwordHash, credentialVersion: expectedVersion + 1 },
+    }, { new: true, runValidators: true }).exec();
+  },
   findById(id: string | Types.ObjectId): Promise<UserDoc | null> {
     return User.findById(id).exec();
   },
 
   findByEmail(email: string): Promise<UserDoc | null> {
     return User.findOne({ email: email.toLowerCase().trim() }).exec();
+  },
+
+  findRecoveryByEmail(email: string) {
+    return User.findOne({ email: email.toLowerCase().trim() })
+      .select('_id displayName email role credentialVersion mustChangePassword temporaryPasswordExpiresAt')
+      .lean<Pick<UserDoc, '_id' | 'displayName' | 'email' | 'role' | 'credentialVersion' | 'mustChangePassword' | 'temporaryPasswordExpiresAt'>>()
+      .exec();
   },
 
   /** id → displayName for a few users in one query (no password hash or other fields loaded). */

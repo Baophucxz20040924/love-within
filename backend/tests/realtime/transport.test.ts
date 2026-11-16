@@ -15,6 +15,12 @@ async function main() {
   const { createApp } = await import('../../src/app.js');
   const { userRepository } = await import('../../src/repositories/user.repository.js');
   const { tokenService } = await import('../../src/services/token.service.js');
+  const { credentialService } = await import('../../src/services/credential.service.js');
+  const { Errors } = await import('../../src/utils/errors.js');
+  credentialService.assertApp = async (id, version) => {
+    if (id === b || version !== 0) throw Errors.unauthorized();
+    return { _id: id, credentialVersion: 0, role: 'user', mustChangePassword: false } as never;
+  };
   const { realtimeService, assertSingleRealtimeProcess } = await import('../../src/services/realtime.service.js');
   userRepository.findById = async (id) => id.toString() === b ? null : ({ friendsJoinedAt: id.toString() === a ? new Date() : null } as never);
   const server = createApp().listen(0, '127.0.0.1');
@@ -43,7 +49,7 @@ async function main() {
     userRepository.findById = () => { lookupStarted(); return new Promise((resolve) => { release = resolve; }); };
     let registered = false;
     realtimeService.subscribe = (...args) => { registered = true; return originalSubscribe(...args); };
-    const aborted = request({ host: '127.0.0.1', port, path: '/api/realtime?space=couple', headers: { Authorization: `Bearer ${tokenService.signAccess(a)}` } });
+    const aborted = request({ host: '127.0.0.1', port, path: '/api/realtime?space=couple', headers: { Authorization: `Bearer ${tokenService.signAccess(a, 0)}` } });
     aborted.on('error', () => {}); aborted.end();
     await started; aborted.destroy();
     await new Promise((resolve) => setTimeout(resolve, 50));
@@ -54,9 +60,9 @@ async function main() {
     realtimeService.subscribe = originalSubscribe;
     assert.equal((await open('/api/realtime?space=couple')).statusCode, 401);
     assert.equal((await open('/api/realtime?space=couple', 'bad')).statusCode, 401);
-    assert.equal((await open('/api/realtime?space=other', tokenService.signAccess(a))).statusCode, 400);
-    assert.equal((await open('/api/realtime?space=couple', tokenService.signAccess(b))).statusCode, 401);
-    assert.equal((await open('/api/realtime?space=friends', tokenService.signAccess('333333333333333333333333'))).statusCode, 403);
+    assert.equal((await open('/api/realtime?space=other', tokenService.signAccess(a, 0))).statusCode, 400);
+    assert.equal((await open('/api/realtime?space=couple', tokenService.signAccess(b, 0))).statusCode, 401);
+    assert.equal((await open('/api/realtime?space=friends', tokenService.signAccess('333333333333333333333333', 0))).statusCode, 403);
     const now = Math.floor(Date.now() / 1000);
     const long = jwt.sign({ sub: a, type: 'access', iat: now, exp: now + 3600 }, process.env.JWT_SECRET!, { algorithm: 'HS256' });
     assert.equal(tokenService.verifyAccess(long).expiresAtMs, (now + 2) * 1000);
@@ -82,14 +88,14 @@ async function main() {
     await once(stream, 'end'); // expires at maxAge, not the much later exp
     const streams: IncomingMessage[] = [];
     for (let i = 0; i < 5; i++) {
-      const s = await open('/api/realtime?space=couple', tokenService.signAccess(a));
+      const s = await open('/api/realtime?space=couple', tokenService.signAccess(a, 0));
       assert.equal(s.statusCode, 200); await chunk(s); streams.push(s);
     }
-    const limited = await open('/api/realtime?space=couple', tokenService.signAccess(a));
+    const limited = await open('/api/realtime?space=couple', tokenService.signAccess(a, 0));
     assert.equal(limited.statusCode, 429); assert.equal(limited.headers['retry-after'], '10');
     streams[0].destroy();
     await new Promise((r) => setTimeout(r, 50));
-    const replacement = await open('/api/realtime?space=couple', tokenService.signAccess(a));
+    const replacement = await open('/api/realtime?space=couple', tokenService.signAccess(a, 0));
     assert.equal(replacement.statusCode, 200); await chunk(replacement);
     // Exercise heartbeat, backpressure, ready ordering, and cleanup without a 20 second sleep.
     const oldInterval = global.setInterval;
@@ -101,15 +107,17 @@ async function main() {
       end() { this.writableEnded = true; }
     }
     const fake = new FakeResponse();
-    assert.equal(realtimeService.subscribe('other', 'couple', fake as unknown as Response, Date.now() + 10000), true);
+    assert.equal(realtimeService.subscribe('other', 0, 'couple', fake as unknown as Response, Date.now() + 10000), true);
+    const flush = () => new Promise<void>(resolve => setImmediate(resolve));
+    await flush();
     assert.equal(fake.writes[0], 'event: ready\ndata: {"version":1,"domains":[]}\n\n');
-    heartbeat!(); assert.equal(fake.writes[1], ': heartbeat\n\n');
-    fake.backpressure = true; heartbeat!(); assert.equal(fake.writableEnded, true);
+    heartbeat!(); await flush(); assert.equal(fake.writes[1], ': heartbeat\n\n');
+    fake.backpressure = true; heartbeat!(); await flush(); assert.equal(fake.writableEnded, true);
     const disconnected = new FakeResponse(); disconnected.destroyed = true;
-    assert.equal(realtimeService.subscribe('other', 'couple', disconnected as unknown as Response, Date.now() + 10000), false);
+    assert.equal(realtimeService.subscribe('other', 0, 'couple', disconnected as unknown as Response, Date.now() + 10000), false);
     const expiredResponse = new FakeResponse();
-    assert.equal(realtimeService.subscribe('other', 'couple', expiredResponse as unknown as Response, NaN), false);
-    assert.equal(realtimeService.subscribe('other', 'couple', expiredResponse as unknown as Response, Date.now() - 1), false);
+    assert.equal(realtimeService.subscribe('other', 0, 'couple', expiredResponse as unknown as Response, NaN), false);
+    assert.equal(realtimeService.subscribe('other', 0, 'couple', expiredResponse as unknown as Response, Date.now() - 1), false);
     global.setInterval = oldInterval;
     assert.throws(() => assertSingleRealtimeProcess({ WEB_CONCURRENCY: '2' }));
     assert.doesNotThrow(() => assertSingleRealtimeProcess({ NODE_ENV: 'test', NODE_APP_INSTANCE: '1' }));
@@ -119,7 +127,7 @@ async function main() {
     assert.throws(() => assertSingleRealtimeProcess({ ...mockDev, BANK_PROVIDER: 'thueapibank' }));
     assert.throws(() => assertSingleRealtimeProcess({ ...mockDev, WEB_CONCURRENCY: '2' }));
     realtimeService.drain();
-    assert.equal(realtimeService.subscribe('other', 'couple', new FakeResponse() as unknown as Response, Date.now() + 1000), false);
+    assert.equal(realtimeService.subscribe('other', 0, 'couple', new FakeResponse() as unknown as Response, Date.now() + 1000), false);
     for (const s of [...streams, replacement]) s.destroy();
     console.log('realtime transport tests passed');
   } finally { realtimeService.drain(); server.close(); }

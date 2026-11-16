@@ -60,7 +60,7 @@ interface Props {
 }
 
 export function AuthPage({ variant = 'couple', invite, initialMode = 'login' }: Props) {
-  const { login, register } = useAuth();
+  const { login, register, cancelLoginAttempt } = useAuth();
   const navigate = useNavigate();
   const toast = useToast();
   const [mode, setMode] = useState<Mode>(initialMode);
@@ -75,7 +75,12 @@ export function AuthPage({ variant = 'couple', invite, initialMode = 'login' }: 
   const [boatOpen, setBoatOpen] = useState(false);
   const markRef = useRef<HTMLButtonElement>(null);
   const mounted = useRef(false);
-  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+  useEffect(() => {
+    mounted.current = true;
+    const conceal = () => { setPassword(''); setShowPassword(false); cancelLoginAttempt(); };
+    window.addEventListener('lw:app-lock', conceal);
+    return () => { mounted.current = false; cancelLoginAttempt(); window.removeEventListener('lw:app-lock', conceal); };
+  }, [cancelLoginAttempt]);
   const copy = COPY[variant];
 
   function resetSecret() {
@@ -134,10 +139,9 @@ export function AuthPage({ variant = 'couple', invite, initialMode = 'login' }: 
     setError(null);
     setBusy(true);
     try {
-      const opts = invite ? { inviteCode: invite.code } : undefined;
-      const joined =
-        mode === 'login' ? await login(email, password, variant, opts) : await register(email, password, displayName, variant, opts);
-      if (current()) announceInvite(joined, toast);
+      const opts = { inviteCode: invite?.code, onJoined: (joined: import('../lib/types').JoinResult | null) => announceInvite(joined, toast) };
+      if (mode === 'login') await login(email, password, variant, opts);
+      else await register(email, password, displayName, variant, opts);
     } catch (err) {
       if (current() && !(err instanceof DOMException && err.name === 'AbortError')) setError(messageForError(err, mode));
     } finally {

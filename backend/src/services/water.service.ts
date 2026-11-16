@@ -147,7 +147,8 @@ async function submit(
   });
   await notificationService.toPartner(couple, uid, {
     type: 'water_pending',
-    entityId: log._id,
+    entityId: log._id, eventKey: String(log._id),
+    target: { kind: 'approval', category: 'water', id: String(log._id) },
     push: { body: (name) => `${name} vừa uống ${numberVi.format(amountMl)} ml, chờ bạn duyệt 💧`, url: '/approvals', tag: 'water' },
   });
   return {

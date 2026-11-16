@@ -3274,6 +3274,11 @@ html[data-theme='friends'] .skeleton {
 }
 
 /* Notifications */
+.couple-notifications__actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
 .notif {
   align-items: flex-start;
   padding-top: 12px;

@@ -360,7 +360,8 @@ export const letterService = {
         await realtimeAudience.couple(couple._id, ['letters']);
         logger.info('Letter opened', { coupleId: couple._id.toString(), userId, letterId: id });
         await notificationService.emit({
-          space: 'couple',
+          space: 'couple', coupleId: couple._id,
+          eventKey: String(letter._id), target: { kind: 'letter', id: String(letter._id) },
           to: letter.authorId,
           actorId: new Types.ObjectId(userId),
           type: 'letter_opened',

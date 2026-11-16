@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { SESSION_EXPIRED_EVENT, apiRequest, assertCurrentSession } from '../../lib/apiClient';
@@ -7,7 +7,22 @@ import { tokenStore } from '../../lib/tokenStore';
 import type { AuthTokens, JoinResult, Me } from '../../lib/types';
 import { forgetThisDevice } from '../push/device';
 import { advanceAccessEpoch } from '../../lib/apiClient';
-import { appLockEpoch, appLockState, bindPasswordLogin, isAuthAttemptCurrent, refreshLockSettings, resetAppLock, subscribeAppLock } from '../appLock/store';
+import { activateAppLock, appLockEpoch, appLockState, bindPasswordLogin, isAuthAttemptCurrent, refreshLockSettings, resetAppLock, subscribeAppLock } from '../appLock/store';
+
+interface PasswordChangeRequired {
+  status: 'password_change_required';
+  passwordChangeToken: string;
+  expiresAt: string;
+}
+interface RecoveryAttempt extends PasswordChangeRequired {
+  target: Space;
+  opts?: SessionOptions;
+  generation: string;
+  epoch: number;
+  attempt: number;
+  completing: boolean;
+}
+
 
 interface AuthState {
   me: Me | null;
@@ -21,6 +36,11 @@ interface AuthState {
   /** Friends space: returns what joining did (incl. an invite link's result). */
   login: (email: string, password: string, space?: Space, opts?: SessionOptions) => Promise<JoinResult | null>;
   register: (email: string, password: string, displayName: string, space?: Space, opts?: SessionOptions) => Promise<JoinResult | null>;
+  /** Metadata only; the limited credential is kept in a private ref, never storage/cache/history. */
+  passwordChange: { expiresAt: string; target: Space } | null;
+  completePasswordChange: (newPassword: string, confirmPassword: string) => Promise<JoinResult | null>;
+  cancelPasswordChange: () => void;
+  cancelLoginAttempt: () => void;
   logout: () => void;
   refreshMe: () => Promise<void>;
   /** Discard access-sensitive /me data and invalidate older in-flight /me responses. */
@@ -31,6 +51,8 @@ interface AuthState {
 interface SessionOptions {
   /** Invite link (/j/<code>): become friends with the inviter while joining the friends space. */
   inviteCode?: string;
+  /** Runs synchronously only after the final generation/attempt/PIN guards, including recovery. */
+  onJoined?: (joined: JoinResult | null) => void;
 }
 
 const AuthContext = createContext<AuthState | null>(null);
@@ -43,6 +65,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [space, setSpaceState] = useState<Space>(() => spaceStore.get());
   const observedGeneration = useRef(tokenStore.generation());
   const loginAttempt = useRef(0);
+  const recovery = useRef<RecoveryAttempt | null>(null);
+  const [passwordChange, setPasswordChange] = useState<AuthState['passwordChange']>(null);
+  const cancelPasswordChange = useCallback(() => {
+    recovery.current = null;
+    setPasswordChange(null);
+  }, []);
+  const credentialsPending = useRef(false);
+  // Do not cancel the deliberate hand-off to recovery or an already promoted app session.
+  const cancelLoginAttempt = useCallback(() => {
+    if (credentialsPending.current) { credentialsPending.current = false; loginAttempt.current += 1; }
+  }, []);
   const meEpoch = useRef(0);
   const meFlight = useRef<{ generation: string; epoch: number; promise: Promise<void> } | null>(null);
 
@@ -57,12 +90,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
    */
   const clearView = useCallback(() => {
     loginAttempt.current += 1;
+    credentialsPending.current = false;
+    cancelPasswordChange();
     meEpoch.current += 1;
     setMe(null);
     setBootstrapFailed(false);
     void qc.cancelQueries();
     qc.clear();
-  }, [qc]);
+  }, [qc, cancelPasswordChange]);
 
   const endSession = useCallback(() => {
     tokenStore.clear();
@@ -117,9 +152,38 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  useLayoutEffect(() => {
+    const deactivate = activateAppLock();
+    let mounted = true;
+    void Promise.all([refreshMe(), refreshLockSettings(false)]).finally(() => { if (mounted) setLoading(false); });
+    return () => {
+      mounted = false;
+      loginAttempt.current += 1;
+      credentialsPending.current = false;
+      recovery.current = null;
+      meEpoch.current += 1;
+      advanceAccessEpoch();
+      void qc.cancelQueries();
+      qc.clear();
+      deactivate();
+    };
+  }, [qc, refreshMe]);
+
   useEffect(() => {
-    void Promise.all([refreshMe(), refreshLockSettings(false)]).finally(() => setLoading(false));
-  }, [refreshMe]);
+    if (!passwordChange) return;
+    const clear = () => cancelPasswordChange();
+    const visibility = () => { if (document.visibilityState !== 'visible') clear(); };
+    const timer = window.setTimeout(clear, Math.max(0, Date.parse(passwordChange.expiresAt) - Date.now()));
+    window.addEventListener('lw:app-lock', clear);
+    window.addEventListener('pagehide', clear);
+    document.addEventListener('visibilitychange', visibility);
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener('lw:app-lock', clear);
+      window.removeEventListener('pagehide', clear);
+      document.removeEventListener('visibilitychange', visibility);
+    };
+  }, [passwordChange, cancelPasswordChange]);
 
   useEffect(() => {
     let previous = appLockState().discard;
@@ -192,7 +256,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   /** Store the new session. The friends space is joined first, so its API works as soon as the user lands there. */
   const startSession = useCallback(
     async (tokens: AuthTokens, target: Space, opts: SessionOptions | undefined, expectedEpoch: number, attempt: number): Promise<JoinResult | null> => {
-      if (!isAuthAttemptCurrent(expectedEpoch)) throw new DOMException('Phiên nhập đã thay đổi.', 'AbortError');
+      if (!isAuthAttemptCurrent(expectedEpoch) || attempt !== loginAttempt.current) throw new DOMException('Phiên nhập đã thay đổi.', 'AbortError');
       void qc.cancelQueries();
       qc.clear();
       setMe(null);
@@ -222,6 +286,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       assertCurrent();
       await refreshLockSettings(false);
       assertCurrent();
+      opts?.onJoined?.(joined);
       return joined;
     },
     [qc, refreshMe, setSpace, endSession],
@@ -229,36 +294,73 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = useCallback(
     async (email: string, password: string, target: Space = 'couple', opts?: SessionOptions) => {
+      cancelPasswordChange();
       const attempt = ++loginAttempt.current;
+      credentialsPending.current = true;
       const expectedEpoch = appLockEpoch();
       const generation = tokenStore.generation();
-      const tokens = await apiRequest<AuthTokens>('/auth/login', {
-        method: 'POST',
-        body: { email, password },
-        auth: false,
-      });
-      assertCurrentSession(generation);
-      if (attempt !== loginAttempt.current) throw new Error('Phiên đăng nhập đã thay đổi.');
-      return startSession(tokens, target, opts, expectedEpoch, attempt);
+      try {
+        const result = await apiRequest<AuthTokens | PasswordChangeRequired>('/auth/login', {
+          method: 'POST', body: { email, password }, auth: false,
+        });
+        assertCurrentSession(generation);
+        if (attempt !== loginAttempt.current || !isAuthAttemptCurrent(expectedEpoch)) throw new DOMException('Phiên đăng nhập đã thay đổi.', 'AbortError');
+        credentialsPending.current = false;
+        if ('status' in result && result.status === 'password_change_required') {
+          if (!result.passwordChangeToken || !Number.isFinite(Date.parse(result.expiresAt)) || Date.parse(result.expiresAt) <= Date.now()) throw new Error('Quyền đổi mật khẩu đã hết hạn.');
+          // Never pass a limited credential to tokenStore, /me, Friends join, PIN or push.
+          recovery.current = { ...result, target, opts, generation, epoch: expectedEpoch, attempt, completing: false };
+          setPasswordChange({ expiresAt: result.expiresAt, target });
+          return null;
+        }
+        if (!('accessToken' in result) || !result.accessToken || !result.refreshToken) throw new Error('Phản hồi đăng nhập không hợp lệ.');
+        return startSession(result, target, opts, expectedEpoch, attempt);
+      } finally {
+        if (attempt === loginAttempt.current) credentialsPending.current = false;
+      }
     },
-    [startSession],
+    [startSession, cancelPasswordChange],
   );
+
+  const completePasswordChange = useCallback(async (newPassword: string, confirmPassword: string) => {
+    const grant = recovery.current;
+    const current = () => grant !== null && recovery.current === grant && grant.attempt === loginAttempt.current &&
+      tokenStore.isCurrent(grant.generation) && isAuthAttemptCurrent(grant.epoch) && Date.parse(grant.expiresAt) > Date.now();
+    if (!grant || !current() || grant.completing) throw new DOMException('Quyền đổi mật khẩu không còn hiệu lực.', 'AbortError');
+    grant.completing = true;
+    try {
+      const tokens = await apiRequest<AuthTokens>('/auth/password-change', {
+        method: 'POST', auth: false,
+        body: { passwordChangeToken: grant.passwordChangeToken, newPassword, confirmPassword },
+      });
+      if (!current()) throw new DOMException('Phiên đăng nhập đã thay đổi.', 'AbortError');
+      cancelPasswordChange();
+      return await startSession(tokens, grant.target, grant.opts, grant.epoch, grant.attempt);
+    } finally {
+      grant.completing = false;
+    }
+  }, [startSession, cancelPasswordChange]);
 
   const register = useCallback(
     async (email: string, password: string, displayName: string, target: Space = 'couple', opts?: SessionOptions) => {
+      cancelPasswordChange();
       const attempt = ++loginAttempt.current;
+      credentialsPending.current = true;
       const expectedEpoch = appLockEpoch();
       const generation = tokenStore.generation();
-      const tokens = await apiRequest<AuthTokens>('/auth/register', {
-        method: 'POST',
-        body: { email, password, displayName },
-        auth: false,
-      });
-      assertCurrentSession(generation);
-      if (attempt !== loginAttempt.current) throw new Error('Phiên đăng nhập đã thay đổi.');
-      return startSession(tokens, target, opts, expectedEpoch, attempt);
+      try {
+        const tokens = await apiRequest<AuthTokens>('/auth/register', {
+          method: 'POST', body: { email, password, displayName }, auth: false,
+        });
+        assertCurrentSession(generation);
+        if (attempt !== loginAttempt.current || !isAuthAttemptCurrent(expectedEpoch)) throw new DOMException('Phiên đăng nhập đã thay đổi.', 'AbortError');
+        credentialsPending.current = false;
+        return startSession(tokens, target, opts, expectedEpoch, attempt);
+      } finally {
+        if (attempt === loginAttempt.current) credentialsPending.current = false;
+      }
     },
-    [startSession],
+    [startSession, cancelPasswordChange],
   );
 
   const logout = useCallback(() => {
@@ -287,12 +389,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       space,
       login,
       register,
+      passwordChange,
+      completePasswordChange,
+      cancelPasswordChange,
+      cancelLoginAttempt,
       logout,
       refreshMe,
       revokeMe,
       verifyMe,
     }),
-    [me, loading, bootstrapError, retryBootstrap, switchSpace, space, login, register, logout, refreshMe, revokeMe, verifyMe],
+    [me, loading, bootstrapError, retryBootstrap, switchSpace, space, login, register, passwordChange, completePasswordChange, cancelPasswordChange, cancelLoginAttempt, logout, refreshMe, revokeMe, verifyMe],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

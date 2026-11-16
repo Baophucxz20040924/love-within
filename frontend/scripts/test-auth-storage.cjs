@@ -77,6 +77,7 @@ async function main() {
       if (!(index in cells)) { cells[index] = true; effects.push(effect); }
     },
   };
+  react.useLayoutEffect = react.useEffect;
   const element = (type, props) => ({ type, props });
   const mocks = {
     react,
@@ -87,9 +88,10 @@ async function main() {
     }) },
     '../../lib/apiClient': {
       SESSION_EXPIRED_EVENT: 'session-expired',
-      apiRequest: (url) => {
+      apiRequest: (url, options) => {
         const request = deferred();
         request.url = url;
+        request.options = options;
         calls.requests.push(request);
         return request.promise;
       },
@@ -99,7 +101,7 @@ async function main() {
     '../../lib/spaceStore': { spaceStore: { get: () => 'couple', set: () => {}, isSpaceKey: () => false } },
     '../../lib/tokenStore': { tokenStore },
     '../push/device': { forgetThisDevice: () => { throw new Error('unexpected device operation'); } },
-    '../appLock/store': { appLockEpoch: () => epoch, appLockState: () => ({ discard: false, phase: lockPhase }), bindPasswordLogin() {}, isAuthAttemptCurrent: expected => expected === epoch && visible, refreshLockSettings: async () => {}, resetAppLock() {}, subscribeAppLock: fn => { lockSubscriber = fn; return () => {}; } },
+    '../appLock/store': { activateAppLock: () => () => {}, appLockEpoch: () => epoch, appLockState: () => ({ discard: false, phase: lockPhase }), bindPasswordLogin() {}, isAuthAttemptCurrent: expected => expected === epoch && visible, refreshLockSettings: async () => {}, resetAppLock() {}, subscribeAppLock: fn => { lockSubscriber = fn; return () => {}; } },
     '../../components/StatusViews': { ErrorState: 'error', Loading: 'loading' },
   };
   const module = { exports: {} };
@@ -210,6 +212,74 @@ async function main() {
   const requestCount = calls.requests.length;
   assert.equal((await result).name, 'AbortError');
   assert.equal(calls.requests.length, requestCount, 'stale join cannot start /me');
+  // Limited credentials must never become an application session or join Friends early.
+  for (const target of ['couple', 'friends']) {
+    const beforeLogins = calls.logins;
+    let announced = null;
+    attempt = render().login('recovery@example.test', 'temporary-test-only', target, {
+      inviteCode: 'continue-invite', onJoined: joined => { announced = joined; },
+    });
+    calls.requests.at(-1).resolve({ status: 'password_change_required', passwordChangeToken: 'limited-test-only', expiresAt: new Date(Date.now() + 900_000).toISOString() });
+    await attempt;
+    assert.equal(calls.logins, beforeLogins);
+    assert.equal(calls.requests.at(-1).url, '/auth/login');
+    assert.equal(render().passwordChange.target, target);
+    assert.equal(Object.hasOwn(render().passwordChange, 'passwordChangeToken'), false);
+    render().cancelLoginAttempt(); // Login form's hand-off unmount must not cancel recovery.
+    const completion = render().completePasswordChange('new-password-test', 'new-password-test');
+    const changeRequest = calls.requests.at(-1);
+    assert.equal(changeRequest.url, '/auth/password-change');
+    assert.equal(changeRequest.options.auth, false);
+    assert.equal(changeRequest.options.body.passwordChangeToken, 'limited-test-only');
+    assert.equal(calls.logins, beforeLogins);
+    changeRequest.resolve({ accessToken: 'completed-access', refreshToken: 'completed-refresh' });
+    await new Promise(setImmediate);
+    const joined = { joinedAt: 'test', invite: { status: 'friended' } };
+    if (target === 'friends') {
+      assert.equal(calls.requests.at(-1).url, '/friends/join');
+      assert.equal(calls.requests.at(-1).options.body.inviteCode, 'continue-invite');
+      calls.requests.at(-1).resolve(joined);
+      await new Promise(setImmediate);
+    }
+    assert.equal(calls.requests.at(-1).url, '/me');
+    calls.requests.at(-1).resolve({ user: { id: 'recovered' } });
+    await completion;
+    assert.equal(calls.logins, beforeLogins + 1);
+    assert.equal(announced, target === 'friends' ? joined : null);
+    assert.equal(render().passwordChange, null);
+  }
+
+  // Navigation away while credentials are pending, and explicit recovery cancellation, both fence late successes.
+  attempt = render().login('a', 'password');
+  result = attempt.then(() => null, error => error);
+  render().cancelLoginAttempt();
+  const beforeCancelledLogin = calls.logins;
+  calls.requests.at(-1).resolve({ accessToken: 'late', refreshToken: 'late' });
+  assert.equal((await result).name, 'AbortError');
+  assert.equal(calls.logins, beforeCancelledLogin);
+
+  for (const cancel of ['cancel', 'epoch', 'generation', 'new-login']) {
+    attempt = render().login('a', 'temporary');
+    calls.requests.at(-1).resolve({ status: 'password_change_required', passwordChangeToken: 'limited-test-only', expiresAt: new Date(Date.now() + 900_000).toISOString() });
+    await attempt;
+    const completion = render().completePasswordChange('new-password-test', 'new-password-test');
+    const outcome = completion.then(() => null, error => error);
+    const pending = calls.requests.at(-1);
+    const count = calls.logins;
+    let newer;
+    if (cancel === 'cancel') render().cancelPasswordChange();
+    if (cancel === 'epoch') epoch++;
+    if (cancel === 'generation') values.set('lw.sessionGeneration', 'another-account');
+    if (cancel === 'new-login') {
+      newer = render().login('b', 'password').catch(() => null);
+      calls.requests.at(-1).reject(new Error('test failure'));
+    }
+    pending.resolve({ accessToken: 'stale', refreshToken: 'stale' });
+    assert.equal((await outcome).name, 'AbortError');
+    assert.equal(calls.logins, count, `late completion after ${cancel} must not start a session`);
+    if (newer) await newer;
+    render().cancelPasswordChange();
+  }
   cleanups.forEach((cleanup) => cleanup());
   assert.equal(listeners.has('storage'), false);
   console.log('PASS: isolated AuthContext storage events, stale response, rotation and removal');

@@ -24,7 +24,8 @@ coverage/
 *.key
 
 # Dev-only helper scripts and notes: not needed to build or run
-backend/scripts/
+backend/scripts/*
+!backend/scripts/bootstrap-admin.ts
 backend/README.md
 frontend/README.md
 

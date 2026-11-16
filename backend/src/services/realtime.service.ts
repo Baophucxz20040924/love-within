@@ -1,9 +1,11 @@
 import type { Response } from 'express';
+import { credentialService } from './credential.service.js';
 
 /** Wire protocol v1 carries invalidation hints only; REST remains authoritative. */
 export const REALTIME_DOMAINS = [
   'account', 'couple', 'pairing', 'quests', 'wallet', 'water', 'market', 'proposals', 'stories', 'story-unread',
   'questions', 'events', 'letters', 'moods', 'bucket', 'moments', 'savings', 'finance', 'assistant',
+  'couple-notifications', 'couple-notification-unread',
   'friends', 'friend-posts', 'friend-events', 'friend-outings', 'friend-notifications', 'friend-profile',
 ] as const;
 export type RealtimeDomain = (typeof REALTIME_DOMAINS)[number];
@@ -17,8 +19,8 @@ const HEARTBEAT_MS = 20_000;
 const MAX_LIFETIME_MS = 10 * 60_000;
 
 type Subscriber = {
-  userId: string; space: RealtimeSpace; res: Response; closed: boolean; deadline: number;
-  domains: Set<RealtimeDomain>; access: boolean; wholeAccess: boolean; scheduled: boolean;
+  userId: string; credentialVersion: number; space: RealtimeSpace; res: Response; closed: boolean; deadline: number;
+  domains: Set<RealtimeDomain>; access: boolean; wholeAccess: boolean; scheduled: boolean; ready: boolean;
   heartbeat?: ReturnType<typeof setInterval>; expiry?: ReturnType<typeof setTimeout>;
   close: () => void;
 };
@@ -28,6 +30,16 @@ let draining = false;
 function frame(event: 'ready' | 'dirty' | 'access', domains: RealtimeDomain[]): string {
   return `event: ${event}\ndata: ${JSON.stringify({ version: 1, domains })}\n\n`;
 }
+async function subscriberCurrent(sub: Subscriber): Promise<boolean> {
+  if (sub.closed) return false;
+  try {
+    await credentialService.assertApp(sub.userId, sub.credentialVersion);
+    return !sub.closed;
+  } catch {
+    return false;
+  }
+}
+
 function write(sub: Subscriber, data: string): void {
   if (sub.closed) return;
   if (Date.now() >= sub.deadline || sub.res.destroyed || sub.res.writableEnded) { sub.close(); return; }
@@ -37,9 +49,26 @@ function write(sub: Subscriber, data: string): void {
   } catch { sub.close(); }
 }
 
+function schedule(sub: Subscriber): void {
+  if (sub.closed || !sub.ready || sub.scheduled || (!sub.domains.size && !sub.wholeAccess)) return;
+  sub.scheduled = true;
+  queueMicrotask(() => {
+    void subscriberCurrent(sub).then((current) => {
+      if (!current) { sub.close(); return; }
+      const pending = sub.wholeAccess ? [] : [...sub.domains];
+      const event = sub.access ? 'access' : 'dirty';
+      sub.domains.clear(); sub.access = false; sub.wholeAccess = false;
+      write(sub, frame(event, pending));
+    }).catch(() => sub.close()).finally(() => {
+      sub.scheduled = false;
+      schedule(sub);
+    });
+  });
+}
+
 export const realtimeService = {
   /** Register first, then send ready so a ready-time resync has no registration gap. */
-  subscribe(userId: string, space: RealtimeSpace, res: Response, expiresAtMs: number): boolean {
+  subscribe(userId: string, credentialVersion: number, space: RealtimeSpace, res: Response, expiresAtMs: number): boolean {
     if (draining || subscribers.size >= MAX_CONNECTIONS || !Number.isFinite(expiresAtMs) ||
         expiresAtMs <= Date.now() || res.destroyed || res.writableEnded) return false;
     let userCount = 0, spaceCount = 0;
@@ -49,8 +78,8 @@ export const realtimeService = {
     }
     if (userCount >= MAX_PER_USER || spaceCount >= MAX_PER_SPACE) return false;
     const sub: Subscriber = {
-      userId, space, res, closed: false, deadline: Math.min(expiresAtMs, Date.now() + MAX_LIFETIME_MS),
-      domains: new Set(), access: false, wholeAccess: false, scheduled: false,
+      userId, credentialVersion, space, res, closed: false, deadline: Math.min(expiresAtMs, Date.now() + MAX_LIFETIME_MS),
+      domains: new Set(), access: false, wholeAccess: false, scheduled: false, ready: false,
       close: () => {
         if (sub.closed) return;
         sub.closed = true;
@@ -65,10 +94,25 @@ export const realtimeService = {
     subscribers.add(sub);
     res.once('close', sub.close);
     res.once('error', sub.close);
-    sub.heartbeat = setInterval(() => write(sub, ': heartbeat\n\n'), HEARTBEAT_MS);
+    sub.heartbeat = setInterval(() => {
+      void subscriberCurrent(sub).then((current) => {
+        if (current) write(sub, ': heartbeat\n\n');
+        else sub.close();
+      }).catch(() => sub.close());
+    }, HEARTBEAT_MS);
     sub.expiry = setTimeout(sub.close, Math.max(0, sub.deadline - Date.now()));
-    write(sub, frame('ready', []));
+    void subscriberCurrent(sub).then((current) => {
+      if (current) {
+        write(sub, frame('ready', []));
+        sub.ready = !sub.closed;
+        schedule(sub);
+      } else sub.close();
+    }).catch(() => sub.close());
     return true;
+  },
+  /** Close all streams belonging to a user after credential rotation. */
+  revokeUser(userId: string): void {
+    for (const sub of [...subscribers]) if (sub.userId === userId) sub.close();
   },
   /** Synchronous, best-effort hint. No IDs, content, or actor data enter the frame. */
   publish(userIds: Iterable<string>, space: RealtimeSpace, domains: RealtimeDomain[], access = false): void {
@@ -84,16 +128,7 @@ export const realtimeService = {
         for (const domain of safeDomains) sub.domains.add(domain);
         sub.access ||= access;
         sub.wholeAccess ||= wholeAccess;
-        if (sub.scheduled) continue;
-        sub.scheduled = true;
-        queueMicrotask(() => {
-          sub.scheduled = false;
-          if (sub.closed || (!sub.domains.size && !sub.wholeAccess)) return;
-          const pending = sub.wholeAccess ? [] : [...sub.domains];
-          const event = sub.access ? 'access' : 'dirty';
-          sub.domains.clear(); sub.access = false; sub.wholeAccess = false;
-          write(sub, frame(event, pending));
-        });
+        schedule(sub);
       }
     } catch { /* delivery is never allowed to fail a committed mutation */ }
   },

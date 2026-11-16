@@ -53,6 +53,12 @@ export const loginLimiter = make(15 * 60_000, 10, 'Sai mật khẩu quá nhiều
 /** Register: 10 / 15 min per IP. */
 export const registerLimiter = make(15 * 60_000, 10, 'Quá nhiều lần đăng ký. Vui lòng đợi 15 phút.', false);
 
+/** Recovery completion is unauthenticated until its purpose-bound grant is checked. */
+export const passwordChangeLimiter = make(15 * 60_000, 20, 'Quá nhiều lần đổi mật khẩu. Vui lòng đợi 15 phút.', false);
+/** Sensitive admin writes include bcrypt reauthentication; counted on every attempt per admin. */
+export const adminCredentialLimiter = make(15 * 60_000, 10, 'Quá nhiều thao tác quản trị. Vui lòng đợi 15 phút.', true);
+export const adminLookupLimiter = make(60_000, 30, 'Bạn tìm tài khoản quá nhanh, vui lòng thử lại sau.', true);
+
 /** Token refresh: 60 / 15 min per IP (a tab refreshes about once per 15 min; this only stops token grinding). */
 export const refreshLimiter = make(15 * 60_000, 60, 'Quá nhiều yêu cầu, vui lòng thử lại sau.', false);
 
