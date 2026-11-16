@@ -19,6 +19,8 @@ friendOutingRouter.post('/', outingsWriteLimiter, validate({ body: outingSchemas
   ok(res, await friendOutingService.create(req.friendsMember!, req.body), 201)));
 friendOutingRouter.get('/:id', expensiveReadLimiter, validate({ params: idParams }), asyncHandler(async (req, res) =>
   ok(res, await friendOutingService.get(req.friendsMember!, req.params.id))));
+friendOutingRouter.delete('/:id', outingsWriteLimiter, validate({ params: idParams, body: outingSchemas.simple }), asyncHandler(async (req, res) =>
+  ok(res, await friendOutingService.delete(req.friendsMember!, req.params.id, req.body))));
 
 function mutation(path: string, kind: OutingMutationKind, body: z.ZodType, target?: 'expenseId' | 'settlementId', method: 'post' | 'patch' = 'post') {
   const params = target ? idParams.extend({ [target]: outingObjectId }) : idParams;

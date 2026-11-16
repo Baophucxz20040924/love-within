@@ -1,16 +1,17 @@
-import { useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
+import { useEffect, useRef, useState } from 'react';
+import { Link, useNavigate, useParams } from 'react-router-dom';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { BottomSheet } from '../components/BottomSheet';
 import { Icon } from '../components/Icon';
 import { ErrorState, Page, Skeleton } from '../components/StatusViews';
 import { useAuth } from '../features/auth/AuthContext';
 import { ApiRequestError } from '../lib/apiClient';
 import { formatVnd } from '../lib/format';
-import { outingKey, outingsApi } from '../features/friends/outings/api';
+import { FRIEND_NOTIFICATIONS_KEY, FRIENDS_UNREAD_KEY } from '../features/friends/api';
+import { OUTINGS_KEY, outingKey, outingsApi } from '../features/friends/outings/api';
 import { CapacityMessage, ExpenseSheet, InviteOutingSheet, memberName, OperationMessage, SettlementSheet } from '../features/friends/outings/OutingForms';
 import { canReportSettlement, expenseParticipantIds, outingLimits, outingDate, phaseLabel, settlementLabel } from '../features/friends/outings/presentation';
-import { isLedger, type MutationMeta, type OutingExpense, type OutingResult } from '../features/friends/outings/types';
+import { isLedger, type MutationMeta, type OutingDeleteResult, type OutingExpense, type OutingResult } from '../features/friends/outings/types';
 import { useOutingOperation } from '../features/friends/outings/useOutingOperation';
 import '../features/friends/outings/outings.css';
 
@@ -22,11 +23,18 @@ type Section = typeof sections[number]['id'];
 
 export function FriendOutingPage() {
   const { id = '' } = useParams();
+  const navigate = useNavigate();
+  const qc = useQueryClient();
   const { me } = useAuth();
   const myId = me?.user.id ?? '';
-  const query = useQuery({ queryKey: outingKey(id), queryFn: () => outingsApi.get(id), enabled: !!id, refetchOnWindowFocus: true, retry: (count, err) => !(err instanceof ApiRequestError && [403, 404].includes(err.status)) && count < 1 });
+  const query = useQuery({ queryKey: outingKey(id), queryFn: () => outingsApi.get(id), enabled: !!id, refetchOnMount: 'always', refetchOnWindowFocus: true, retry: (count, err) => !(err instanceof ApiRequestError && [403, 404].includes(err.status)) && count < 1 });
   const accessDenied = query.error instanceof ApiRequestError && [403, 404].includes(query.error.status);
-  const view = accessDenied ? undefined : query.data;
+  // Never trust a cached ledger until a successful read on this mount. Retain a
+  // validated ledger on transient errors so mounted forms keep their retry keys.
+  const validatedId = useRef<string | null>(null);
+  if (query.isFetchedAfterMount && !query.isError && query.data && !query.isFetching) validatedId.current = id;
+  if (accessDenied) validatedId.current = null;
+  const view = !accessDenied && validatedId.current === id ? query.data : undefined;
   const ledger = view && isLedger(view) ? view : null;
   const [section, setSection] = useState<Section>('expenses');
   const [expense, setExpense] = useState<OutingExpense | 'new' | null>(null);
@@ -34,6 +42,21 @@ export function FriendOutingPage() {
   const [payment, setPayment] = useState<{ recipient?: string } | null>(null);
   const [action, setAction] = useState<Action | null>(null);
   const op = useOutingOperation(id);
+  const [deleteRevision, setDeleteRevision] = useState<number | null>(null);
+  const deletion = useOutingOperation<OutingDeleteResult>(id, undefined, async (result, isCurrent) => {
+    await qc.cancelQueries({ queryKey: outingKey(result.deletedId), exact: true });
+    if (!isCurrent()) return;
+    qc.removeQueries({ queryKey: outingKey(result.deletedId), exact: true });
+    void qc.invalidateQueries({ queryKey: OUTINGS_KEY });
+    void qc.invalidateQueries({ queryKey: FRIEND_NOTIFICATIONS_KEY });
+    void qc.invalidateQueries({ queryKey: FRIENDS_UNREAD_KEY });
+  });
+  // A remote delete/access loss hides the old ledger immediately. Keep an in-flight or
+  // uncertain delete sheet so the creator can replay the same operation receipt.
+  useEffect(() => {
+    if (accessDenied && !deletion.busy && !deletion.uncertain) setDeleteRevision(null);
+  }, [accessDenied, deletion.busy, deletion.uncertain]);
+  const canDelete = !!ledger && ledger.creatorId === myId && ledger.expenses.length === 0 && ledger.settlements.length === 0 && ledger.totalExpenses === 0;
   const mine = ledger?.balances.find(row => row.userId === myId);
   const members = ledger?.participants.filter(p => p.status === 'accepted') ?? [];
   const editing = !!ledger && ['collecting', 'review'].includes(ledger.phase);
@@ -78,7 +101,7 @@ export function FriendOutingPage() {
 
   return <Page title="Buổi chia tiền" back="/friends/outings" bell={false} actions={<button type="button" className="icon-btn" aria-label="Cập nhật sổ chia tiền" disabled={query.isFetching} onClick={() => void query.refetch()}><Icon name="refresh" size={20} /></button>}>
     <div className="outings-page">
-      {query.isLoading && <><Skeleton height={300} /><Skeleton height={64} /><Skeleton height={140} count={2} /></>}
+      {!view && query.isFetching && !query.isError && <><Skeleton height={300} /><Skeleton height={64} /><Skeleton height={140} count={2} /></>}
       {query.isError && <ErrorState title={query.error instanceof ApiRequestError && query.error.status === 404 ? 'Không tìm thấy buổi chia tiền' : 'Chưa cập nhật được sổ'} message="Buổi không tồn tại, bạn không có quyền xem hoặc kết nối đang gián đoạn. Không có khoản tiền nào bị tự thay đổi." onRetry={() => void query.refetch()} />}
       {view && <>
         {!ledger ? <section className="outing-invitation"><span className="outing-empty__icon"><Icon name="users" size={28} /></span><p className="outing-eyebrow">{view.myMembership === 'pending' ? 'BẠN CÓ MỘT LỜI MỜI' : 'LỜI MỜI ĐÃ TỪ CHỐI'}</p><h2>{view.title}</h2><p className="text-muted">{outingDate(view.outingDate)}</p><p>{view.myMembership === 'pending' ? 'Nhận lời để cùng ghi và kiểm tra các khoản chi. Chưa nhận lời thì bạn chưa được tính phần tiền và chưa xem được sổ.' : 'Bạn đã từ chối lời mời này, không được tính phần tiền và không xem được sổ.'}</p>{view.myMembership === 'pending' && <div className="outing-actions"><button className="btn btn-primary" onClick={() => requestAction({ kind: 'accept' })}>Nhận lời tham gia</button><button className="btn btn-ghost" onClick={() => requestAction({ kind: 'decline' })}>Từ chối</button></div>}<p className="outing-hint">Nhận lời không phải đồng ý nợ. Chốt sổ cần tất cả thành viên đồng ý riêng.</p></section> : <>
@@ -102,14 +125,24 @@ export function FriendOutingPage() {
           </section>
           {ledger.eventId && !restricted && <Link className="outing-source" to={`/friends/events/${ledger.eventId}`}><Icon name="calendar" size={18} /><span>Xem kèo của buổi này</span><Icon name="chevronRight" size={18} /></Link>}
           <p className="outing-bottom-note"><Icon name="shield" size={16} /> Sổ được giữ để đối chiếu, kể cả khi kèo hoặc quan hệ bạn bè thay đổi.</p>
+          {ledger.creatorId === myId && <div className="outing-phase-action">{canDelete
+            ? <button className="btn btn-ghost text-danger" onClick={() => { deletion.reset(); setDeleteRevision(ledger.revision); }}>Xóa buổi chia tiền</button>
+            : <p className="outing-hint">Chỉ có thể xóa buổi chưa từng có khoản chi hoặc lời báo chuyển, kể cả khoản đã hủy. Lịch sử tài chính được giữ để đối chiếu.</p>}</div>}
           {expense && <ExpenseSheet outing={ledger} expense={expense === 'new' ? undefined : expense} myId={myId} onClose={() => setExpense(null)} />}
           {invite && <InviteOutingSheet outing={ledger} onClose={() => setInvite(false)} />}
           {payment && <SettlementSheet outing={ledger} myId={myId} recipient={payment.recipient} onClose={() => setPayment(null)} />}
         </>}
       </>}
     </div>
-    <BottomSheet open={!!action} onClose={() => { if (!op.busy && !op.uncertain) { setAction(null); op.reset(); } }} title={action ? actionTitles[action.kind] : ''}>
+    <BottomSheet open={!!action && !accessDenied} onClose={() => { if (!op.busy && !op.uncertain) { setAction(null); op.reset(); } }} title={action ? actionTitles[action.kind] : ''}>
       {action && <div className="outing-form"><p>{actionDescription}</p>{targetPayment && <div className="outing-preview"><p>{name(targetPayment.fromUserId)} → {name(targetPayment.toUserId)}</p><strong>{formatVnd(targetPayment.amount)}</strong></div>}{targetExpense && <div className="outing-preview"><p>{targetExpense.title ?? 'Khoản chi đã lưu'}</p><strong>{formatVnd(targetExpense.amount)}</strong></div>}<OperationMessage operation={{ ...op, reset: () => { op.reset(); setAction(current => current && view ? { ...current, revision: view.revision, financeRevision: view.financeRevision } : current); } }} /><button className="btn btn-primary btn-block" disabled={op.busy || op.stale || query.isFetching} onClick={() => void submitAction()}>{op.busy ? 'Đang lưu…' : op.uncertain ? 'Thử lại cùng yêu cầu' : actionButtons[action.kind]}</button><button className="btn btn-ghost btn-block" disabled={op.busy || op.uncertain} onClick={() => { setAction(null); op.reset(); }}>Quay lại kiểm tra</button></div>}
+    </BottomSheet>
+    <BottomSheet open={deleteRevision !== null && (!accessDenied || deletion.busy || deletion.uncertain)} onClose={() => { if (!deletion.busy && !deletion.uncertain) { setDeleteRevision(null); deletion.reset(); } }} title="Xóa buổi chia tiền?">
+      <div className="outing-form"><p>Buổi chưa từng có khoản chi hoặc lời báo chuyển sẽ bị xóa vĩnh viễn và không thể khôi phục. Các thành viên sẽ không còn thấy buổi này.</p>
+        <OperationMessage operation={{ ...deletion, reset: () => { deletion.reset(); if (view) setDeleteRevision(view.revision); } }} />
+        <button className="btn btn-primary btn-block" disabled={deleteRevision === null || deletion.busy || deletion.stale || (!deletion.uncertain && (!canDelete || query.isFetching))} onClick={() => { if (deleteRevision === null || (accessDenied && !deletion.uncertain)) return; void deletion.run(deleteRevision, meta => outingsApi.delete(id, meta)).then(result => { if (result?.isCurrent()) navigate('/friends/outings', { replace: true }); }); }}>{deletion.busy ? 'Đang xóa…' : deletion.uncertain ? 'Thử lại cùng yêu cầu' : 'Xóa vĩnh viễn'}</button>
+        <button className="btn btn-ghost btn-block" disabled={deletion.busy || deletion.uncertain} onClick={() => { setDeleteRevision(null); deletion.reset(); }}>Hủy</button>
+      </div>
     </BottomSheet>
   </Page>;
 }

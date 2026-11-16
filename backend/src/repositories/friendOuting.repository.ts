@@ -19,7 +19,8 @@ export function assertOutingCapacity(record: FriendOutingRecord, ordinary: boole
 }
 /** No ledger query ever joins to live event RSVP or updates separate balance rows. */
 export const friendOutingRepository = {
-  find(id: string): Promise<FriendOutingRecord | null> { return FriendOuting.findById(id).lean<FriendOutingRecord>().exec(); },
+  find(id: string): Promise<FriendOutingRecord | null> { return FriendOuting.findOne({ _id: id, deletedAt: null }).lean<FriendOutingRecord>().exec(); },
+  findRaw(id: string): Promise<FriendOutingRecord | null> { return FriendOuting.findById(id).lean<FriendOutingRecord>().exec(); },
   findCreate(creatorId: string, createOperationId: string): Promise<FriendOutingRecord | null> {
     return FriendOuting.findOne({ creatorId, createOperationId }).lean<FriendOutingRecord>().exec();
   },
@@ -30,22 +31,22 @@ export const friendOutingRepository = {
   },
   async compareAndSwap(beforeRevision: number, record: FriendOutingRecord): Promise<boolean> {
     // Full replacement deliberately preserves every receipt and all audit metadata; no truncation/TTL.
-    const result = await FriendOuting.replaceOne({ _id: record._id, revision: beforeRevision }, record, { writeConcern, runValidators: true }).exec();
+    const result = await FriendOuting.replaceOne({ _id: record._id, revision: beforeRevision, deletedAt: null }, record, { writeConcern, runValidators: true }).exec();
     return result.matchedCount === 1;
   },
   list(userId: string, limit: number, before?: string, eventId?: string): Promise<OutingHeader[]> {
-    return FriendOuting.find({ 'participants.userId': userId,
+    return FriendOuting.find({ deletedAt: null, 'participants.userId': userId,
       ...(before ? { _id: { $lt: new Types.ObjectId(before) } } : {}),
       ...(eventId ? { eventId: new Types.ObjectId(eventId) } : {}),
     }).select(headerProjection).sort({ _id: -1 }).limit(limit).lean<OutingHeader[]>().exec();
   },
   headers(userId: string, ids: string[]): Promise<OutingHeader[]> {
-    return FriendOuting.find({ _id: { $in: ids.map((id) => new Types.ObjectId(id)) }, 'participants.userId': userId })
+    return FriendOuting.find({ _id: { $in: ids.map((id) => new Types.ObjectId(id)) }, deletedAt: null, 'participants.userId': userId })
       .select(headerProjection).lean<OutingHeader[]>().exec();
   },
   /** Relationship changes can revoke pending invitations or restrict historical ledgers. */
   affectedByRelationship(a: string, b: string): Promise<OutingHeader[]> {
-    return FriendOuting.find({ 'participants.userId': { $all: [a, b] } })
+    return FriendOuting.find({ deletedAt: null, 'participants.userId': { $all: [a, b] } })
       .select(headerProjection).lean<OutingHeader[]>().exec();
   },
   /** Bounded to the <=50 members, unlike loading every user's entire block history. */

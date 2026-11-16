@@ -218,9 +218,25 @@ export function HomePage() {
         </Link>
       )}
 
-      {/* Home order (COUPLE_V2_PLAN §0): Hero · Cần duyệt · Khoảnh khắc · Thư mở được · Câu hỏi hôm nay · [Tổng kết] · Sắp tới · the rest. */}
+      {/* Permanent entry points stay separate from the activity cards, including when pulse cannot load. */}
       <section className="home-section" aria-labelledby="home-together">
         <div className="home-section__heading"><h2 id="home-together">Dành cho hai bạn</h2></div>
+        <nav className="home-summary-grid" aria-label="Khám phá cùng nhau">
+          <Link to="/moments" className="card card--link">
+            <div className="row">
+              <span className="icon-tile" aria-hidden="true"><Icon name="camera" /></span>
+              <div className="grow"><p className="card__title">Khoảnh khắc</p><p className="text-sm text-muted">Lịch chụp và những tấm ảnh của hai bạn</p></div>
+              <Icon name="chevronRight" className="text-muted" />
+            </div>
+          </Link>
+          <Link to="/events" className="card card--link">
+            <div className="row">
+              <span className="icon-tile" aria-hidden="true"><Icon name="calendar" /></span>
+              <div className="grow"><p className="card__title">Sự kiện</p><p className="text-sm text-muted">Lên lịch hẹn và lưu ngày đáng nhớ</p></div>
+              <Icon name="chevronRight" className="text-muted" />
+            </div>
+          </Link>
+        </nav>
         {pulse.isPending && <p className="text-sm text-muted" role="status">Đang tải hoạt động của hai bạn…</p>}
         {pulse.isError && <ErrorState title="Chưa cập nhật được hoạt động" message={pulse.data ? 'Đang giữ thông tin đã tải trước đó.' : 'Một số hoạt động chưa hiển thị. Thử tải lại nhé.'} onRetry={() => void pulse.refetch()} />}
         {pulse.data?.moment?.state === 'open' && <MomentCard moment={pulse.data.moment} />}

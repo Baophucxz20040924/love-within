@@ -21,7 +21,7 @@ export function CapacityMessage({ outing }: { outing: OutingLedger }) {
   </div>;
 }
 
-export function OperationMessage({ operation }: { operation: OutingOperation }) {
+export function OperationMessage({ operation }: { operation: Pick<OutingOperation, 'error' | 'stale' | 'reset'> }) {
   return <>{operation.error && <div className="outing-notice outing-notice--warning" role="alert"><Icon name="alert" size={18} /><div><p>{operation.error}</p>{operation.stale && <><p>Đã yêu cầu tải bản mới. Nội dung bạn nhập vẫn được giữ. Hãy kiểm tra số dư và phần chia trước khi gửi lại.</p><button type="button" className="btn btn-outline" onClick={operation.reset}>Tôi đã kiểm tra, sửa bản nháp</button></>}</div></div>}</>;
 }
 

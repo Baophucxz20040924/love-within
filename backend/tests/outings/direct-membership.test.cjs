@@ -55,7 +55,7 @@ function harness() {
       return state.event;
     } } },
     'services/profile.service.ts': { profileService, profileOf: (profiles, value) => profiles.get(value.toString()) },
-    'services/realtimeAudience.service.ts': { realtimeAudience: { outing: async (doc) => { state.hints.push(doc.revision); }, own: async () => {} } },
+    'services/realtimeAudience.service.ts': { realtimeAudience: { outing: async (doc, domains) => { state.hints.push({ revision: doc.revision, participants: plain(doc.participants), domains }); }, own: async () => {} } },
     'services/realtime.service.ts': { realtimeService: {} },
     'services/friendSuggestion.service.ts': { invalidateSuggestionCache() {} },
     'services/push.service.ts': { pushService: { enqueue: (job) => state.pushes.push(job) } },
@@ -85,9 +85,11 @@ function harness() {
   }
   const repositoryModule = load('repositories/friendOuting.repository.ts');
   const repo = repositoryModule.friendOutingRepository;
+  const actualRepo = { ...repo };
   // Exercise actual capacity/BSON helpers but replace database access with snapshot-isolated CAS.
   Object.assign(repo, {
-    find: async (outingId) => state.stored?._id.toString() === outingId ? clone(state.stored) : null,
+    find: async (outingId) => state.stored?._id.toString() === outingId && !state.stored.deletedAt ? clone(state.stored) : null,
+    findRaw: async (outingId) => state.stored?._id.toString() === outingId ? clone(state.stored) : null,
     findCreate: async (creatorId, op) => state.stored?.creatorId === creatorId && state.stored.createOperationId === op ? clone(state.stored) : null,
     create: async (doc) => {
       state.creates++;
@@ -98,7 +100,7 @@ function harness() {
     },
     compareAndSwap: async (revision, doc) => {
       state.cas++;
-      if (state.mode === 'fail' || state.stored.revision !== revision) return false;
+      if (state.mode === 'fail' || state.stored.deletedAt || state.stored.revision !== revision) return false;
       if (state.mode === 'unknown') throw Error('write unavailable');
       state.stored = clone(doc);
       if (state.mode === 'ambiguous') throw Error('ack lost');
@@ -106,8 +108,8 @@ function harness() {
       return true;
     },
     groupHasBlock: async (ids) => { state.blockChecks.push([...ids]); return state.blocks.some(([a, b]) => ids.includes(a) && ids.includes(b)); },
-    list: async (who) => state.stored?.participants.some((p) => p.userId === who) ? [clone(state.stored)] : [],
-    headers: async (who, ids) => state.stored && ids.includes(state.stored._id.toString()) && state.stored.participants.some((p) => p.userId === who) ? [clone(state.stored)] : [],
+    list: async (who) => state.stored && !state.stored.deletedAt && state.stored.participants.some((p) => p.userId === who) ? [clone(state.stored)] : [],
+    headers: async (who, ids) => state.stored && !state.stored.deletedAt && ids.includes(state.stored._id.toString()) && state.stored.participants.some((p) => p.userId === who) ? [clone(state.stored)] : [],
   });
   const serviceModule = load('services/friendOuting.service.ts'), service = serviceModule.friendOutingService;
   serviceModule.configureFriendOutingNotifications(async (event) => state.notifications.push(event));
@@ -116,7 +118,7 @@ function harness() {
   const createInput = (extra = {}) => outingSchemas.create.parse({ operationId: `create_${++sequence}`, expectedRevision: 0, title: 'Private trip title', outingDate: '2026-11-16', inviteeIds: [B], ...extra });
   const input = (extra = {}) => ({ operationId: `operation_${++sequence}`, expectedRevision: state.stored.revision, ...extra });
   const mutate = (kind, extra = {}, who = A, targetId) => service.mutate(user(who), state.stored._id.toString(), kind, input(extra), targetId);
-  return { state, load, repo, service, createInput, input, mutate, pair, limits: load('models/FriendOuting.ts').OUTING_LIMITS };
+  return { state, load, repo, actualRepo, service, createInput, input, mutate, pair, limits: load('models/FriendOuting.ts').OUTING_LIMITS };
 }
 
 function participant(who, status = 'accepted', consent = null) { return { userId: who, displayName: 'Member', status, consent }; }
@@ -395,4 +397,134 @@ test('adapter still skips blocked, invisible and duplicate recipients; replay do
   await fresh.service.mutate(user(A), outingId, 'invite', add);
   await fresh.service.mutate(user(A), outingId, 'invite', add);
   assert.equal(fresh.state.rows.length, 2); assert.equal(fresh.state.pushes.length, 2);
+});
+
+test('delete uses a dedicated receipt, creator-only replay, hides detail and notifications and preserves event source', async () => {
+  const h = harness(); h.load('services/friendOutingNotifications.ts').registerFriendOutingNotifications();
+  const create = h.createInput({ eventId: EVENT }); await h.service.create(user(A), create);
+  const outingId = h.state.stored._id.toString(), request = h.input(), before = clone(h.state.stored);
+  await assert.rejects(h.service.delete(user(B), outingId, request), expectCode('FORBIDDEN'));
+  await assert.rejects(h.service.delete(user(D), outingId, request), expectCode('NOT_FOUND'));
+  const pushes = h.state.pushes.length;
+  const result = await h.service.delete(user(A), outingId, request);
+  assert.deepEqual(result, { deletedId: outingId, outcome: { operationId: request.operationId, kind: 'delete', resultId: outingId, committedRevision: 2, replayed: false } });
+  assert.equal(h.state.stored.eventId, null); assert.equal(h.state.stored.originalEventId.toString(), EVENT);
+  assert.deepEqual(plain(h.state.stored.receipts), plain(before.receipts));
+  assert.ok(h.state.stored.deletedAt); await new (h.load('models/FriendOuting.ts').FriendOuting)(h.state.stored).validate();
+  assert.deepEqual(h.state.hints.at(-1).domains, ['friend-outings', 'friend-notifications']);
+  assert.deepEqual(h.state.hints.at(-1).participants, before.participants); assert.equal(h.state.pushes.length, pushes);
+  assert.equal((await h.service.delete(user(A), outingId, request)).outcome.replayed, true);
+  await assert.rejects(h.service.delete(user(A), outingId, { ...request, expectedRevision: 2 }), expectCode('OUTING_OPERATION_CONFLICT'));
+  await assert.rejects(h.service.delete(user(A), outingId, { ...request, operationId: 'another_operation' }), expectCode('OUTING_OPERATION_CONFLICT'));
+  await assert.rejects(h.service.delete(user(B), outingId, request), expectCode('NOT_FOUND'));
+  await assert.rejects(h.service.get(user(A), outingId), expectCode('NOT_FOUND'));
+  await assert.rejects(h.service.mutate(user(A), outingId, 'close_review', request), expectCode('NOT_FOUND'));
+  assert.equal((await h.service.list(user(B), { limit: 20 })).items.length, 0);
+  assert.equal((await h.service.notificationVisibility(B, [outingId])).size, 0);
+  const feed = h.load('services/friendNotifications.service.ts').friendNotificationsService;
+  assert.equal((await feed.list(user(B))).items.length, 0); assert.equal((await feed.unread(user(B))).notifications, 0);
+  await assert.rejects(h.service.create(user(A), create), expectCode('OUTING_DELETED'));
+});
+
+test('delete rejects all monetary history and inconsistent total, but permits every phase and restricted empty outings', async () => {
+  for (const setup of [
+    (d) => { d.expenses.push({ status: 'active' }); }, (d) => { d.expenses.push({ status: 'void' }); },
+    ...['pending', 'confirmed', 'rejected', 'cancelled'].map((status) => (d) => { d.settlements.push({ status }); }),
+    (d) => { d.totalExpenses = 1; },
+  ]) {
+    const h = harness(); await h.service.create(user(A), h.createInput()); setup(h.state.stored);
+    await assert.rejects(h.service.delete(user(A), h.state.stored._id.toString(), h.input()), expectCode('OUTING_NOT_EMPTY'));
+    assert.equal(h.state.cas, 0);
+  }
+  for (const phase of ['collecting', 'review', 'settling', 'completed']) {
+    const h = harness(); await h.service.create(user(A), h.createInput()); h.state.stored.phase = phase;
+    h.state.friendships.set(h.pair(A, B), 'missing');
+    await h.service.delete(user(A), h.state.stored._id.toString(), h.input()); assert.ok(h.state.stored.deletedAt);
+  }
+});
+
+test('delete key collision, quota reserve, absolute size, ambiguous write and CAS race paths', async () => {
+  for (const mode of ['ambiguous', 'race-replay', 'unknown', 'fail']) {
+    const h = harness(); await h.service.create(user(A), h.createInput()); const request = h.input(), outingId = h.state.stored._id.toString();
+    h.state.mode = mode;
+    if (mode === 'unknown' || mode === 'fail') await assert.rejects(h.service.delete(user(A), outingId, request), expectCode(mode === 'unknown' ? 'OUTING_OUTCOME_UNKNOWN' : 'OUTING_REVISION_CONFLICT'));
+    else assert.equal((await h.service.delete(user(A), outingId, request)).outcome.replayed, true);
+  }
+  const h = harness(); const create = h.createInput(); await h.service.create(user(A), create);
+  const outingId = h.state.stored._id.toString();
+  await assert.rejects(h.service.delete(user(A), outingId, { operationId: create.operationId, expectedRevision: 1 }), expectCode('OUTING_OPERATION_CONFLICT'));
+  h.state.stored.ordinaryOperations = h.limits.ordinaryOperations; h.state.stored.reservedOperations = h.limits.reservedOperations;
+  await h.service.delete(user(A), outingId, h.input()); assert.ok(h.state.stored.deleteReceipt);
+  const full = harness(); await full.service.create(user(A), full.createInput()); full.state.stored.title = 'x'.repeat(full.limits.maximumBytes);
+  await assert.rejects(full.service.delete(user(A), full.state.stored._id.toString(), full.input()), expectCode('OUTING_CAPACITY'));
+});
+
+test('create ambiguous readback never returns a concurrent tombstone and delete cannot reuse mutation keys', async () => {
+  const h = harness(), request = h.createInput();
+  const create = h.repo.create;
+  h.repo.create = async (doc) => { await create(doc); h.state.stored.deletedAt = new Date(); throw Error('ack lost'); };
+  await assert.rejects(h.service.create(user(A), request), expectCode('OUTING_DELETED'));
+  const other = harness(); await other.service.create(user(A), other.createInput());
+  const invite = other.input({ userIds: [C] }), outingId = other.state.stored._id.toString();
+  await other.service.mutate(user(A), outingId, 'invite', invite);
+  const before = plain(other.state.stored.receipts);
+  await assert.rejects(other.service.delete(user(A), outingId, { operationId: invite.operationId, expectedRevision: other.state.stored.revision }), expectCode('OUTING_OPERATION_CONFLICT'));
+  await other.service.delete(user(A), outingId, other.input());
+  assert.deepEqual(plain(other.state.stored.receipts), before);
+});
+
+test('released event permits a fresh create while old create cannot resurrect the tombstone', async () => {
+  const h = harness(), rows = [];
+  h.repo.findCreate = async (creator, op) => clone(rows.find((d) => d.creatorId === creator && d.createOperationId === op));
+  h.repo.findRaw = async (outingId) => clone(rows.find((d) => d._id.toString() === outingId));
+  h.repo.create = async (doc) => {
+    if (doc.eventId && rows.some((r) => r.eventId?.equals(doc.eventId))) throw Object.assign(Error('duplicate event'), { code: 11000 });
+    rows.push(clone(doc));
+  };
+  h.repo.compareAndSwap = async (revision, doc) => {
+    const index = rows.findIndex((r) => r._id.equals(doc._id) && r.revision === revision && !r.deletedAt);
+    if (index < 0) return false; rows[index] = clone(doc); return true;
+  };
+  const first = h.createInput({ eventId: EVENT }); const created = await h.service.create(user(A), first);
+  const second = h.createInput({ eventId: EVENT });
+  await assert.rejects(h.service.create(user(A), second), expectCode('OUTING_EVENT_EXISTS'));
+  await h.service.delete(user(A), created.outing.id, { operationId: 'delete_event', expectedRevision: 1 });
+  const fresh = await h.service.create(user(A), second);
+  assert.notEqual(fresh.outing.id, created.outing.id); assert.equal(rows.length, 2);
+  await assert.rejects(h.service.create(user(A), first), expectCode('OUTING_DELETED'));
+});
+
+test('real repository applies active filters and preserves event unique-index behavior', async () => {
+  const h = harness(), Model = h.load('models/FriendOuting.ts').FriendOuting, seen = [];
+  const original = { findOne: Model.findOne, find: Model.find, replaceOne: Model.replaceOne };
+  const chain = () => ({ select() { return this; }, sort() { return this; }, limit() { return this; }, lean() { return this; }, exec: async () => [] });
+  Model.findOne = (query) => { seen.push(query); return chain(); };
+  Model.find = (query) => { seen.push(query); return chain(); };
+  Model.replaceOne = (query) => { seen.push(query); return { exec: async () => ({ matchedCount: 1 }) }; };
+  try {
+    await h.actualRepo.find(id(99)); await h.actualRepo.list(A, 10); await h.actualRepo.headers(A, [id(99)]);
+    await h.actualRepo.affectedByRelationship(A, B); await h.actualRepo.compareAndSwap(7, { _id: user(id(99))._id });
+    assert.equal(seen.length, 5); for (const query of seen) assert.equal(query.deletedAt, null);
+    assert.equal(seen[4].revision, 7);
+    const indexes = Model.schema.indexes();
+    assert.ok(indexes.some(([fields, options]) => fields.eventId === 1 && options.unique && options.partialFilterExpression.eventId.$type === 'objectId'));
+  } finally { Object.assign(Model, original); }
+});
+
+test('expense and delete resolve against the same revision in both race orders', async () => {
+  for (const winner of ['delete', 'expense']) {
+    const h = harness(); await h.service.create(user(A), h.createInput());
+    const outingId = h.state.stored._id.toString(), del = h.input(), expense = h.input({ title: 'Meal', amount: 10, splitMode: 'equal', participantIds: [A, B] });
+    const original = h.repo.compareAndSwap; let release, entered;
+    const blocked = new Promise((resolve) => { release = resolve; }), ready = new Promise((resolve) => { entered = resolve; });
+    let first = true;
+    h.repo.compareAndSwap = async (...args) => { if (first) { first = false; entered(); await blocked; } return original(...args); };
+    const slow = winner === 'delete' ? h.service.mutate(user(A), outingId, 'expense_create', expense) : h.service.delete(user(A), outingId, del);
+    await ready;
+    if (winner === 'delete') await h.service.delete(user(A), outingId, del);
+    else await h.service.mutate(user(A), outingId, 'expense_create', expense);
+    release(); await assert.rejects(slow, expectCode(winner === 'delete' ? 'NOT_FOUND' : 'OUTING_REVISION_CONFLICT'));
+    assert.equal(!!h.state.stored.deletedAt, winner === 'delete');
+    assert.equal(h.state.stored.expenses.length, winner === 'expense' ? 1 : 0);
+  }
 });

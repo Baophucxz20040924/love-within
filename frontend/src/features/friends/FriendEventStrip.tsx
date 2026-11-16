@@ -71,40 +71,39 @@ export function FriendEventStrip() {
           Xem tất cả
         </Link>
       </h2>
-      {list.isError ? (
+      {list.isError && (
         <p className="text-sm text-muted suggest__error">
           Không tải được kèo.{' '}
           <button type="button" className="btn btn-ghost" onClick={() => void list.refetch()}>
             Thử lại
           </button>
         </p>
-      ) : (
-        <ul className="suggest__list fev-strip__list">
-          <li className="fev-strip__new-item">
-            <button type="button" className="fev-strip__new" onClick={() => setCreating(true)}>
-              <span className="fev-strip__plus" aria-hidden="true">
-                <Icon name="plus" size={26} />
-              </span>
-              <span>Lên kèo</span>
-            </button>
-          </li>
-          {list.isLoading && (
-            <li className="fev-strip__loading" aria-busy="true" aria-label="Đang tải">
-              <span className="skeleton" />
-            </li>
-          )}
-          {items.map((ev) => (
-            <li key={ev.id} className="fev-strip__item">
-              <EventCard ev={ev} />
-            </li>
-          ))}
-          {list.isSuccess && items.length === 0 && (
-            <li className="fev-strip__empty">
-              <span className="text-sm text-muted">Chưa có kèo nào sắp tới. Rủ bạn bè đi đâu đó nhé!</span>
-            </li>
-          )}
-        </ul>
       )}
+      <ul className="suggest__list fev-strip__list">
+        <li className="fev-strip__new-item">
+          <button type="button" className="fev-strip__new" onClick={() => setCreating(true)}>
+            <span className="fev-strip__plus" aria-hidden="true">
+              <Icon name="plus" size={26} />
+            </span>
+            <span>Lên kèo</span>
+          </button>
+        </li>
+        {list.isLoading && (
+          <li className="fev-strip__loading" aria-busy="true" aria-label="Đang tải">
+            <span className="skeleton" />
+          </li>
+        )}
+        {!list.isError && items.map((ev) => (
+          <li key={ev.id} className="fev-strip__item">
+            <EventCard ev={ev} />
+          </li>
+        ))}
+        {list.isSuccess && items.length === 0 && (
+          <li className="fev-strip__empty">
+            <span className="text-sm text-muted">Chưa có kèo nào sắp tới. Rủ bạn bè đi đâu đó nhé!</span>
+          </li>
+        )}
+      </ul>
       <FriendEventSheet open={creating} editing={null} onClose={() => setCreating(false)} onSaved={(ev) => navigate(`/friends/events/${ev.id}`)} />
     </section>
   );

@@ -28,6 +28,7 @@ export type OutingView = OutingCommon | OutingLedger;
 export interface OutingSummary extends OutingCommon { memberCount?: number; totalExpenses?: number }
 export interface MutationMeta { operationId: string; expectedRevision: number }
 export interface OutingResult { outing: OutingView; outcome: { operationId: string; kind: string; resultId: string; committedRevision: number; replayed: boolean } }
+export interface OutingDeleteResult { deletedId: string; outcome: { operationId: string; kind: 'delete'; resultId: string; committedRevision: number; replayed: boolean } }
 export interface CreateOuting { title: string; outingDate: string; inviteeIds: string[]; eventId?: string }
 export type ExpenseInput = { title?: string; amount: number } & ({ splitMode: 'equal'; participantIds: string[] } | { splitMode: 'custom'; allocations: Allocation[] });
 export const isLedger = (view: OutingView): view is OutingLedger => view.access === 'full' || view.access === 'restricted';

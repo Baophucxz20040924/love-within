@@ -47,9 +47,11 @@ function harness() {
     useEffect(effect) { const index = cursor++; if (!(index in cells)) { cells[index] = true; effects.push(effect); } },
   };
   const lock = { appLockEpoch: () => lockEpoch, isAppLockCurrent: value => value === lockEpoch && phase === 'ready' && document.visibilityState === 'visible' };
-  const outingApi = { OUTINGS_KEY: ['friends', 'outings'], outingKey: id => ['friends', 'outing', id] };
+  const outingApi = { OUTINGS_KEY: ['friends', 'outings'], outingKey: id => ['friends', 'outing', id], outingsApi: { get: id => h.get?.(id) ?? Promise.resolve(result.outing) } };
   const qc = {
     setQueryData: (...args) => calls.cache.push(['set', ...args]),
+    cancelQueries: (...args) => { calls.cache.push(['cancel', ...args]); return h.cancel?.() ?? Promise.resolve(); },
+    removeQueries: (...args) => calls.cache.push(['remove', ...args]),
     invalidateQueries: (...args) => { calls.cache.push(['invalidate', ...args]); return h.invalidate?.() ?? Promise.resolve(); },
   };
   const query = { useQueryClient: () => qc, useQuery: () => ({}) };
@@ -110,6 +112,29 @@ function formHarness(kind) {
   }
   return { h, transport, render, tree };
 }
+
+function pageHarness(initial = ledger, user = 'me') {
+  const h = harness(); let current = { data: initial, isFetching: false, isFetchedAfterMount: true }, transport;
+  h.calls.navigate = [];
+  const page = load('pages/FriendOutingPage.tsx', {
+    react: h.react, 'react/jsx-runtime': jsx,
+    'react-router-dom': { Link: 'Link', useParams: () => ({ id: 'outing' }), useNavigate: () => (...args) => h.calls.navigate.push(args) },
+    '@tanstack/react-query': { ...h.query, useQuery: () => current },
+    '../components/BottomSheet': { BottomSheet: 'BottomSheet' }, '../components/Icon': { Icon: 'Icon' },
+    '../components/StatusViews': { Page: 'Page', ErrorState: 'ErrorState', Skeleton: 'Skeleton' },
+    '../features/auth/AuthContext': { useAuth: () => ({ me: { user: { id: user } } }) },
+    '../lib/apiClient': h.api, '../lib/format': { formatVnd: String },
+    '../features/friends/api': { FRIEND_NOTIFICATIONS_KEY: ['friends', 'notifications'], FRIENDS_UNREAD_KEY: ['friends', 'unread'] },
+    '../features/friends/outings/api': { ...h.outingApi, outingsApi: { delete: (id, meta) => { h.calls.sent.push({ id, meta: plain(meta) }); return transport.promise; } } },
+    '../features/friends/outings/OutingForms': Object.fromEntries(['CapacityMessage', 'ExpenseSheet', 'InviteOutingSheet', 'OperationMessage', 'SettlementSheet'].map(key => [key, key]).concat([['memberName', () => 'Me']])),
+    '../features/friends/outings/presentation': load('features/friends/outings/presentation.ts'),
+    '../features/friends/outings/types': load('features/friends/outings/types.ts'),
+    '../features/friends/outings/useOutingOperation': h.hook, '../features/friends/outings/outings.css': {},
+  });
+  return { h, render: () => h.render(page.FriendOutingPage), setQuery: value => { current = value; }, setTransport: value => { transport = value; } };
+}
+const button = (tree, label) => find(tree, node => node.type === 'button' && node.props.children === label);
+const deleteResult = { deletedId: 'outing', outcome: { operationId: 'server', kind: 'delete', resultId: 'outing', committedRevision: 4, replayed: false } };
 
 (async () => {
   let checks = 0;
@@ -205,11 +230,12 @@ function formHarness(kind) {
     const view = membership === 'accepted' ? ledger : { ...ledger, access: membership === 'pending' ? 'invited' : 'declined', myMembership: membership };
     const page = load('pages/FriendOutingPage.tsx', {
       react: h.react, 'react/jsx-runtime': jsx,
-      'react-router-dom': { Link: 'Link', useParams: () => ({ id: 'outing' }) },
-      '@tanstack/react-query': { ...h.query, useQuery: () => ({ data: view }) },
+      'react-router-dom': { Link: 'Link', useParams: () => ({ id: 'outing' }), useNavigate: () => () => {} },
+      '@tanstack/react-query': { ...h.query, useQuery: () => ({ data: view, isFetchedAfterMount: true }) },
       '../components/BottomSheet': { BottomSheet: 'BottomSheet' }, '../components/Icon': { Icon: 'Icon' },
       '../components/StatusViews': { Page: 'Page' }, '../features/auth/AuthContext': { useAuth: () => ({ me: { user: { id: 'me' } } }) },
       '../lib/apiClient': h.api, '../lib/format': { formatVnd: String },
+      '../features/friends/api': { FRIEND_NOTIFICATIONS_KEY: ['friends', 'notifications'], FRIENDS_UNREAD_KEY: ['friends', 'unread'] },
       '../features/friends/outings/api': { ...h.outingApi, outingsApi: {} },
       '../features/friends/outings/OutingForms': Object.fromEntries(['CapacityMessage', 'ExpenseSheet', 'InviteOutingSheet', 'OperationMessage', 'SettlementSheet'].map(key => [key, key]).concat([['memberName', () => 'Me']])),
       '../features/friends/outings/presentation': load('features/friends/outings/presentation.ts'),
@@ -222,5 +248,90 @@ function formHarness(kind) {
     }
     checks++;
   }
-  console.log(`PASS ${checks} outing operation and actual form/legacy UI scenarios (mocked React hooks/query, actual TypeScript).`);
+  // Creator-only deletion checks all financial history, regardless of phase or restricted access.
+  for (const view of [ledger, { ...ledger, phase: 'completed', access: 'restricted' }]) {
+    const p = pageHarness(view); let tree = p.render();
+    assert.ok(button(tree, 'Xóa buổi chia tiền')); button(tree, 'Xóa buổi chia tiền').props.onClick();
+    tree = p.render(); assert.equal(find(tree, n => n.type === 'BottomSheet' && n.props.title === 'Xóa buổi chia tiền?').props.open, true);
+    button(tree, 'Hủy').props.onClick(); tree = p.render();
+    assert.equal(find(tree, n => n.type === 'BottomSheet' && n.props.title === 'Xóa buổi chia tiền?').props.open, false); checks++;
+  }
+  for (const [view, user] of [[ledger, 'other'], [{ ...ledger, expenses: [{ id: 'e', status: 'void', allocations: [], participantIds: [], amount: 1 }] }, 'me'], [{ ...ledger, settlements: [{ status: 'cancelled' }] }, 'me'], [{ ...ledger, totalExpenses: 1 }, 'me']]) {
+    const tree = pageHarness(view, user).render(); assert.equal(button(tree, 'Xóa buổi chia tiền'), undefined); checks++;
+  }
+  // A successful deletion waits for cancellation, removes only detail, refreshes lists and notices, then navigates.
+  {
+    const p = pageHarness(), pending = deferred(), cancelled = deferred(); p.setTransport(pending); p.h.cancel = () => cancelled.promise;
+    let tree = p.render(); button(tree, 'Xóa buổi chia tiền').props.onClick(); tree = p.render(); button(tree, 'Xóa vĩnh viễn').props.onClick();
+    pending.resolve(deleteResult); await tick(); assert.deepEqual(p.h.calls.cache.map(c => c[0]), ['cancel']); assert.equal(p.h.calls.navigate.length, 0);
+    cancelled.resolve(); await tick(); assert.deepEqual(p.h.calls.cache.map(c => c[0]), ['cancel', 'remove', 'invalidate', 'invalidate', 'invalidate']);
+    assert.deepEqual(plain(p.h.calls.cache[0][1]), { queryKey: ['friends', 'outing', 'outing'], exact: true });
+    assert.deepEqual(plain(p.h.calls.cache.slice(2).map(c => c[1].queryKey)), [['friends', 'outings'], ['friends', 'notifications'], ['friends', 'unread']]);
+    assert.equal(p.h.calls.navigate[0][0], '/friends/outings'); checks++;
+  }
+  for (const transition of ['conceal', 'changeSession', 'changeAccess', 'changeLock', 'hideOnly']) {
+    const p = pageHarness(), pending = deferred(), cancelled = deferred(); p.setTransport(pending); p.h.cancel = () => cancelled.promise;
+    let tree = p.render(); button(tree, 'Xóa buổi chia tiền').props.onClick(); tree = p.render(); button(tree, 'Xóa vĩnh viễn').props.onClick();
+    pending.resolve(deleteResult); await tick(); p.h[transition](); cancelled.resolve(); await tick();
+    assert.deepEqual(p.h.calls.cache.map(c => c[0]), ['cancel'], `${transition}: no cache mutation after cancellation`);
+    assert.equal(p.h.calls.navigate.length, 0); checks++;
+  }
+  // A response lost after SSE makes GET 404 must retain retry with the original revision/key.
+  {
+    const p = pageHarness(), pending = deferred(); p.setTransport(pending);
+    let tree = p.render(); button(tree, 'Xóa buổi chia tiền').props.onClick(); tree = p.render(); button(tree, 'Xóa vĩnh viễn').props.onClick();
+    p.setQuery({ data: ledger, isError: true, error: new p.h.api.ApiRequestError(404, 'NOT_FOUND', 'missing'), isFetching: false });
+    tree = p.render(); assert.equal(find(tree, n => n.type === 'BottomSheet' && n.props.title === 'Xóa buổi chia tiền?').props.open, true);
+    pending.reject(new p.h.api.ApiRequestError(503, 'UNKNOWN', 'unknown')); await tick(); tree = p.render();
+    assert.equal(find(tree, n => n.type === 'section' && n.props.className === 'outing-hero'), undefined);
+    const retry = button(tree, 'Thử lại cùng yêu cầu'); assert.ok(retry); const replay = deferred(); p.setTransport(replay); retry.props.onClick();
+    assert.deepEqual(p.h.calls.sent[0], p.h.calls.sent[1]); replay.resolve(deleteResult); await tick(); assert.equal(p.h.calls.navigate.length, 1); checks++;
+  }
+  // A remote deletion before submission closes confirmation and never sends stale content.
+  {
+    const p = pageHarness(); let tree = p.render(); button(tree, 'Xóa buổi chia tiền').props.onClick(); p.render();
+    p.setQuery({ data: ledger, isError: true, error: new p.h.api.ApiRequestError(404, 'NOT_FOUND', 'missing') }); tree = p.render();
+    assert.equal(find(tree, n => n.type === 'BottomSheet' && n.props.title === 'Xóa buổi chia tiền?').props.open, false); assert.equal(p.h.calls.sent.length, 0); checks++;
+  }
+  // Conflict leaves deletion blocked until review; refresh uses the current revision.
+  {
+    const p = pageHarness(), pending = deferred(); p.setTransport(pending); let tree = p.render(); button(tree, 'Xóa buổi chia tiền').props.onClick(); tree = p.render(); button(tree, 'Xóa vĩnh viễn').props.onClick();
+    pending.reject(new p.h.api.ApiRequestError(409, 'OUTING_REVISION_CONFLICT', 'stale')); await tick(); tree = p.render();
+    assert.equal(button(tree, 'Xóa vĩnh viễn').props.disabled, true);
+    assert.ok(p.h.calls.cache.some(c => c[0] === 'invalidate')); checks++;
+  }
+  // A delayed mutation receipt is never published without a fresh detail read.
+  for (const failure of ['404', 'network']) {
+    const h = harness(), mutation = deferred(), read = deferred(), metas = []; h.get = () => read.promise;
+    const running = h.render().run(3, meta => { metas.push(plain(meta)); return mutation.promise; });
+    mutation.resolve(result); await tick(); assert.equal(h.calls.cache.length, 0);
+    read.reject(failure === '404' ? new h.api.ApiRequestError(404, 'NOT_FOUND', 'deleted') : new Error('offline'));
+    assert.equal(await running, undefined); assert.equal(h.render().uncertain, true);
+    assert.equal(h.calls.cache.some(c => c[0] === 'set'), false);
+    h.get = () => Promise.resolve(result.outing);
+    await h.render().run(99, () => { throw new Error('must replay captured mutation'); });
+    assert.deepEqual(metas[0], metas[1]); checks++;
+  }
+  for (const transition of ['conceal', 'changeSession', 'changeAccess', 'changeLock', 'hideOnly']) {
+    const h = harness(), read = deferred(); h.get = () => read.promise;
+    const running = h.render().run(3, async () => result); await tick(); h[transition](); read.resolve(result.outing);
+    assert.equal(await running, undefined); assert.equal(h.calls.cache.length, 0, `${transition}: no stale validated result`); checks++;
+  }
+  for (const state of [{ isFetchedAfterMount: false }, { isFetchedAfterMount: true, isError: true, error: new Error('offline') }]) {
+    const p = pageHarness(); p.setQuery({ data: ledger, ...state }); const tree = p.render();
+    assert.equal(find(tree, n => n.type === 'section' && n.props.className === 'outing-hero'), undefined); checks++;
+  }
+  // A routine refetch keeps the mounted draft component instead of discarding its hook state.
+  {
+    const p = pageHarness(); let tree = p.render();
+    const add = find(tree, n => n.type === 'button' && Array.isArray(n.props.children) && n.props.children.includes(' Thêm chi phí'));
+    assert.ok(add); add.props.onClick(); tree = p.render(); assert.ok(find(tree, n => n.type === 'ExpenseSheet'));
+    p.setQuery({ data: ledger, isFetchedAfterMount: true, isFetching: true }); tree = p.render();
+    assert.ok(find(tree, n => n.type === 'ExpenseSheet')); assert.equal(find(tree, n => n.type === 'Skeleton'), undefined);
+    p.setQuery({ data: ledger, isFetchedAfterMount: true, isError: true, error: new Error('offline') }); tree = p.render();
+    assert.ok(find(tree, n => n.type === 'ExpenseSheet'), 'transient failure preserves the mounted draft and retry key');
+    p.setQuery({ data: ledger, isFetchedAfterMount: true }); tree = p.render();
+    assert.ok(find(tree, n => n.type === 'ExpenseSheet'), 'draft remains mounted on recovery'); checks++;
+  }
+  console.log(`PASS ${checks} outing operation and actual form/page scenarios (mocked React hooks/query, actual TypeScript).`);
 })().catch(error => { console.error(error); process.exitCode = 1; });

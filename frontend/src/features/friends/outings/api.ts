@@ -1,5 +1,5 @@
 import { apiRequest } from '../../../lib/apiClient';
-import type { CreateOuting, ExpenseInput, MutationMeta, OutingResult, OutingSummary, OutingView } from './types';
+import type { CreateOuting, ExpenseInput, MutationMeta, OutingDeleteResult, OutingResult, OutingSummary, OutingView } from './types';
 const root = '/friends/outings';
 const path = (id: string) => `${root}/${encodeURIComponent(id)}`;
 const post = <T extends MutationMeta>(id: string, action: string, body: T) => apiRequest<OutingResult>(`${path(id)}/${action}`, { method: 'POST', body });
@@ -10,6 +10,7 @@ export const outingsApi = {
   forEvent: (eventId: string) => apiRequest<{ items: OutingSummary[]; nextCursor: string | null }>(`${root}?eventId=${encodeURIComponent(eventId)}&limit=20`),
   get: (id: string) => apiRequest<OutingView>(path(id)),
   create: (body: CreateOuting & MutationMeta) => apiRequest<OutingResult>(root, { method: 'POST', body }),
+  delete: (id: string, meta: MutationMeta) => apiRequest<OutingDeleteResult>(path(id), { method: 'DELETE', body: meta }),
   membership: (id: string, action: 'accept' | 'decline', meta: MutationMeta) => post(id, `members/${action}`, meta),
   // The legacy endpoint name is retained; new members join immediately without financial consent.
   addMembers: (id: string, userIds: string[], meta: MutationMeta) => post(id, 'members/invite', { ...meta, userIds }),

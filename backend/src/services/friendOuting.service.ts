@@ -15,7 +15,7 @@ const invalidateOuting = (doc: FriendOutingRecord) => realtimeAudience.outing(do
 import { profileService } from './profile.service.js';
 import { outingAccess, outingInvitationEligible, outingRestricted, outingSummary, outingView } from './friendOuting.views.js';
 import { applyOutingMutation, outingOperationConflict, outingRevisionConflict, outingRestrictedError } from './friendOuting.mutations.js';
-import { outingPayloadHash, type OutingCreateInput, type OutingMutationInput, type OutingMutationKind } from './friendOuting.validation.js';
+import { outingPayloadHash, type OutingCreateInput, type OutingMutationInput, type OutingMutationKind, type OutingOperationInput } from './friendOuting.validation.js';
 export type { FriendOutingView, FriendOutingSummary } from './friendOuting.views.js';
 
 export interface OutingNotificationEvent {
@@ -33,6 +33,21 @@ async function notify(event: OutingNotificationEvent): Promise<void> {
 }
 const duplicate = (err: unknown) => !!err && typeof err === 'object' && 'code' in err && err.code === 11000;
 const outcomeUnknown = () => new AppError(503, 'OUTING_OUTCOME_UNKNOWN', 'Chưa xác định được kết quả ghi sổ. Giữ nguyên mã thao tác và nội dung để thử lại');
+const outingDeleted = () => new AppError(409, 'OUTING_DELETED', 'Buổi chia tiền đã bị xóa');
+const outingNotFound = () => Errors.notFound('Buổi chia tiền không tồn tại');
+function deleteReplay(doc: FriendOutingRecord, actorId: string, input: OutingOperationInput, hash: string) {
+  if (doc.creatorId !== actorId) throw outingNotFound();
+  const receipt = doc.deleteReceipt;
+  if (!receipt || receipt.operationId !== input.operationId || receipt.actorId !== actorId ||
+      receipt.kind !== 'delete' || receipt.hash !== hash || receipt.expectedRevision !== input.expectedRevision) throw outingOperationConflict();
+  return deleteResult(receipt, true);
+}
+function deleteResult(receipt: OutingReceipt, replayed: boolean) {
+  return { deletedId: receipt.resultId, outcome: { operationId: receipt.operationId, kind: 'delete' as const, resultId: receipt.resultId, committedRevision: receipt.revision, replayed } };
+}
+async function invalidateDeletedOuting(doc: FriendOutingRecord): Promise<void> {
+  await realtimeAudience.outing(doc, ['friend-outings', 'friend-notifications']).catch(() => {});
+}
 async function required(id: string, me: UserDoc): Promise<FriendOutingRecord> {
   const doc = await friendOutingRepository.find(id);
   if (!doc) throw Errors.notFound('Buổi chia tiền không tồn tại');
@@ -106,6 +121,7 @@ export const friendOutingService = {
     const previous = await friendOutingRepository.findCreate(actorId, input.operationId);
     if (previous) {
       if (previous.createHash !== hash) throw outingOperationConflict();
+      if (previous.deletedAt) throw outingDeleted();
       return result(previous, me, previous.receipts[0], true);
     }
     if (input.eventId) {
@@ -131,6 +147,7 @@ export const friendOutingService = {
       const saved = await friendOutingRepository.findCreate(actorId, input.operationId).catch(() => { throw outcomeUnknown(); });
       if (saved) {
         if (saved.createHash !== hash) throw outingOperationConflict();
+        if (saved.deletedAt) throw outingDeleted();
         await invalidateOuting(saved);
         return result(saved, me, saved.receipts[0], true);
       }
@@ -140,6 +157,49 @@ export const friendOutingService = {
     await invalidateOuting(doc);
     await notify({ type: 'outing_added', outingId: id.toString(), actorId, recipientIds: input.inviteeIds, operationId: input.operationId });
     return result(doc, me, receipt, false);
+  },
+  async delete(me: UserDoc, id: string, input: OutingOperationInput) {
+    const actorId = me._id.toString(), hash = outingPayloadHash('delete', input);
+    const doc = await friendOutingRepository.findRaw(id);
+    if (!doc) throw outingNotFound();
+    if (doc.deletedAt) return deleteReplay(doc, actorId, input, hash);
+    await outingAccess(doc, actorId);
+    if (doc.creatorId !== actorId) throw Errors.forbidden('Chỉ người tạo được xóa buổi chia tiền');
+    // Delete has its own receipt, but must not reuse any existing operation key.
+    receiptFor(doc, actorId, input.operationId, 'delete', hash);
+    if (doc.revision !== input.expectedRevision) throw outingRevisionConflict();
+    if (doc.expenses.length !== 0 || doc.settlements.length !== 0 || doc.totalExpenses !== 0)
+      throw new AppError(409, 'OUTING_NOT_EMPTY', 'Chỉ có thể xóa buổi chưa có khoản chi hoặc thanh toán');
+    const now = new Date(), receipt = { operationId: input.operationId, actorId, kind: 'delete', hash,
+      resultId: doc._id.toString(), revision: doc.revision + 1, financeRevision: doc.financeRevision,
+      at: now, bucket: 'reserved' as const, expectedRevision: input.expectedRevision };
+    const tombstone: FriendOutingRecord = { ...doc, revision: receipt.revision, updatedAt: now, deletedAt: now,
+      originalEventId: doc.eventId, eventId: null, deleteReceipt: receipt };
+    // Delete's dedicated receipt is independent of operation quotas, but never exceeds the absolute BSON ceiling.
+    if (outingBsonBytes(tombstone) >= OUTING_LIMITS.maximumBytes) throw new AppError(409, 'OUTING_CAPACITY', 'Sổ đã đạt giới hạn dung lượng');
+    let committed: boolean;
+    try { committed = await friendOutingRepository.compareAndSwap(doc.revision, tombstone); }
+    catch {
+      const fresh = await friendOutingRepository.findRaw(id).catch(() => { throw outcomeUnknown(); });
+      if (fresh?.deletedAt) {
+        const replay = deleteReplay(fresh, actorId, input, hash);
+        await invalidateDeletedOuting(doc);
+        return replay;
+      }
+      throw outcomeUnknown();
+    }
+    if (!committed) {
+      const fresh = await friendOutingRepository.findRaw(id);
+      if (!fresh) throw outingNotFound();
+      if (fresh.deletedAt) {
+        const replay = deleteReplay(fresh, actorId, input, hash);
+        await invalidateDeletedOuting(doc);
+        return replay;
+      }
+      throw outingRevisionConflict();
+    }
+    await invalidateDeletedOuting(doc);
+    return deleteResult(receipt, false);
   },
   async get(me: UserDoc, id: string) { return outingView(await required(id, me), me); },
   async list(me: UserDoc, input: { limit: number; cursor?: string; eventId?: string }) {

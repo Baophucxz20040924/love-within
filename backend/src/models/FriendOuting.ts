@@ -41,6 +41,8 @@ export interface FriendOutingRecord {
   eventId: Types.ObjectId | null; title: string; outingDate: string;
   participants: OutingParticipant[]; expenses: OutingExpense[]; settlements: OutingSettlement[];
   receipts: OutingReceipt[];
+  deletedAt?: Date | null; originalEventId?: Types.ObjectId | null;
+  deleteReceipt?: (OutingReceipt & { expectedRevision: number }) | null;
   phase: OutingPhase; revision: number; financeRevision: number;
   ordinaryOperations: number; reservedOperations: number; editCount: number;
   ordinaryWritesClosed?: boolean;
@@ -81,12 +83,15 @@ const receipt = new Schema({
   financeRevision: { type: Number, required: true }, at: { type: Date, required: true },
   bucket: { type: String, enum: ['ordinary', 'reserved'], required: true },
 }, { _id: false });
+const deleteReceipt = receipt.clone().add({ expectedRevision: { type: Number, required: true } });
 const schema = new Schema<FriendOutingRecord>({
   schemaVersion: { type: Number, default: 1 }, creatorId: { type: String, required: true },
   createOperationId: { type: String, required: true, maxlength: 80 }, createHash: { type: String, required: true },
   eventId: { type: Schema.Types.ObjectId, default: null }, title: { type: String, required: true, maxlength: 100 },
   outingDate: { type: String, required: true }, participants: { type: [participant], default: [] },
   expenses: { type: [expense], default: [] }, settlements: { type: [settlement], default: [] }, receipts: { type: [receipt], default: [] },
+  deletedAt: { type: Date, default: null }, originalEventId: { type: Schema.Types.ObjectId, default: null },
+  deleteReceipt: { type: deleteReceipt, default: null },
   phase: { type: String, enum: ['collecting', 'review', 'settling', 'completed'], default: 'collecting' },
   revision: { type: Number, default: 1 }, financeRevision: { type: Number, default: 1 },
   ordinaryOperations: { type: Number, default: 1 }, reservedOperations: { type: Number, default: 0 }, editCount: { type: Number, default: 0 },
