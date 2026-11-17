@@ -226,7 +226,7 @@ function ComposerDialog({ editing, initialFiles, onClose }: { editing: Story | n
         )}
         {error && <p ref={errorRef} id={errorId} className="form-feedback" role="alert" tabIndex={-1}>{error}</p>}
         {pending && <p className="composer__status" role="status">Đang xử lý ảnh/video…</p>}
-        <p id={hintId} className="composer__hint">Chỉ hai bạn xem được bài viết. Tối đa 10 tệp, gồm 1 video MP4/WebM ≤ 50 MB.</p>
+        <p id={hintId} className="composer__hint">Chỉ hai bạn xem được bài viết. Tối đa 10 tệp, gồm 1 video MP4/WebM/MOV ≤ 50 MiB.</p>
         <div className="composer__tools">
           <span className="composer__tools-label">Thêm vào bài viết</span>
           <button

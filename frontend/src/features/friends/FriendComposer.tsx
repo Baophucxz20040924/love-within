@@ -401,7 +401,7 @@ function ComposerDialog({
         )}
         {error && <p ref={errorRef} id={errorId} className="form-feedback" role="alert" tabIndex={-1}>{error}</p>}
         {pending && <p className="composer__status" role="status">Đang xử lý ảnh/video…</p>}
-        <p id={hintId} className="composer__hint">Gõ @ để nhắc tên bạn bè. Tối đa 10 tệp, gồm 1 video MP4/WebM ≤ 50 MB; có thể thêm bình chọn.</p>
+        <p id={hintId} className="composer__hint">Gõ @ để nhắc tên bạn bè. Tối đa 10 tệp, gồm 1 video MP4/WebM/MOV ≤ 50 MiB; có thể thêm bình chọn.</p>
         <div className="composer__tools">
           <span className="composer__tools-label">Thêm vào bài viết</span>
           <button

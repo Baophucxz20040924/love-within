@@ -25,6 +25,6 @@ export function PostVideo({ src, label = 'Video bài viết' }: { src: string; l
     <video ref={ref} src={src} controls playsInline preload="metadata" aria-label={label}
       onPlay={() => { if (verification !== 'clear' || document.visibilityState !== 'visible') ref.current?.pause(); }}
       onError={() => setFailed(true)} />
-    {failed && <p className="post-video__error" role="status">Không phát được video này. Hãy thử tải lại bài viết hoặc dùng trình duyệt hỗ trợ MP4/WebM.</p>}
+    {failed && <p className="post-video__error" role="status">Không phát được video này. Khả năng phát MP4, WebM và MOV phụ thuộc codec và trình duyệt. Hãy thử tải lại hoặc dùng trình duyệt khác.</p>}
   </div>;
 }

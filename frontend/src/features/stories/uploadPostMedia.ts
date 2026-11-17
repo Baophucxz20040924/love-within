@@ -74,7 +74,7 @@ export async function uploadPostMedia(
       }
     }
     if (item.mediaType === 'video') {
-      if (uploaded.mimeType !== 'video/mp4' && uploaded.mimeType !== 'video/webm') throw new Error('Định dạng video chưa được hỗ trợ.');
+      if (uploaded.mimeType !== 'video/mp4' && uploaded.mimeType !== 'video/webm' && uploaded.mimeType !== 'video/quicktime') throw new Error('Định dạng video chưa được hỗ trợ.');
       out.videos.push({ key: uploaded.key, width: uploaded.width, height: uploaded.height, mimeType: uploaded.mimeType });
     } else out.photos.push({ key: uploaded.key, width: uploaded.width, height: uploaded.height });
   }

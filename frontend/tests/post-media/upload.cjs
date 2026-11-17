@@ -67,6 +67,12 @@ const urls = {
   for (const [outcome, message] of [['onerror', /Không kết nối/], ['ontimeout', /quá lâu/], ['onabort', /hủy/], [403, /thất bại/]]) {
     outcomes.push(outcome); await assert.rejects(putPostMedia('https://storage.invalid/test', photo.blob), message);
   }
+  const mov = { ...video, id: 'mov', mimeType: 'video/quicktime', blob: new Blob(['original MOV bytes'], { type: 'video/quicktime' }) };
+  const movResult = await uploadPostMedia([mov], new Map(), urls, () => {});
+  assert.equal(movResult.videos[0].mimeType, 'video/quicktime');
+  assert.deepEqual(signed.at(-1), ['video/quicktime', mov.blob.size]);
+  assert.equal(requests.at(-1).headers['Content-Type'], 'video/quicktime');
+  assert.equal(requests.at(-1).blob, mov.blob, 'original prepared bytes sent unchanged');
   let active = true; let signCount = 0;
   const guardedUrls = { ...urls, uploadUrl: async (...args) => { signCount++; return urls.uploadUrl(...args); },
     videoUploadUrl: async (...args) => { signCount++; return urls.videoUploadUrl(...args); } };

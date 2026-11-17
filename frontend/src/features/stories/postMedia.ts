@@ -1,4 +1,5 @@
-export const POST_MEDIA_ACCEPT = 'image/*,video/mp4,video/webm,.heic,.heif,.mp4,.webm';
+export const POST_MEDIA_ACCEPT = 'image/*,video/mp4,video/webm,video/quicktime,.heic,.heif,.mp4,.webm,.mov';
+const VIDEO_PREFIX_BYTES = 64 * 1024;
 export const MAX_POST_MEDIA = 10;
 export const MAX_POST_VIDEOS = 1;
 export const MAX_VIDEO_BYTES = 50 * 1024 * 1024;
@@ -41,7 +42,7 @@ export type PreparedPostMedia = {
 
 type DecodedImage = { source: CanvasImageSource; width: number; height: number; close(): void };
 const imageError = () => new Error('Không đọc được ảnh này trên trình duyệt hiện tại. Hãy đổi sang JPEG/PNG rồi chọn lại (HEIC chỉ hỗ trợ khi trình duyệt đọc được).');
-const videoError = () => new Error('Không đọc được khung hình video trên trình duyệt hiện tại. Hãy đổi sang MP4 H.264 hoặc WebM rồi chọn lại.');
+const videoError = () => new Error('Không đọc được khung hình video. Khả năng phát MOV, MP4 và WebM phụ thuộc codec và trình duyệt; hãy thử MP4 H.264 hoặc WebM rồi chọn lại.');
 const aborted = () => new DOMException('Đã hủy xử lý tệp.', 'AbortError');
 function checkAbort(signal: AbortSignal) { if (signal.aborted) throw aborted(); }
 function validDimensions(width: number, height: number) {
@@ -70,7 +71,7 @@ function waitFor<T>(promise: Promise<T>, signal: AbortSignal, disposeLate?: (val
 }
 
 const text = (bytes: Uint8Array, start: number, length: number) => String.fromCharCode(...bytes.subarray(start, start + length));
-function signature(bytes: Uint8Array): string | undefined {
+function signature(bytes: Uint8Array, totalSize: number): string | undefined {
   if (bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return 'image/jpeg';
   if (text(bytes, 0, 8) === '\x89PNG\r\n\x1a\n') return 'image/png';
   if (['GIF87a', 'GIF89a'].includes(text(bytes, 0, 6))) return 'image/gif';
@@ -78,15 +79,36 @@ function signature(bytes: Uint8Array): string | undefined {
   if (text(bytes, 0, 2) === 'BM') return 'image/bmp';
   if (['II\x2a\0', 'MM\0\x2a'].includes(text(bytes, 0, 4))) return 'image/tiff';
   if (text(bytes, 0, 4) === '\0\0\x01\0') return 'image/x-icon';
-  if (bytes.length >= 16 && text(bytes, 4, 4) === 'ftyp') {
-    const size = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint32(0);
-    const brands = [text(bytes, 8, 4)];
-    for (let i = 16; i + 4 <= Math.min(size, bytes.length); i += 4) brands.push(text(bytes, i, 4));
-    if (brands.some(brand => ['avif', 'avis'].includes(brand))) return 'image/avif';
-    if (brands.some(brand => /^(hei[cxms]|hev[cxms]|mif1|msf1)$/.test(brand))) return 'image/heic';
-    // QuickTime/MOV is not MP4, even if a decoder happens to support it.
-    if (brands.includes('qt  ')) return undefined;
-    if (/^(isom|iso[2-9]|mp4[12]|avc1|M4V |MSNV|dash)$/.test(brands[0])) return 'video/mp4';
+  // Match the server's bounded BMFF box policy, including optional padding and extended sizes.
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  let offset = 0;
+  while (offset + 8 <= bytes.length) {
+    let size = view.getUint32(offset);
+    const type = text(bytes, offset + 4, 4);
+    let headerSize = 8;
+    if (size === 1) {
+      if (offset + 16 > bytes.length) break;
+      const wideSize = view.getBigUint64(offset + 8);
+      if (wideSize > BigInt(Number.MAX_SAFE_INTEGER)) break;
+      size = Number(wideSize);
+      headerSize = 16;
+    }
+    if (size < headerSize || offset + size > totalSize || offset + size > bytes.length) break;
+    if (type === 'ftyp') {
+      const payload = size - headerSize;
+      if (payload < 8 || (payload - 8) % 4 !== 0) break;
+      const major = text(bytes, offset + headerSize, 4);
+      const compatible: string[] = [];
+      for (let i = offset + headerSize + 8; i < offset + size; i += 4) compatible.push(text(bytes, i, 4));
+      const brands = [major, ...compatible];
+      if (brands.some(brand => /^(avif|avis)$/.test(brand))) return 'image/avif';
+      if (brands.some(brand => /^(hei[cxms]|hev[cxms]|mif1|msf1)$/.test(brand))) return 'image/heic';
+      if (major === 'qt  ') return 'video/quicktime';
+      if (!compatible.includes('qt  ') && /^(isom|iso[2-9]|mp4[12]|avc1|M4V |MSNV|dash)$/.test(major)) return 'video/mp4';
+      break;
+    }
+    if (!['free', 'skip', 'wide'].includes(type)) break;
+    offset += size;
   }
   if (text(bytes, 0, 4) === '\x1a\x45\xdf\xa3') {
     // EBML alone also identifies Matroska. Require its bounded DocType field to say WebM.
@@ -106,22 +128,22 @@ async function classify(file: File, signal: AbortSignal): Promise<{ mediaType: '
   if (!file.size) throw new Error('Tệp trống. Hãy chọn ảnh hoặc video khác.');
   const mime = file.type.toLowerCase().split(';')[0].trim();
   const missingMime = !mime || mime === 'application/octet-stream';
-  const detected = signature(new Uint8Array(await waitFor(file.slice(0, 4096).arrayBuffer(), signal)));
+  const detected = signature(new Uint8Array(await waitFor(file.slice(0, VIDEO_PREFIX_BYTES).arrayBuffer(), signal)), file.size);
   checkAbort(signal);
-  if (mime === 'video/mp4' || mime === 'video/webm' || (missingMime && detected?.startsWith('video/'))) {
+  if (mime === 'video/mp4' || mime === 'video/webm' || mime === 'video/quicktime' || (missingMime && detected?.startsWith('video/'))) {
     if (!detected?.startsWith('video/') || (!missingMime && detected !== mime)) {
-      throw new Error('Định dạng bên trong tệp không khớp MP4/WebM. Hãy đổi sang MP4 H.264 hoặc WebM rồi chọn lại.');
+      throw new Error('Định dạng bên trong tệp không khớp MP4/WebM/MOV. Hãy đổi sang MP4 H.264 hoặc WebM rồi chọn lại.');
     }
     if (file.size > MAX_VIDEO_BYTES) throw new Error('Video vượt quá 50 MiB. Hãy chọn video nhỏ hơn hoặc nén video trước.');
     return { mediaType: 'video', mimeType: detected };
   }
   const extension = file.name.toLowerCase().split('.').pop() ?? '';
   if (mime.startsWith('image/') || (missingMime && (detected?.startsWith('image/') || imageExtensions[extension]))) {
-    if (detected?.startsWith('video/')) throw new Error('Tệp được ghi là ảnh nhưng chứa video. Hãy chọn lại tệp MP4/WebM đúng định dạng.');
+    if (detected?.startsWith('video/')) throw new Error('Tệp được ghi là ảnh nhưng chứa video. Hãy chọn lại tệp MP4/WebM/MOV đúng định dạng.');
     if (file.size > MAX_IMAGE_INPUT_BYTES) throw new Error('Ảnh vượt quá 30 MiB. Hãy thu nhỏ ảnh hoặc chọn ảnh khác.');
     return { mediaType: 'image', mimeType: detected ?? (missingMime ? imageExtensions[extension] : mime) };
   }
-  throw new Error('Tệp chưa được hỗ trợ. Hãy chọn ảnh JPEG/PNG hoặc video MP4 H.264/WebM (không hỗ trợ MOV).');
+  throw new Error('Tệp chưa được hỗ trợ. Hãy chọn ảnh JPEG/PNG hoặc video MP4, WebM hay MOV.');
 }
 
 function decodeImageElement(blob: Blob, signal: AbortSignal): Promise<DecodedImage> {

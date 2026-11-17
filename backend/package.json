@@ -14,6 +14,7 @@
     "test:privacy-lock": "npm run build && node tests/privacy-lock/service.cjs",
     "test:credentials": "npm run build && node tests/credentials/unit.cjs",
     "test:credentials:mongo": "npm run build && node tests/credentials/mongo.cjs",
+    "test:bootstrap-deploy": "npm run build && node tests/credentials/bootstrap-deploy.cjs",
     "bootstrap:admin": "tsx scripts/bootstrap-admin.ts",
     "test:mentions": "node tests/post-mentions/story.test.cjs && node tests/post-mentions/repository.test.cjs && node tests/post-mentions/notification.test.cjs",
     "test:reactions": "node tests/post-mentions/reactions.test.cjs",

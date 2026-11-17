@@ -225,6 +225,25 @@ async function run() {
       assert.ok(await bcrypt.compare('operator-input-only', existing.passwordHash));
     } finally { User.findOne = originalFind; User.create = originalCreate; }
   });
+  await check('bootstrap duplicate insert accepts only a legitimate concurrent admin winner', async () => {
+    const originalFind = User.findOne, originalCreate = User.create;
+    try {
+      for (const winner of [{ email: ADMIN_EMAIL, role: 'admin', passwordHash: 'winner-hash' }, { email: ADMIN_EMAIL, role: 'user', passwordHash: 'user-hash' }, null]) {
+        let reads = 0, writes = 0;
+        User.findOne = () => ({ exec: async () => ++reads === 1 ? null : winner });
+        User.create = async () => { writes++; throw Object.assign(new Error('synthetic duplicate'), { code: 11000 }); };
+        if (winner?.role === 'admin') {
+          assert.equal(await bootstrapAdmin('losing-input-only'), 'exists');
+          assert.equal(winner.passwordHash, 'winner-hash');
+        } else await assert.rejects(() => bootstrapAdmin('losing-input-only'), /collision/);
+        assert.equal(reads, 2); assert.equal(writes, 1);
+      }
+      User.findOne = () => ({ exec: async () => null });
+      const failure = new Error('synthetic write failure');
+      User.create = async () => { throw failure; };
+      await assert.rejects(() => bootstrapAdmin('operator-input-only'), error => error === failure);
+    } finally { User.findOne = originalFind; User.create = originalCreate; }
+  });
   console.log(`PASS ${count} credential/admin unit groups`);
 }
 run().catch(error => { console.error(error); process.exitCode = 1; });

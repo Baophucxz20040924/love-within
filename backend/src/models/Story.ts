@@ -12,7 +12,7 @@ export const MAX_STORY_PHOTOS = 10;
 export const MAX_STORY_ATTACHMENTS = 10;
 export const MAX_STORY_VIDEOS = 1;
 export const MAX_STORY_VIDEO_BYTES = 50 * 1024 * 1024;
-export const STORY_VIDEO_MIME_TYPES = ['video/mp4', 'video/webm'] as const;
+export const STORY_VIDEO_MIME_TYPES = ['video/mp4', 'video/webm', 'video/quicktime'] as const;
 export const MAX_STORY_BODY = 20_000;
 
 export interface StoryVideo {

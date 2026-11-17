@@ -3,7 +3,7 @@ import { getStorage } from '../integrations/index.js';
 import { MAX_STORY_ATTACHMENTS, MAX_STORY_VIDEOS, MAX_STORY_VIDEO_BYTES, type StoryPhoto, type StoryVideo } from '../models/Story.js';
 import { Errors } from '../utils/errors.js';
 
-export const STORY_VIDEO_TYPES = { 'video/mp4': 'mp4', 'video/webm': 'webm' } as const;
+export const STORY_VIDEO_TYPES = { 'video/mp4': 'mp4', 'video/webm': 'webm', 'video/quicktime': 'mov' } as const satisfies Record<StoryVideo['mimeType'], string>;
 /** A small bounded read for container plausibility only, NOT codec/duration or malware verification. */
 export const STORY_VIDEO_PREFIX_BYTES = 64 * 1024;
 
@@ -32,7 +32,7 @@ export function storyVideoPrefix(scope: 'friends' | 'couples', id: string): stri
 }
 
 export async function createStoryVideoUploadUrl(prefix: string, month: string, mimeType: string, sizeBytes: number) {
-  if (!Object.hasOwn(STORY_VIDEO_TYPES, mimeType)) throw Errors.badRequest('Chỉ chấp nhận video MP4/WebM');
+  if (!Object.hasOwn(STORY_VIDEO_TYPES, mimeType)) throw Errors.badRequest('Chỉ chấp nhận video MP4/WebM/MOV');
   if (!Number.isSafeInteger(sizeBytes) || sizeBytes <= 0 || sizeBytes > MAX_STORY_VIDEO_BYTES) {
     throw Errors.badRequest('Video phải lớn hơn 0 và không quá 50 MiB');
   }
@@ -42,7 +42,7 @@ export async function createStoryVideoUploadUrl(prefix: string, month: string, m
   return { uploadUrl, videoKey, expiresIn, maxBytes: MAX_STORY_VIDEO_BYTES };
 }
 
-function plausibleMp4(bytes: Buffer, totalSize: number): boolean {
+function plausibleBmff(bytes: Buffer, totalSize: number, mimeType: 'video/mp4' | 'video/quicktime'): boolean {
   // An ftyp box near the start is conventional ISO-BMFF. Permit only padding boxes before it.
   let offset = 0;
   while (offset + 8 <= bytes.length) {
@@ -62,12 +62,12 @@ function plausibleMp4(bytes: Buffer, totalSize: number): boolean {
       // major_brand + minor_version, followed by zero or more compatible brands.
       if (payload < 8 || (payload - 8) % 4 !== 0) return false;
       const majorBrand = bytes.toString('latin1', offset + headerSize, offset + headerSize + 4);
-      // ISO-BMFF also carries HEIF/AVIF images and QuickTime MOV. An ftyp box alone is not MP4.
-      // Require a known MP4 major brand; a compatible MP4 brand must not rescue a foreign major brand.
-      if (!/^(?:isom|iso[2-9]|mp4[12]|avc1|M4V |MSNV|dash)$/.test(majorBrand)) return false;
+      // A compatible brand cannot rescue a foreign major brand. MOV requires modern qt ftyp.
+      if (mimeType === 'video/quicktime' ? majorBrand !== 'qt  ' : !/^(?:isom|iso[2-9]|mp4[12]|avc1|M4V |MSNV|dash)$/.test(majorBrand)) return false;
       for (let brandOffset = offset + headerSize + 8; brandOffset < offset + size; brandOffset += 4) {
         const compatible = bytes.toString('latin1', brandOffset, brandOffset + 4);
-        if (/^(?:hei[cxms]|hev[cxms]|mif1|msf1|avif|avis|qt  )$/.test(compatible)) return false;
+        if (/^(?:hei[cxms]|hev[cxms]|mif1|msf1|avif|avis)$/.test(compatible) ||
+            (mimeType === 'video/mp4' && compatible === 'qt  ')) return false;
       }
       return true;
     }
@@ -124,7 +124,7 @@ export async function validateStoryVideos(prefix: string, videos: StoryVideo[], 
   for (const video of videos) {
     const suffix = video.key.startsWith(prefix) ? video.key.slice(prefix.length) : '';
     const ext = STORY_VIDEO_TYPES[video.mimeType];
-    if (!/^\d{4}-(?:0[1-9]|1[0-2])\/[a-f\d]{8}-[a-f\d]{4}-[a-f\d]{4}-[a-f\d]{4}-[a-f\d]{12}\.(?:mp4|webm)$/.test(suffix) ||
+    if (!/^\d{4}-(?:0[1-9]|1[0-2])\/[a-f\d]{8}-[a-f\d]{4}-[a-f\d]{4}-[a-f\d]{4}-[a-f\d]{12}\.(?:mp4|webm|mov)$/.test(suffix) ||
         !suffix.endsWith(`.${ext}`)) throw Errors.forbidden('Video không thuộc bài viết của bạn hoặc định dạng không hợp lệ');
     if (seen.has(video.key)) throw Errors.badRequest('Có video bị trùng');
     seen.add(video.key);
@@ -139,8 +139,9 @@ export async function validateStoryVideos(prefix: string, videos: StoryVideo[], 
     // Required adapter capability: never fall back to downloading an entire video.
     const bytes = await storage.getObjectPrefix(video.key, STORY_VIDEO_PREFIX_BYTES);
     if (!Buffer.isBuffer(bytes) || bytes.length > STORY_VIDEO_PREFIX_BYTES || bytes.length > head.size ||
-        !(video.mimeType === 'video/mp4' ? plausibleMp4(bytes, head.size) : plausibleWebm(bytes))) {
-      throw Errors.badRequest('Tệp không có phần đầu video MP4/WebM hợp lệ');
+        !(video.mimeType === 'video/webm' ? plausibleWebm(bytes) :
+          (video.mimeType === 'video/mp4' || video.mimeType === 'video/quicktime') && plausibleBmff(bytes, head.size, video.mimeType))) {
+      throw Errors.badRequest('Tệp không có phần đầu video MP4/WebM/MOV hợp lệ');
     }
   }
 }

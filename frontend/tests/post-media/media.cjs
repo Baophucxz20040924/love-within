@@ -127,7 +127,8 @@ function hookHarness(helper, existing = [], initialFiles = []) {
   await assert.rejects(env.prepare(mp4('video/mp4', 'nope')), /không khớp/);
   await assert.rejects(env.prepare(mp4('video/mp4', 'heic')), /không khớp/);
   await assert.rejects(env.prepare(mp4('video/mp4', 'avif')), /không khớp/);
-  await assert.rejects(env.prepare(mp4('', 'qt  ')), /không hỗ trợ MOV/);
+  await assert.rejects(env.prepare(mp4('video/mp4', 'qt  ')), /không khớp/);
+  await assert.rejects(env.prepare(mp4('video/quicktime', 'isom')), /không khớp/);
   await assert.rejects(env.prepare(new File(['not a container'], 'clip.mp4', { type: 'video/mp4' })), /không khớp/);
   await assert.rejects(env.prepare(new File([Uint8Array.from([0x1a, 0x45, 0xdf, 0xa3]), 'matroska'], 'clip.webm', { type: 'video/webm' })), /không khớp/);
   await assert.rejects(env.prepare(mp4('image/png')), /chứa video/);
@@ -161,17 +162,44 @@ function hookHarness(helper, existing = [], initialFiles = []) {
     assert.equal(result.mediaType, 'video'); assert.equal(result.width, 1920); assert.equal(result.height, 1080);
     assert.equal(result.mimeType, result.blob.type); assert.equal(result.blob.size, file.size);
   }
+  // Fixtures exercise classification, not actual codec playback (the video element is mocked).
+  for (const mime of ['video/quicktime', '', 'application/octet-stream', 'VIDEO/QUICKTIME; codecs=hvc1']) {
+    const file = mp4(mime, 'qt  '); const result = await env.prepare(file);
+    assert.equal(result.mimeType, 'video/quicktime'); assert.equal(result.blob.type, 'video/quicktime');
+    assert.deepEqual(Buffer.from(await result.blob.arrayBuffer()), Buffer.from(await file.arrayBuffer()));
+  }
+  const box = (type, payload, extended = false) => {
+    const result = Buffer.alloc((extended ? 16 : 8) + payload.length);
+    result.writeUInt32BE(extended ? 1 : result.length, 0); result.write(type, 4, 'latin1');
+    if (extended) result.writeBigUInt64BE(BigInt(result.length), 8);
+    Buffer.from(payload).copy(result, extended ? 16 : 8); return result;
+  };
+  const ftyp = (major, brands = [], extended = false) => box('ftyp', Buffer.concat([Buffer.from(major, 'latin1'), Buffer.alloc(4), ...brands.map(b => Buffer.from(b, 'latin1'))]), extended);
+  const movFile = bytes => new File([bytes], 'clip.mov', { type: 'video/quicktime' });
+  await assert.rejects(env.prepare(new File(['not a video'], 'clip.mov')), /chưa được hỗ trợ/);
+  await assert.rejects(env.prepare(sized(movFile(ftyp('qt  ')), 50 * 1024 * 1024 + 1)), /50 MiB/);
+  for (const bytes of [ftyp('qt  '), ftyp('qt  ', ['isom'], true), Buffer.concat([box('free', Buffer.alloc(0)), box('skip', Buffer.alloc(0)), box('wide', Buffer.alloc(0)), ftyp('qt  ')])]) {
+    assert.equal((await env.prepare(movFile(bytes))).mimeType, 'video/quicktime');
+  }
+  for (const bytes of [ftyp('heic', ['qt  ']), ftyp('avif', ['qt  ']), ftyp('qt  ', ['heic']), ftyp('qt  ', ['avif']), ftyp('isom', ['qt  ']),
+    ftyp('qt  ').subarray(0, 15), Buffer.from('00000000667479707174202000000000', 'hex'), Buffer.from('0000001166747970717420200000000000', 'hex'),
+    Buffer.from('0000000166747970', 'hex'), Buffer.from('0000000166747970ffffffffffffffff', 'hex'),
+    Buffer.from('000000016674797000000000000000187174202000000000', 'hex').subarray(0, 23)]) {
+    await assert.rejects(env.prepare(movFile(bytes)), /không khớp/);
+  }
   assert.equal(env.urls.size, 0);
   assert.ok(env.videos.every(video => video.paused === 1 && video.preload === 'auto' && video.autoplay === false && !video.src));
   for (const options of [{ videoFail: true }, { videoWidth: 0 }]) {
     env = environment(options); await assert.rejects(env.prepare(mp4()), /MP4 H.264/); assert.equal(env.urls.size, 0);
   }
-  env = environment({ videoPending: true }); controller = new AbortController(); pending = env.prepare(mp4(), controller.signal); await tick();
-  assert.equal(env.videos.length, 1); assert.equal(env.videos[0].onloadedmetadata, undefined, 'metadata alone does not complete preparation');
-  controller.abort(); await assert.rejects(pending, { name: 'AbortError' }); assert.equal(env.urls.size, 0);
-  env = environment({ videoPending: true, manualTimers: true }); pending = env.prepare(webm()); await tick();
-  for (const timer of [...env.timers.values()]) timer();
-  await assert.rejects(pending, /30 giây/); assert.equal(env.urls.size, 0); assert.equal(env.timers.size, 0);
+  for (const file of [mp4(), webm(), mp4('video/quicktime', 'qt  ')]) {
+    env = environment({ videoPending: true }); controller = new AbortController(); pending = env.prepare(file, controller.signal); await tick();
+    assert.equal(env.videos.length, 1); assert.equal(env.videos[0].onloadedmetadata, undefined, 'metadata alone does not complete preparation');
+    controller.abort(); await assert.rejects(pending, { name: 'AbortError' }); assert.equal(env.urls.size, 0);
+    env = environment({ videoPending: true, manualTimers: true }); pending = env.prepare(file); await tick();
+    for (const timer of [...env.timers.values()]) timer();
+    await assert.rejects(pending, /30 giây/); assert.equal(env.urls.size, 0); assert.equal(env.timers.size, 0);
+  }
 
   // Integration: actual helper + actual hook; render/init creates no object URLs, effects own all decoding.
   env = environment({ bitmapFail: true });

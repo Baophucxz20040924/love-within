@@ -26,6 +26,16 @@ jobs:
       VPS_USER: ${{ secrets.VPS_USER }}
       VPS_PATH: ${{ secrets.VPS_PATH || '/opt/look-within' }}
     steps:
+      - name: Validate admin bootstrap secret
+        env:
+          ADMIN_BOOTSTRAP_PASSWORD: ${{ secrets.ADMIN_BOOTSTRAP_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [ -z "$ADMIN_BOOTSTRAP_PASSWORD" ]; then
+            echo '::error::Set ADMIN_BOOTSTRAP_PASSWORD in the GitHub environment dev.'
+            exit 1
+          fi
+
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
@@ -39,6 +49,8 @@ jobs:
         run: |
           npm ci
           npm run typecheck
+          npm run test:credentials
+          npm run test:bootstrap-deploy
 
       - name: Image name
         run: |
@@ -90,28 +102,49 @@ jobs:
           set -eu
           scp -P "$VPS_PORT" backend/docker-compose.yml backend/Caddyfile "$VPS_USER@$VPS_HOST:$VPS_PATH/"
 
-      - name: Pull and restart on the VPS
+      - name: Pull exact API image on the VPS
         env:
           IMAGE: ${{ env.IMAGE_REPO }}:${{ github.sha }}
           GHCR_USER: ${{ github.actor }}
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          set -eu
+          set -euo pipefail
           # The short-lived GITHUB_TOKEN is only used to pull this image during this run.
-          printf '%s' "$GHCR_TOKEN" | ssh -p "$VPS_PORT" "$VPS_USER@$VPS_HOST" \
+          printf '%s' "$GHCR_TOKEN" | ssh -T -p "$VPS_PORT" "$VPS_USER@$VPS_HOST" \
             "docker login ghcr.io -u '$GHCR_USER' --password-stdin"
-          ssh -p "$VPS_PORT" "$VPS_USER@$VPS_HOST" "set -eu
-            cd '$VPS_PATH'
-            test -f .env || { echo 'Missing $VPS_PATH/.env on the VPS'; exit 1; }
-            sed -i '/^IMAGE=/d' .env
-            printf 'IMAGE=%s\n' '$IMAGE' >> .env
-            docker compose pull
+          ssh -T -p "$VPS_PORT" "$VPS_USER@$VPS_HOST" \
+            "bash -c 'set -euo pipefail; cd \"\$1\"; test -f .env || { echo Missing-VPS-env >&2; exit 1; }; IMAGE=\"\$2\" docker compose pull api' _ '$VPS_PATH' '$IMAGE'"
+
+      - name: Bootstrap admin on the VPS
+        env:
+          IMAGE: ${{ env.IMAGE_REPO }}:${{ github.sha }}
+          ADMIN_BOOTSTRAP_PASSWORD: ${{ secrets.ADMIN_BOOTSTRAP_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [ -z "$ADMIN_BOOTSTRAP_PASSWORD" ]; then
+            echo '::error::Set ADMIN_BOOTSTRAP_PASSWORD in the GitHub environment dev.'
+            exit 1
+          fi
+          printf '%s' "$ADMIN_BOOTSTRAP_PASSWORD" | ssh -T -p "$VPS_PORT" "$VPS_USER@$VPS_HOST" \
+            "bash -c 'set -euo pipefail; cd \"\$1\"; IMAGE=\"\$2\" docker compose run --rm -T --no-deps api node dist/commands/bootstrap-admin.js --password-stdin' _ '$VPS_PATH' '$IMAGE'"
+
+      - name: Persist image and restart on the VPS
+        env:
+          IMAGE: ${{ env.IMAGE_REPO }}:${{ github.sha }}
+        run: |
+          set -euo pipefail
+          ssh -T -p "$VPS_PORT" "$VPS_USER@$VPS_HOST" "bash -c '
+            set -euo pipefail
+            cd \"\$1\"
+            test -f .env || { echo Missing-VPS-env >&2; exit 1; }
+            sed -i \"/^IMAGE=/d\" .env
+            printf \"IMAGE=%s\\n\" \"\$2\" >> .env
             docker compose up -d --remove-orphans
             for i in \$(seq 1 30); do
-              status=\$(docker inspect --format '{{.State.Health.Status}}' \$(docker compose ps -q api) 2>/dev/null || echo starting)
+              status=\$(docker inspect --format \"{{.State.Health.Status}}\" \$(docker compose ps -q api) 2>/dev/null || echo starting)
               echo \"api health: \$status\"
               if [ \"\$status\" = healthy ]; then docker image prune -f >/dev/null; exit 0; fi
               sleep 4
             done
             docker compose logs --tail 80 api
-            exit 1"
+            exit 1' _ '$VPS_PATH' '$IMAGE'"

@@ -8,13 +8,13 @@ Post composers prepare selected files before enabling submission. Images with mi
 
 HEIC/HEIF works only when the current browser has a native decoder. Unsupported files must be converted to JPEG/PNG outside the app. There is no bundled HEIC conversion service. Animated images become a still JPEG. Existing non-post image helpers are unchanged.
 
-Video accepts browser-decodable MP4 or WebM, at most **one video and 50 MiB per post**. The combined image/video limit is ten. A decoded first frame, not only metadata, is required before posting. MOV/QuickTime is not supported; MP4 H.264 is the recommended conversion target, but device codec support still varies. No transcoding, duration probing, thumbnail generation or malware scanning is provided. Width/height are client display metadata, not server-verified media properties.
+Video accepts browser-decodable MP4, WebM or modern QuickTime MOV, at most **one video and 50 MiB per post**. The combined image/video limit is ten. A decoded first frame, not only metadata, is required before posting. Playback depends on the browser and codec on both sender and viewer devices; MP4 H.264 is a suggested conversion target if decoding fails. No transcoding, duration probing, thumbnail generation or malware scanning is provided. Width/height are client display metadata, not server-verified media properties.
 
 Images appear in the existing image grid/gallery; a separate controls-enabled inline video follows it. Mixed picker order is not preserved across those two groups. Video does not autoplay or auto-resume. It pauses on document hiding, viewport exit, unmount and realtime privacy masking (which retains the React tree).
 
 ## REST and persistence
 
-Existing `photos[]` contracts and image upload endpoints remain unchanged. Story/FriendStory add `videos[]`, defaulting to `[]` for older documents. Each video is `{key, mimeType: 'video/mp4' | 'video/webm', width, height}`; read DTOs add a signed `url`.
+Existing `photos[]` contracts and image upload endpoints remain unchanged. Story/FriendStory add `videos[]`, defaulting to `[]` for older documents. Each video is `{key, mimeType: 'video/mp4' | 'video/webm' | 'video/quicktime', width, height}`; read DTOs add a signed `url`.
 
 - Create without `videos`: no videos.
 - Edit without `videos`: preserve current videos, including in the combined-count/nonempty checks.
@@ -24,11 +24,11 @@ Existing `photos[]` contracts and image upload endpoints remain unchanged. Story
 Separate `POST /api/stories/video-upload-url` and `POST /api/friends/stories/video-upload-url` use the existing context authentication/membership and upload limiters. Response: `{uploadUrl, videoKey, expiresIn, maxBytes}`. They accept MIME and positive integer `sizeBytes` up to 50 MiB. Keys are scoped to:
 
 ```
-couples/<coupleId>/story-videos/YYYY-MM/<uuid>.mp4|webm
-friends/<userId>/story-videos/YYYY-MM/<uuid>.mp4|webm
+couples/<coupleId>/story-videos/YYYY-MM/<uuid>.mp4|webm|mov
+friends/<userId>/story-videos/YYYY-MM/<uuid>.mp4|webm|mov
 ```
 
-These sibling prefixes cannot pass the existing post image-prefix validation. Saving new or descriptor-changed videos verifies key scope/extension, existence, nonzero size, size cap, stored MIME and a bounded 64 KiB container plausibility check. This check does not establish codec validity or sanitize video. Unchanged attached descriptors avoid redundant storage reads. Newly attached photos also require nonzero allowed-image HEAD metadata; existing/shared moment photos retain compatibility.
+These sibling prefixes cannot pass the existing post image-prefix validation. Saving new or descriptor-changed videos verifies key scope/extension, existence, nonzero size, size cap, stored MIME and a bounded 64 KiB container plausibility check. MOV requires a structurally valid `ftyp` with major brand `qt  `, optionally preceded by `free`/`skip`/`wide` padding; older QuickTime files without this header are not accepted. HEIF/AVIF conflicting brands are rejected, and MP4 remains distinct. This check does not establish codec validity or sanitize video. Unchanged attached descriptors avoid redundant storage reads. Newly attached photos also require nonzero allowed-image HEAD metadata; existing/shared moment photos retain compatibility.
 
 Removed videos and soft-deleted post media remain in storage deliberately: references may be shared. There is no new reference-count/orphan cleanup job, so failed uploads and removed files can consume storage until an explicitly designed maintenance process is introduced. Existing photo cleanup behavior is not redesigned here.
 
@@ -45,6 +45,8 @@ Existing ACL checks still run before URLs are returned. Already-issued signed UR
 Local mixed-media verification also exposed an existing couple Story realtime feedback loop: feed refresh → mark seen → broad `stories` invalidation → feed refresh. Seen acknowledgements now publish `story-unread`, mapped only to the unread badge query; post/comment changes retain broad `stories` invalidation. Cross-tab badges remain synchronized without repeatedly loading the feed or weakening API rate limits. Deploy the matching backend/frontend domain lists together; older clients ignore the unfamiliar hint and retain polling/reconnect reconciliation.
 
 ## Verification
+
+For MOV-specific automated evidence and the outstanding real-iPhone H.264/HEVC device matrix, see [MOV compatibility and verification](mov-compatibility.md).
 
 ```
 npm --prefix backend run typecheck

@@ -4,7 +4,9 @@
 
 The API never creates an administrator at startup. Public registration reserves `admin@phucxz.com`; an account with this email alone is not an admin. Both its persisted `role: admin` and exact normalized reserved email are required.
 
-From the backend directory, an authorized operator must explicitly supply `MONGODB_URI` in the process environment and pipe one initial password to:
+The existing **Deploy backend (dev)** workflow targets the database configured for the VPS `api` service. Set `ADMIN_BOOTSTRAP_PASSWORD` as a secret in the GitHub `dev` environment before running that workflow. Each deployment pulls the exact new API image, passes the secret through SSH stdin to its compiled bootstrap command, and only after success persists the image and restarts the services. A missing secret, reserved-email collision, or bootstrap failure fails the deployment. The secret is not persisted in the VPS environment file. Re-running does not reset an existing admin's password; changing the GitHub secret does not rotate credentials.
+
+Alternatively, from the backend directory, an authorized operator must explicitly supply `MONGODB_URI` in the process environment and pipe one initial password to:
 
 ```sh
 npm run bootstrap:admin -- --password-stdin
@@ -55,7 +57,7 @@ Local realtime revocation after commit is supplementary; current credential chec
 
 ## Local verification
 
-`npm run test:credentials` builds and runs synthetic in-memory credential/admin unit tests without reading `.env`, connecting to Mongo, starting HTTP, or contacting providers. The suite covers token-purpose separation, legacy zero, forced change, version snapshots, races, one-use completion, bootstrap collision/rerun, audit-safe outputs, and asynchronous middleware failure forwarding.
+`npm run test:credentials` builds and runs synthetic in-memory credential/admin unit tests without reading `.env`, connecting to Mongo, starting HTTP, or contacting providers. The suite covers token-purpose separation, legacy zero, forced change, version snapshots, races, one-use completion, bootstrap collision/rerun/concurrent-insert winner checks, audit-safe outputs, and asynchronous middleware failure forwarding. `npm run test:bootstrap-deploy` builds and verifies the compiled command with mocks and the deployment transport with a fake SSH process; the dev workflow runs both suites before building the image.
 
 An operator may separately run the opt-in synthetic Mongo test:
 

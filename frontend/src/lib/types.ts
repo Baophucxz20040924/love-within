@@ -247,7 +247,7 @@ export interface StoryPhotoView {
 
 export interface StoryVideoInput {
   key: string;
-  mimeType: 'video/mp4' | 'video/webm';
+  mimeType: 'video/mp4' | 'video/webm' | 'video/quicktime';
   width: number;
   height: number;
 }

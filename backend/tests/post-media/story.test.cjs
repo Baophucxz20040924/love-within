@@ -34,9 +34,10 @@ const me = { _id: author, timezone: 'UTC' };
 const couple = { _id: coupleId, memberIds: [author, friend], timezone: 'UTC' };
 const mp4 = Buffer.from('000000186674797069736f6d0000020069736f6d6d703432', 'hex');
 const webm = Buffer.from('1a45dfa3874282847765626d', 'hex');
+const mov = Buffer.from('0000001466747970717420200000000069736f6d', 'hex');
 const suffix = '2026-11/12345678-1234-4234-8234-123456789abc';
 const video = (scope = 'friends', mimeType = 'video/mp4') => ({
-  key: `${scope}/${scope === 'friends' ? author : coupleId}/story-videos/${suffix}.${mimeType === 'video/mp4' ? 'mp4' : 'webm'}`,
+  key: `${scope}/${scope === 'friends' ? author : coupleId}/story-videos/${suffix}.${mimeType === 'video/mp4' ? 'mp4' : mimeType === 'video/webm' ? 'webm' : 'mov'}`,
   mimeType, width: 640, height: 360,
 });
 const photo = (scope = 'friends', n = 0) => ({ key: `${scope}/${scope === 'friends' ? author : coupleId}/stories/a${n}.jpg`, width: 10, height: 10 });
@@ -44,7 +45,7 @@ let objects, calls, current, blocked, accepted, race, pollRace;
 function reset() { objects = new Map(); calls = []; current = null; blocked = false; accepted = true; race = false; pollRace = false; }
 reset();
 function put(v, overrides = {}) {
-  const bytes = v.mimeType === 'video/webm' ? webm : mp4;
+  const bytes = v.mimeType === 'video/webm' ? webm : v.mimeType === 'video/quicktime' ? mov : mp4;
   objects.set(v.key, { size: bytes.length, mimeType: v.mimeType, bytes, ...overrides });
 }
 const storage = {
@@ -143,7 +144,9 @@ test('model defaults keep legacy posts readable and enforce video descriptors', 
   for (const Model of [storyModel.Story, friendModel.FriendStory]) {
     const doc = new Model({ authorId: author, coupleId, happenedOn: '2026-11-15' });
     assert.equal(doc.videos.length, 0);
-    doc.videos = [{ ...video(), mimeType: 'video/quicktime' }];
+    doc.videos = [video('friends', 'video/quicktime')];
+    assert.equal(doc.validateSync()?.errors['videos.0.mimeType'], undefined);
+    doc.videos = [{ ...video(), mimeType: 'video/unknown' }];
     assert.ok(doc.validateSync().errors['videos.0.mimeType']);
   }
 });
@@ -207,11 +210,18 @@ for (const scope of ['friends', 'couples']) {
   test(`${scope}: upload cap and MIME use distinct prefix without changing images`, async () => {
     reset(); const api = byScope(scope);
     for (const size of [0, -1, 50 * 1024 * 1024 + 1, Infinity, 1.5]) await assert.rejects(api.upload('video/mp4', size), status(400));
-    for (const mime of ['video/quicktime', 'image/jpeg', '__proto__']) await assert.rejects(api.upload(mime, 1), status(400));
+    for (const mime of ['video/unknown', 'image/jpeg', '__proto__']) await assert.rejects(api.upload(mime, 1), status(400));
     const result = await api.upload('video/webm', 50 * 1024 * 1024);
     assert.equal(result.maxBytes, 50 * 1024 * 1024);
     assert.ok(result.videoKey.startsWith(`${scope}/${scope === 'friends' ? author : coupleId}/story-videos/2026-11/`));
     assert.ok(result.videoKey.endsWith('.webm')); assert.equal(calls.filter((c) => c[0] === 'upload').length, 1);
+    const movUpload = await api.upload('video/quicktime', 1);
+    assert.ok(movUpload.videoKey.endsWith('.mov'));
+    assert.equal(calls.at(-1)[1].mimeType, 'video/quicktime');
+    const v = video(scope, 'video/quicktime'); put(v);
+    const view = await api.create({ body: '', photos: [], videos: [v] });
+    assert.equal(view.videos[0].mimeType, 'video/quicktime');
+    assert.ok(calls.some(c => c[0] === 'prefix' && c[1] === v.key && c[2] === 64 * 1024));
   });
 }
 
@@ -297,6 +307,35 @@ test('MP4 ftyp brands reject HEIC, AVIF, MOV and unknown containers despite matc
   }
 });
 
+test('MOV requires bounded qt major ftyp, rejects mixed image brands and mismatched MP4', async () => {
+  reset(); const prefix = media.storyVideoPrefix('friends', author.toString());
+  const v = video('friends', 'video/quicktime');
+  const box = (type, payload, extended = false) => {
+    const b = Buffer.alloc((extended ? 16 : 8) + payload.length);
+    b.writeUInt32BE(extended ? 1 : b.length, 0); b.write(type, 4, 'latin1');
+    if (extended) b.writeBigUInt64BE(BigInt(b.length), 8);
+    payload.copy(b, extended ? 16 : 8); return b;
+  };
+  const ftyp = (major, brands = [], extended = false) => box('ftyp', Buffer.concat([Buffer.from(major, 'latin1'), Buffer.alloc(4), ...brands.map(b => Buffer.from(b, 'latin1'))]), extended);
+  for (const bytes of [mov, ftyp('qt  ', ['isom'], true), Buffer.concat(['free', 'skip', 'wide'].map(x => box(x, Buffer.alloc(0))).concat([mov]))]) {
+    put(v, { bytes, size: bytes.length }); await media.validateStoryVideos(prefix, [v]);
+  }
+  for (const bytes of [mp4, webm, ftyp('heic', ['qt  ']), ftyp('avif', ['qt  ']), ftyp('qt  ', ['heic']), ftyp('qt  ', ['avif']),
+    mov.subarray(0, 15), Buffer.from('00000000667479707174202000000000', 'hex'), Buffer.from('0000001166747970717420200000000000', 'hex'),
+    Buffer.from('0000000166747970', 'hex'), Buffer.from('0000000166747970ffffffffffffffff', 'hex'),
+    Buffer.from('000000016674797000000000000000187174202000000000', 'hex').subarray(0, 23)]) {
+    put(v, { bytes, size: bytes.length }); await assert.rejects(media.validateStoryVideos(prefix, [v]), status(400));
+  }
+  for (const overrides of [{ size: 0 }, { size: 50 * 1024 * 1024 + 1 }, { mimeType: 'video/mp4' }, { size: 100_000, bytes: Buffer.alloc(64 * 1024 + 1) }]) {
+    put(v, overrides); await assert.rejects(media.validateStoryVideos(prefix, [v]), status(400));
+  }
+  for (const key of [v.key.replace('.mov', '.mp4'), v.key.replace(author.toString(), other.toString()), v.key.replace('/story-videos/', '/stories/')]) {
+    await assert.rejects(media.validateStoryVideos(prefix, [{ ...v, key }]), status(403));
+  }
+  const m = video(); put(m, { bytes: mov, size: mov.length });
+  await assert.rejects(media.validateStoryVideos(prefix, [m]), status(400));
+});
+
 test('existing ACL must succeed before any signed video URL', async () => {
   reset(); current = makeStory({ videos: [video()] }); const viewer = { _id: friend };
   blocked = true; await assert.rejects(friendService.get(viewer, storyId.toString()), status(404));
@@ -368,12 +407,14 @@ for (const kind of ['story', 'friendStory']) test(`${kind} routes: video schema,
   assert.equal(routes.find((r) => r.url === '/upload-url').handlers[0], limiter);
   const uploadSchema = upload.handlers.find((h) => h?.schemas)?.schemas.body;
   assert.equal(uploadSchema.safeParse({ mimeType: 'video/mp4', sizeBytes: 50 * 1024 * 1024 }).success, true);
+  assert.equal(uploadSchema.safeParse({ mimeType: 'video/quicktime', sizeBytes: 1 }).success, true);
   assert.equal(uploadSchema.safeParse({ mimeType: 'video/mp4', sizeBytes: 50 * 1024 * 1024 + 1 }).success, false);
   const schema = routes.find((r) => r.method === 'patch' && r.url === '/:id').handlers.find((h) => h?.schemas).schemas.body;
   assert.equal(Object.hasOwn(schema.parse({ body: 'legacy' }), 'videos'), false);
   assert.equal(schema.parse({ videos: [] }).videos.length, 0);
   assert.equal(schema.safeParse({ videos: [video()] }).success, true);
-  for (const videos of [null, [video(), video()], [{ ...video(), mimeType: 'video/quicktime' }], [{ ...video(), width: 0 }], [{ ...video(), height: 20_001 }]]) {
+  assert.equal(schema.safeParse({ videos: [video('friends', 'video/quicktime')] }).success, true);
+  for (const videos of [null, [video(), video()], [{ ...video(), mimeType: 'video/unknown' }], [{ ...video(), width: 0 }], [{ ...video(), height: 20_001 }]]) {
     assert.equal(schema.safeParse({ videos }).success, false);
   }
 });
