@@ -1,12 +1,25 @@
 import { Schema, model, type Document, type Types } from 'mongoose';
 import type { LedgerReason } from './LedgerEntry.js';
 
+export interface RewardProvenance {
+  version: 1;
+  source: 'checkin' | 'moment' | 'quest';
+  localDate: string;
+  policyVersion: 2;
+  component: 'checkin_pair' | 'checkin_exp' | 'photo_base' | 'timely_pair_bonus' | 'quest_exp';
+  /** Per beneficiary, not a guessed total derived from ledger delta. */
+  baseCoin: number;
+  bonusCoin: number;
+  commonStreak?: number;
+}
 export interface OperationPayload {
   actorUserId: string;
   allocations: Record<string, number>;
   exp: number;
   reason: LedgerReason;
   refId: string | null;
+  /** Absent on v1 payloads: never add defaults to their fingerprint. */
+  provenance?: RewardProvenance;
 }
 export interface OperationResult {
   balances: Record<string, number>;
@@ -44,4 +57,7 @@ export interface RewardIntent {
   exp: number;
   ownerUserId: string | null;
   localDate?: string;
+  /** New intents freeze allocations rather than re-reading mutable membership. */
+  allocations?: Record<string, number>;
+  provenance?: RewardProvenance;
 }

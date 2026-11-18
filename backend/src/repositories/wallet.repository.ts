@@ -85,6 +85,7 @@ export const walletRepository = {
   async appendLedger(input: {
     operationKey: string; coupleId: Types.ObjectId; type: LedgerType; delta: number; balanceAfter: number;
     reason: OperationPayload['reason']; refId: Types.ObjectId | null; actorUserId: Types.ObjectId; ownerUserId: Types.ObjectId | null;
+    provenance?: OperationPayload['provenance'];
   }) {
     try {
       await LedgerEntry.updateOne({ operationKey: input.operationKey }, { $setOnInsert: input }, { upsert: true }).exec();

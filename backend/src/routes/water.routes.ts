@@ -43,6 +43,7 @@ waterRouter.post(
 const uploadUrlSchema = z.object({
   mimeType: z.enum(Object.keys(ALLOWED_IMAGE_TYPES) as [string, ...string[]]),
   sizeBytes: z.number().int().positive(),
+  purpose: z.enum(['ai', 'manual_proof']).default('ai'),
 });
 
 /** POST /api/water/upload-url → { uploadUrl, imageKey, expiresIn, maxBytes } */
@@ -51,7 +52,7 @@ waterRouter.post(
   uploadUrlLimiter,
   validate({ body: uploadUrlSchema }),
   asyncHandler(async (req, res) => {
-    ok(res, await waterService.createUploadUrl(req.couple!, req.body.mimeType, req.body.sizeBytes), 201);
+    ok(res, await waterService.createUploadUrl(req.couple!, req.userId!, req.body.mimeType, req.body.sizeBytes, req.body.purpose), 201);
   }),
 );
 
@@ -67,15 +68,18 @@ waterRouter.post(
   }),
 );
 
-const manualSchema = z.object({ amountMl: z.number().int().min(10).max(MAX_MANUAL_ML) });
+const manualSchema = z.object({
+  amountMl: z.number().int().min(10).max(MAX_MANUAL_ML),
+  imageKey: z.string().min(1).max(300).optional(),
+});
 
-/** POST /api/water/manual { amountMl } → PENDING log (manual entries need approval too). */
+/** POST /api/water/manual { amountMl, imageKey? } → PENDING log, never AI. */
 waterRouter.post(
   '/manual',
   waterManualLimiter,
   validate({ body: manualSchema }),
   asyncHandler(async (req, res) => {
-    ok(res, await waterService.submitManual(req.couple!, req.userId!, req.body.amountMl), 201);
+    ok(res, await waterService.submitManual(req.couple!, req.userId!, req.body.amountMl, req.body.imageKey), 201);
   }),
 );
 

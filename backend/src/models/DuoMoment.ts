@@ -19,6 +19,9 @@ export interface MomentPost {
   postedAt: Date;
   /** v3: rounded-up minutes after rewardEndsAt (at least 1 if late). Historical values are retained. */
   lateMin: number;
+  /** Present only on posts accepted by the durable post-effects writer. */
+  effectsCompletedAt?: Date | null;
+  effectsBoth?: boolean;
 }
 
 export interface MomentSession {
@@ -38,6 +41,10 @@ export interface DuoMomentDoc extends Document {
   localDate: string;
   scheduleVersion?: number;
   timezone?: string;
+  effectsPending?: boolean;
+  effectsLeaseToken?: string | null;
+  effectsLeaseUntil?: Date | null;
+  rewardSettlementPending?: boolean;
   sessions?: MomentSession[];
   // Legacy fields remain readable, never rewritten or reopened.
   promptAt: Date;
@@ -57,6 +64,8 @@ const postSchema = new Schema<MomentPost>(
     caption: { type: String, default: '', maxlength: MAX_MOMENT_CAPTION },
     postedAt: { type: Date, required: true },
     lateMin: { type: Number, default: 0, min: 0 },
+    effectsCompletedAt: { type: Date, default: undefined },
+    effectsBoth: { type: Boolean, default: undefined },
   },
   { _id: false },
 );
@@ -78,6 +87,10 @@ const momentSchema = new Schema<DuoMomentDoc>(
     localDate: { type: String, required: true },
     scheduleVersion: Number,
     timezone: String,
+    effectsPending: { type: Boolean, default: false },
+    effectsLeaseToken: { type: String, default: null },
+    effectsLeaseUntil: { type: Date, default: null },
+    rewardSettlementPending: { type: Boolean, default: false },
     // undefined is important: old documents must remain identifiable as legacy.
     sessions: { type: [sessionSchema], default: undefined, validate: (sessions: MomentSession[]) => sessions.length <= 3 },
     promptAt: Date,
@@ -88,6 +101,8 @@ const momentSchema = new Schema<DuoMomentDoc>(
   { timestamps: true },
 );
 momentSchema.index({ coupleId: 1, localDate: 1 }, { unique: true });
+momentSchema.index({ effectsPending: 1, effectsLeaseUntil: 1, _id: 1 });
+momentSchema.index({ coupleId: 1, rewardSettlementPending: 1, localDate: 1 });
 // Retain the legacy index; no destructive index migration is needed.
 momentSchema.index({ localDate: 1, notifiedAt: 1, promptAt: 1 });
 momentSchema.index({ localDate: 1, 'sessions.promptAt': 1 });

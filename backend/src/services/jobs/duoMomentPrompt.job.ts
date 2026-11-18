@@ -16,7 +16,7 @@ const MAX_PAGES = 100;
 const NOTIFY_BATCH = 200;
 
 /** Lock-screen text of the prompt (plan wording). */
-export const PROMPT_BODY = 'Khoảnh khắc hôm nay đã mở. Cả hai chụp trước hạn thưởng để cùng nhận 40 Xu!';
+export const PROMPT_BODY = 'Khoảnh khắc hôm nay đã mở. Cùng chụp trước hạn để nhận thưởng đủ đôi!';
 
 async function createMissingDays(now: Date): Promise<number> {
   let after: Types.ObjectId | null = null;
@@ -25,11 +25,14 @@ async function createMissingDays(now: Date): Promise<number> {
     const couples = await coupleRepository.listActivePage(after, COUPLES_PER_PAGE);
     if (couples.length === 0) break;
     after = couples[couples.length - 1]._id;
-    const pairs = couples.map((c) => ({ couple: c, coupleId: c._id, localDate: getLocalDate(now, c.timezone) }));
+    const pairs = couples.map((c) => {
+      const timezone = c.dailyRewardPolicy?.timezone ?? c.timezone;
+      return { coupleId: c._id, timezone, localDate: getLocalDate(now, timezone) };
+    });
     const existing = await momentRepository.existingDays(pairs);
     const missing: NewMomentDay[] = pairs
       .filter((p) => !existing.has(`${p.coupleId.toString()}|${p.localDate}`))
-      .map((p) => newMomentDay(p.coupleId, p.localDate, p.couple.timezone, now));
+      .map((p) => newMomentDay(p.coupleId, p.localDate, p.timezone, now));
     created += await momentRepository.createDays(missing);
     if (couples.length < COUPLES_PER_PAGE) break;
     if (page === MAX_PAGES - 1) logger.warn('Duo moments: couple pages cut at the limit', { pages: MAX_PAGES });

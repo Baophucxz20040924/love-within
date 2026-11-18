@@ -15,6 +15,7 @@ import { HomePage } from '../pages/HomePage';
 import { homeOf } from '../lib/spaceStore';
 import { useFriendsTheme } from '../features/friends/useFriendsTheme';
 import { PushSync } from '../features/push/PushSync';
+import { PushOnboarding } from '../features/push/PushOnboarding';
 import { RealtimeSync } from '../features/realtime/RealtimeSync';
 import { RealtimeBoundary } from '../features/realtime/verification';
 import { AppLockBoundary, AppLockCover } from '../features/appLock/AppLockBoundary';
@@ -88,7 +89,7 @@ function PersonalContent() {
     <RouteNavigation />
     <PushSync />
     <RealtimeSync />
-    <RealtimeBoundary><AppLockBoundary><Routes>
+    <RealtimeBoundary><AppLockBoundary><PushOnboarding /><Routes>
       <Route path="/login" element={<LoginRoute />} />
       <Route path={FRIENDS_LOGIN} element={<FriendsLoginRoute />} />
       <Route path="/profile/app-lock" element={<ProtectedRoute><RequireSpace space="couple"><AppLockSettingsPage space="couple" /></RequireSpace></ProtectedRoute>} />

@@ -39,6 +39,7 @@ export function WaterApprovalCard({ item, mode }: WaterProps) {
   const partnerName = usePartnerName();
   const avatarOf = useAvatarOf();
   const [viewing, setViewing] = useState(false);
+  const [imageFailed, setImageFailed] = useState(false);
 
   // Fetched once per log and reused for 4 min (URL valid 5 min) so polling never reloads the photo.
   const image = useQuery({
@@ -83,12 +84,19 @@ export function WaterApprovalCard({ item, mode }: WaterProps) {
             <span className="text-water strong">{formatMl(item.amountMl)}</span>
           </p>
           <p className="approval__meta">
-            {item.source === 'ai' ? 'AI ước lượng từ ảnh' : 'Nhập thủ công'} · {timeAgo(item.createdAt)}
+            {item.source === 'ai' ? 'AI ước lượng từ ảnh' : item.hasImage ? 'Nhập thủ công · Có ảnh minh chứng, không AI' : 'Nhập thủ công · Không ảnh'} · {timeAgo(item.createdAt)}
           </p>
         </div>
       </div>
 
-      {item.hasImage && (
+      {item.hasImage && (image.isError || imageFailed ? (
+        <div role="alert">
+          <p className="text-sm">Không tải được ảnh minh chứng.</p>
+          <button type="button" className="btn btn-outline" disabled={image.isFetching} onClick={() => {
+            void image.refetch().then(result => { if (!result.isError) setImageFailed(false); });
+          }}>{image.isFetching ? 'Đang tải lại…' : 'Thử tải ảnh lại'}</button>
+        </div>
+      ) : (
         <button
           type="button"
           className="approval__photo"
@@ -97,12 +105,12 @@ export function WaterApprovalCard({ item, mode }: WaterProps) {
           disabled={!image.data}
         >
           {image.data ? (
-            <img src={image.data.url} alt={`Ảnh ly nước của ${item.submitterName}`} loading="lazy" />
+            <img src={image.data.url} alt={`Ảnh ly nước của ${item.submitterName}`} loading="lazy" onError={() => setImageFailed(true)} />
           ) : (
             <div className="skeleton" />
           )}
         </button>
-      )}
+      ))}
 
       {mode === 'incoming' ? (
         <>

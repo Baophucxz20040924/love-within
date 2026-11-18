@@ -75,7 +75,7 @@ export function RealtimeSync() {
         if (!current()) return;
         if (meOk && queriesOk) {
           if (pendingDirty) { pendingDirty = false; reconcileAccess(); return; }
-          verifying = false; setVerification('clear'); return;
+          verifying = false; setVerification('clear', undefined, { generation, userId, space }); return;
         }
         if (attempt < 2) retryTimer = setTimeout(() => reconcileAccess(attempt + 1), 1000 * 2 ** attempt);
         else setVerification('failed', () => reconcileAccess());

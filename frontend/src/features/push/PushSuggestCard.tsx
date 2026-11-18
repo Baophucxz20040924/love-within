@@ -1,4 +1,8 @@
+import { useSyncExternalStore } from 'react';
 import { Link } from 'react-router-dom';
+import { useAuth } from '../auth/AuthContext';
+import { canSuggestPush, onboardingVersion, subscribeOnboarding } from './onboardingPolicy';
+import { usePushReadiness } from './readiness';
 import { Icon } from '../../components/Icon';
 import type { PushSpace } from '../../lib/types';
 import { deniedSteps } from './PushHelp';
@@ -17,10 +21,13 @@ interface Props {
  */
 export function PushSuggestCard({ space, text }: Props) {
   const suggest = usePushSuggest(space);
+  const { me } = useAuth();
+  const ready = usePushReadiness();
+  useSyncExternalStore(subscribeOnboarding, onboardingVersion, () => 0);
   const { state, serverEnabled } = usePushDevice();
   const { busy, enable } = usePushSwitch();
 
-  if (suggest !== 'shown' || serverEnabled !== true) return null;
+  if (!ready || !me || !canSuggestPush(me.user.id, typeof Notification === 'undefined' ? 'default' : Notification.permission) || suggest !== 'shown' || serverEnabled !== true) return null;
   if (state !== 'off' && state !== 'ios-install' && state !== 'denied') return null;
 
   const dismiss = () => pushSuggest.dismiss(space);

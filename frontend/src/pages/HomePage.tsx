@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { Avatar } from '../components/Avatar';
@@ -20,7 +20,9 @@ import { QuestionCard } from '../features/questions/QuestionCard';
 import { SavingsHomeCard } from '../features/savings/SavingsViews';
 import { CHECKIN_KEY, QUESTS_KEY, questsApi } from '../features/quests/api';
 import { formatDate, formatNumber, formatToday, formatVnd, localDateOf, shortName } from '../lib/format';
-import type { Couple, CouplePulse } from '../lib/types';
+import type { Couple, CouplePulse, PulseMoment } from '../lib/types';
+import { tokenStore } from '../lib/tokenStore';
+import { appLockState, subscribeAppLock } from '../features/appLock/store';
 
 function Hero({ couple, myId, pulse }: { couple: Couple; myId: string | undefined; pulse: CouplePulse | undefined }) {
   const me = couple.members.find((m) => m.id === myId);
@@ -173,6 +175,25 @@ function FinanceCard({ timezone }: { timezone: string }) {
   );
 }
 
+function HomeMoment({ moment }: { moment: PulseMoment | null | undefined }) {
+  const [pending, setPending] = useState<{ moment: PulseMoment; generation: string } | null>(null);
+  useEffect(() => {
+    const clearInvalid = () => setPending((old) => old && (!tokenStore.isCurrent(old.generation) || appLockState().discard) ? null : old);
+    const unsubscribe = subscribeAppLock(clearInvalid);
+    window.addEventListener('storage', clearInvalid);
+    return () => { unsubscribe(); window.removeEventListener('storage', clearInvalid); };
+  }, []);
+  const retained = pending && tokenStore.isCurrent(pending.generation) && !appLockState().discard ? pending.moment : null;
+  const sameTarget = retained && moment?.localDate === retained.localDate && moment.sessionId === retained.sessionId;
+  const shown = retained ? (sameTarget ? moment : retained) : moment?.state === 'open' ? moment : null;
+  if (!shown) return null;
+  return <MomentCard key={`${shown.localDate}/${shown.sessionId}`} moment={shown} onPendingChange={(hasDraft) => {
+    setPending((old) => hasDraft
+      ? appLockState().discard ? null : old ?? { moment: shown, generation: tokenStore.generation() }
+      : old?.moment.localDate === shown.localDate && old.moment.sessionId === shown.sessionId ? null : old);
+  }} />;
+}
+
 export function HomePage() {
   const { me } = useAuth();
   const couple = useQuery({ queryKey: COUPLE_KEY, queryFn: coupleApi.get });
@@ -239,7 +260,7 @@ export function HomePage() {
         </nav>
         {pulse.isPending && <p className="text-sm text-muted" role="status">Đang tải hoạt động của hai bạn…</p>}
         {pulse.isError && <ErrorState title="Chưa cập nhật được hoạt động" message={pulse.data ? 'Đang giữ thông tin đã tải trước đó.' : 'Một số hoạt động chưa hiển thị. Thử tải lại nhé.'} onRetry={() => void pulse.refetch()} />}
-        {pulse.data?.moment?.state === 'open' && <MomentCard moment={pulse.data.moment} />}
+        <HomeMoment moment={pulse.data?.moment} />
         {pulse.data?.letters && pulse.data.letters.openable > 0 && <LettersCard letters={pulse.data.letters} />}
         <QuestionCard pulse={pulse.data?.question} pulseUpdatedAt={pulse.dataUpdatedAt} />
         {pulse.data?.nextEvent && <UpcomingCard event={pulse.data.nextEvent} />}

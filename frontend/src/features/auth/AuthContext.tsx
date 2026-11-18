@@ -24,8 +24,16 @@ interface RecoveryAttempt extends PasswordChangeRequired {
 }
 
 
+interface CompletedAuth {
+  generation: string;
+  attempt: number;
+  source: 'login' | 'register' | 'recovery';
+}
+
 interface AuthState {
   me: Me | null;
+  /** Explicit authentication completed; never emitted by bootstrap or token refresh. */
+  completedAuth: CompletedAuth | null;
   loading: boolean;
   bootstrapError: boolean;
   retryBootstrap: () => void;
@@ -60,6 +68,7 @@ const AuthContext = createContext<AuthState | null>(null);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const qc = useQueryClient();
   const [me, setMe] = useState<Me | null>(null);
+  const [completedAuth, setCompletedAuth] = useState<CompletedAuth | null>(null);
   const [loading, setLoading] = useState(true);
   const [bootstrapFailed, setBootstrapFailed] = useState(false);
   const [space, setSpaceState] = useState<Space>(() => spaceStore.get());
@@ -89,6 +98,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
    * clearing the cache the next account on this device would briefly see the previous one's data.
    */
   const clearView = useCallback(() => {
+    setCompletedAuth(null);
     loginAttempt.current += 1;
     credentialsPending.current = false;
     cancelPasswordChange();
@@ -158,6 +168,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     void Promise.all([refreshMe(), refreshLockSettings(false)]).finally(() => { if (mounted) setLoading(false); });
     return () => {
       mounted = false;
+      setCompletedAuth(null);
       loginAttempt.current += 1;
       credentialsPending.current = false;
       recovery.current = null;
@@ -255,7 +266,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   /** Store the new session. The friends space is joined first, so its API works as soon as the user lands there. */
   const startSession = useCallback(
-    async (tokens: AuthTokens, target: Space, opts: SessionOptions | undefined, expectedEpoch: number, attempt: number): Promise<JoinResult | null> => {
+    async (tokens: AuthTokens, target: Space, opts: SessionOptions | undefined, expectedEpoch: number, attempt: number, source: CompletedAuth['source']): Promise<JoinResult | null> => {
       if (!isAuthAttemptCurrent(expectedEpoch) || attempt !== loginAttempt.current) throw new DOMException('Phiên nhập đã thay đổi.', 'AbortError');
       void qc.cancelQueries();
       qc.clear();
@@ -287,6 +298,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       await refreshLockSettings(false);
       assertCurrent();
       opts?.onJoined?.(joined);
+      assertCurrent();
+      setCompletedAuth({ generation, attempt, source });
       return joined;
     },
     [qc, refreshMe, setSpace, endSession],
@@ -295,6 +308,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const login = useCallback(
     async (email: string, password: string, target: Space = 'couple', opts?: SessionOptions) => {
       cancelPasswordChange();
+      setCompletedAuth(null);
       const attempt = ++loginAttempt.current;
       credentialsPending.current = true;
       const expectedEpoch = appLockEpoch();
@@ -314,7 +328,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           return null;
         }
         if (!('accessToken' in result) || !result.accessToken || !result.refreshToken) throw new Error('Phản hồi đăng nhập không hợp lệ.');
-        return startSession(result, target, opts, expectedEpoch, attempt);
+        return startSession(result, target, opts, expectedEpoch, attempt, 'login');
       } finally {
         if (attempt === loginAttempt.current) credentialsPending.current = false;
       }
@@ -335,7 +349,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       });
       if (!current()) throw new DOMException('Phiên đăng nhập đã thay đổi.', 'AbortError');
       cancelPasswordChange();
-      return await startSession(tokens, grant.target, grant.opts, grant.epoch, grant.attempt);
+      return await startSession(tokens, grant.target, grant.opts, grant.epoch, grant.attempt, 'recovery');
     } finally {
       grant.completing = false;
     }
@@ -344,6 +358,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const register = useCallback(
     async (email: string, password: string, displayName: string, target: Space = 'couple', opts?: SessionOptions) => {
       cancelPasswordChange();
+      setCompletedAuth(null);
       const attempt = ++loginAttempt.current;
       credentialsPending.current = true;
       const expectedEpoch = appLockEpoch();
@@ -355,7 +370,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         assertCurrentSession(generation);
         if (attempt !== loginAttempt.current || !isAuthAttemptCurrent(expectedEpoch)) throw new DOMException('Phiên đăng nhập đã thay đổi.', 'AbortError');
         credentialsPending.current = false;
-        return startSession(tokens, target, opts, expectedEpoch, attempt);
+        return startSession(tokens, target, opts, expectedEpoch, attempt, 'register');
       } finally {
         if (attempt === loginAttempt.current) credentialsPending.current = false;
       }
@@ -381,6 +396,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const value = useMemo<AuthState>(
     () => ({
       me,
+      completedAuth,
       loading,
       bootstrapError,
       retryBootstrap,
@@ -398,7 +414,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       revokeMe,
       verifyMe,
     }),
-    [me, loading, bootstrapError, retryBootstrap, switchSpace, space, login, register, passwordChange, completePasswordChange, cancelPasswordChange, cancelLoginAttempt, logout, refreshMe, revokeMe, verifyMe],
+    [me, completedAuth, loading, bootstrapError, retryBootstrap, switchSpace, space, login, register, passwordChange, completePasswordChange, cancelPasswordChange, cancelLoginAttempt, logout, refreshMe, revokeMe, verifyMe],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

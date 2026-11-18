@@ -3,6 +3,11 @@
  * All coin/EXP rewards and level thresholds live here — never hard-coded elsewhere.
  */
 export const ECONOMY = {
+  dailyRewards: {
+    checkinBase: 5, checkinStreakPerDay: 1, checkinExp: 5,
+    momentPhoto: 10, momentTimelyPair: 10,
+    quest: { coin: 0, exp: 5 },
+  },
   checkin: {
     coin: 10,
     exp: 5,

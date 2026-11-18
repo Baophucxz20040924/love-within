@@ -1604,10 +1604,20 @@ textarea.input {
   gap: 12px;
 }
 
+.quest-card__actions {
+  flex-wrap: wrap;
+}
+
 .quest-card__rewards {
   display: flex;
   gap: 6px;
   flex-wrap: wrap;
+  min-width: 0;
+}
+
+.quest-card__rewards .chip {
+  max-width: 100%;
+  white-space: normal;
 }
 
 .water-card__stats {
@@ -4380,6 +4390,16 @@ html[data-theme='friends'] .skeleton {
 }
 
 /* ── Web Push (N4): suggestion card, settings pages ── */
+.push-onboarding {
+  width: min(100%, 560px);
+  margin: 0 auto;
+  padding: calc(12px + env(safe-area-inset-top, 0px)) var(--gutter) 0;
+}
+
+.push-onboarding .btn-row {
+  flex-wrap: wrap;
+}
+
 .push-suggest {
   display: flex;
   flex-direction: column;

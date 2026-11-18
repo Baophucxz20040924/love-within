@@ -1,7 +1,8 @@
 import { Schema, model, type Document, type Types } from 'mongoose';
+import type { RewardProvenance } from './WalletOperation.js';
 
 export type LedgerType = 'coin' | 'exp';
-export const LEDGER_REASONS = ['checkin', 'quest', 'market_purchase', 'market_refund', 'bucket_list', 'admin'] as const;
+export const LEDGER_REASONS = ['checkin', 'quest', 'market_purchase', 'market_refund', 'bucket_list', 'admin', 'moment'] as const;
 export type LedgerReason = (typeof LEDGER_REASONS)[number];
 
 /** Immutable audit record for every coin/EXP change. Never updated or deleted. */
@@ -16,6 +17,7 @@ export interface LedgerEntryDoc extends Document {
   actorUserId: Types.ObjectId;
   ownerUserId: Types.ObjectId | null;
   operationKey?: string;
+  provenance?: RewardProvenance;
   createdAt: Date;
 }
 
@@ -30,6 +32,7 @@ const ledgerSchema = new Schema<LedgerEntryDoc>(
     actorUserId: { type: Schema.Types.ObjectId, ref: 'User', required: true },
     ownerUserId: { type: Schema.Types.ObjectId, ref: 'User', default: null },
     operationKey: { type: String, immutable: true },
+    provenance: { type: Schema.Types.Mixed, immutable: true },
   },
   { timestamps: { createdAt: true, updatedAt: false } },
 );

@@ -4,6 +4,10 @@ import { useAuth } from '../auth/AuthContext';
 import { syncThisDevice } from './device';
 import { appLockState, lockForNavigation } from '../appLock/store';
 import { spaceStore } from '../../lib/spaceStore';
+import { usePushReadiness } from './readiness';
+import { appLockEpoch, isAppLocked } from '../appLock/store';
+import { currentAccessEpoch } from '../../lib/apiClient';
+import { tokenStore } from '../../lib/tokenStore';
 
 /**
  * Mounted once (App): refreshes the signed-in account's device without depending on its active space.
@@ -14,11 +18,19 @@ export function PushSync() {
   const { me } = useAuth();
   const navigate = useNavigate();
   const userId = me?.user.id;
+  const ready = usePushReadiness();
+  const generation = tokenStore.generation();
 
   useEffect(() => {
-    if (!userId) return;
-    void syncThisDevice(userId).catch(() => undefined);
-  }, [userId]);
+    if (!userId || !ready) return;
+    let active = true;
+    const access = currentAccessEpoch(), lock = appLockEpoch();
+    void syncThisDevice(userId, () => {
+      if (!active || !tokenStore.isCurrent(generation) || access !== currentAccessEpoch() || lock !== appLockEpoch()
+        || isAppLocked() || document.visibilityState !== 'visible') throw new Error('Push access changed');
+    }).catch(() => undefined);
+    return () => { active = false; };
+  }, [userId, ready, generation]);
 
   useEffect(() => {
     if (!('serviceWorker' in navigator)) return undefined;

@@ -93,21 +93,51 @@ export interface LedgerEntry {
   type: 'coin' | 'exp';
   delta: number;
   balanceAfter: number;
-  reason: 'checkin' | 'quest' | 'market_purchase' | 'market_refund' | 'bucket_list' | 'admin';
+  reason: 'checkin' | 'moment' | 'quest' | 'market_purchase' | 'market_refund' | 'bucket_list' | 'admin';
   refId: string | null;
   actorUserId: string;
   ownerUserId: string | null;
   scope: 'personal' | 'shared_exp' | 'legacy_shared';
   createdAt: string;
+  /** Immutable reward detail; delta remains the amount actually received. */
+  provenance?: {
+    version: 1;
+    source: 'checkin' | 'moment' | 'quest';
+    localDate: string;
+    policyVersion: 2;
+    component: 'checkin_pair' | 'checkin_exp' | 'photo_base' | 'timely_pair_bonus' | 'quest_exp';
+    baseCoin: number;
+    bonusCoin: number;
+    commonStreak?: number;
+  };
 }
 
 // ── Check-in / quests ────────────────────────────────────
+
+export interface RewardPolicyView {
+  version: 1 | 2;
+  effectiveDate: string;
+  timezone: string;
+}
+
+export interface DailyActivityRewardView {
+  policyVersion: 1 | 2;
+  effectiveDate: string;
+  localDate: string;
+  status: 'legacy' | 'waiting' | 'pending' | 'awarded';
+  baseCoin: number;
+  bonusCoin: number;
+  /** Personal coins confirmed by the server, not a projected pair total. */
+  coinAwarded: number;
+  commonStreak: number | null;
+}
 
 export interface CheckinStatus {
   localDate: string;
   checkedInToday: boolean;
   streak: number;
   partnerCheckedIn: boolean;
+  reward: DailyActivityRewardView;
 }
 
 export interface CheckinResult {
@@ -118,6 +148,7 @@ export interface CheckinResult {
   balance?: number;
   level?: number;
   leveledUp: boolean;
+  reward: DailyActivityRewardView;
 }
 
 export interface Quest {
@@ -131,6 +162,7 @@ export interface Quest {
   target: number;
   status: 'in_progress' | 'completed' | 'rewarded';
   localDate: string;
+  rewardPolicy: RewardPolicyView;
 }
 
 // ── Water ────────────────────────────────────────────────
@@ -558,6 +590,7 @@ export interface MomentDay {
   localDate: string;
   legacy: boolean;
   scheduleVersion: number;
+  reward: DailyActivityRewardView;
   /** Only started sessions; no future times or IDs. */
   sessions: MomentSession[];
 }

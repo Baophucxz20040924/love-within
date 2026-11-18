@@ -186,5 +186,9 @@ test('all18 event types persist without device/preferences access; duplicates do
   currentCouple=otherCid;await svc.emit({...input,type:'nudge',eventKey:'new'});assert.equal(stored.length,18,'old event never follows recipient into new couple');
   currentCouple=cid;active=false;await svc.emit({...input,type:'nudge',eventKey:'new'});assert.equal(stored.length,18);
   active=true;fail=true;await assert.doesNotReject(svc.emit({...input,type:'nudge',eventKey:'new'}));assert.equal(jobs.length,18);
+  await assert.rejects(svc.emit({...input,type:'moment_posted',eventKey:'retry',requirePersistence:true}),/offline/);
+  await assert.rejects(svc.toPartner({_id:cid,memberIds:[uid,partner]},partner,{type:'moment_posted',eventKey:'retry',target:input.target,push:input.push,requirePersistence:true}),/offline/);
+  fail=false;await svc.emit({...input,type:'moment_posted',eventKey:'retry',requirePersistence:true});
+  assert.equal(stored.length,19);await svc.emit({...input,type:'moment_posted',eventKey:'retry',requirePersistence:true});assert.equal(stored.length,19);
   await assert.doesNotReject(svc.toPartner({_id:cid,memberIds:[uid,partner]},'invalid',{type:'nudge'}));
 });

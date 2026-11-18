@@ -1,5 +1,6 @@
 import { realtimeAudience } from './realtimeAudience.service.js';
 import { randomInt, randomUUID } from 'node:crypto';
+import { performance } from 'node:perf_hooks';
 import { Types } from 'mongoose';
 import { env } from '../config/env.js';
 import type { CoupleDoc } from '../models/Couple.js';
@@ -9,7 +10,8 @@ import { momentRepository, type NewMomentDay } from '../repositories/moment.repo
 import { storyRepository } from '../repositories/story.repository.js';
 import { userRepository } from '../repositories/user.repository.js';
 import { notificationService } from './notification.service.js';
-import { DUO_MOMENT_QUEST_KEY, questService } from './quest.service.js';
+import { dailyRewardService, type DailyActivityRewardView } from './dailyReward.service.js';
+import { rewardPolicyService } from './rewardPolicy.service.js';
 import { STORY_IMAGE_TYPES, storyService, type StoryView } from './story.service.js';
 import { addDays, formatDayVi, getLocalDate, zonedTimeToUtc } from '../utils/date.js';
 import { AppError, Errors } from '../utils/errors.js';
@@ -41,6 +43,7 @@ export interface MomentDayView {
   localDate: string;
   legacy: boolean;
   scheduleVersion: number;
+  reward: DailyActivityRewardView;
   /** Only started sessions. Future times AND IDs are never exposed. */
   sessions: MomentSessionView[];
 }
@@ -119,9 +122,12 @@ async function photoView(p: MomentPost): Promise<MomentPhotoView> {
 }
 async function viewsOf(couple: CoupleDoc, docs: DuoMomentDoc[], userId: string, now: Date): Promise<MomentDayView[]> {
   const storyIds = docs.flatMap((m) => sessionsOf(m).map((s) => s.storyId)).filter((id): id is Types.ObjectId => !!id);
-  const alive = await storyRepository.aliveIds(couple._id, storyIds);
+  const [alive, rewards] = await Promise.all([
+    storyRepository.aliveIds(couple._id, storyIds),
+    dailyRewardService.getMomentRewardViews(couple, docs, userId),
+  ]);
   return Promise.all(docs.map(async (m) => ({
-    localDate: m.localDate, legacy: isLegacy(m), scheduleVersion: scheduleVersionOf(m),
+    localDate: m.localDate, legacy: isLegacy(m), scheduleVersion: scheduleVersionOf(m), reward: rewards.get(m.localDate)!,
     sessions: await Promise.all(sessionsOf(m).filter((s) => s.promptAt <= now).map(async (s): Promise<MomentSessionView> => {
       const mine = s.posts.find((p) => String(p.userId) === userId);
       const partner = s.posts.find((p) => String(p.userId) !== userId);
@@ -136,8 +142,9 @@ async function viewsOf(couple: CoupleDoc, docs: DuoMomentDoc[], userId: string, 
   })));
 }
 async function ensureToday(couple: CoupleDoc, now: Date): Promise<DuoMomentDoc> {
-  const localDate = getLocalDate(now, couple.timezone);
-  return await momentRepository.findDay(couple._id, localDate) ?? await momentRepository.ensureDay(newMomentDay(couple._id, localDate, couple.timezone));
+  const { timezone } = await rewardPolicyService.ensure(couple);
+  const localDate = getLocalDate(now, timezone);
+  return await momentRepository.findDay(couple._id, localDate) ?? await momentRepository.ensureDay(newMomentDay(couple._id, localDate, timezone));
 }
 function shortName(displayName: string): string { return displayName.trim().split(/\s+/).at(-1) || displayName; }
 export function streakOf(bothDays: string[], today: string): { current: number; best: number } {
@@ -159,10 +166,11 @@ export const momentService = {
     return (await viewsOf(couple, [m], userId, new Date()))[0];
   },
   async month(couple: CoupleDoc, userId: string, month: string): Promise<MomentMonthView> {
-    const today = getLocalDate(new Date(), couple.timezone);
+    const { timezone } = await rewardPolicyService.ensure(couple);
+    const today = getLocalDate(new Date(), timezone);
     if (month === today.slice(0, 7)) await ensureToday(couple, new Date());
     const [docs, both] = await Promise.all([momentRepository.listRange(couple._id, `${month}-01`, `${month}-31`), momentRepository.bothDays(couple._id, STREAK_LOOKBACK)]);
-    return { month, today, minMonth: getLocalDate(couple.createdAt, couple.timezone).slice(0, 7),
+    return { month, today, minMonth: getLocalDate(couple.createdAt, timezone).slice(0, 7),
       days: await viewsOf(couple, docs, userId, new Date()), streak: streakOf(both, today) };
   },
   async createUploadUrl(couple: CoupleDoc, userId: string, target: MomentTarget, mimeType: string, sizeBytes: number) {
@@ -176,42 +184,36 @@ export const momentService = {
     assertOpen(s, userId, new Date());
     return { uploadUrl, imageKey, expiresIn, maxBytes: env.s3.maxUploadBytes };
   },
-  async post(couple: CoupleDoc, userId: string, input: MomentPostInput): Promise<MomentDayView> {
+  async post(couple: CoupleDoc, userId: string, input: MomentPostInput): Promise<{ localDate: string; sessionId: string; postedAt: string; saved: true }> {
+    const started = performance.now();
+    // Activation must precede any new-policy source write, never happen in a detached task.
+    await rewardPolicyService.ensure(couple);
     const { m, s } = await getTarget(couple, input);
     assertOpen(s, userId, new Date());
     const uid = new Types.ObjectId(userId);
     if (!input.key.startsWith(momentPrefix(couple._id, input, userId)) || input.key.includes('..')) throw Errors.forbidden('Ảnh không thuộc lượt chụp của bạn');
+    const headStarted = performance.now();
     const head = await getStorage().headObject(input.key);
+    const headMs = performance.now() - headStarted;
     if (!head) throw Errors.badRequest('Ảnh chưa tải lên xong. Thử đăng lại nhé.');
     if (head.size > env.s3.maxUploadBytes) throw Errors.badRequest('Ảnh vượt kích thước cho phép');
     const now = new Date();
     assertOpen(s, userId, now);
     const post: Omit<MomentPost, 'postedAt' | 'lateMin'> = { userId: uid, key: input.key, width: input.width, height: input.height, caption: input.caption.trim() };
+    const commitStarted = performance.now();
     const updated = await momentRepository.addPost(couple._id, m.localDate, s.id, post);
+    const commitMs = performance.now() - commitStarted;
     if (!updated) {
       const current = await momentRepository.findDay(couple._id, m.localDate);
       if (current?.sessions?.find((x) => x.id === s.id)?.posts.some((p) => p.userId.equals(uid))) throw alreadyPosted();
       // DB time may already be beyond the boundary even if this process's clock is behind.
       throw closed();
     }
-    await realtimeAudience.couple(couple._id, ['moments']);
-    const savedSession = updated.sessions!.find((x) => x.id === s.id)!;
-    const both = savedSession.posts.length >= 2;
-    const savedPost = savedSession.posts.find((p) => p.userId.equals(uid))!;
-    const rewardEndsAt = rewardEndsAtOf(updated, savedSession);
-    logger.info('Duo moment posted', { coupleId: String(couple._id), userId, localDate: m.localDate, sessionId: s.id, lateMin: savedPost.lateMin, both });
-    await questService.refresh(couple, DUO_MOMENT_QUEST_KEY, m.localDate);
-    // Late pairs still get a neutral invitation to view; never invite a late partner to earn the reward.
-    if (both || (savedPost.postedAt < rewardEndsAt && new Date() < rewardEndsAt)) {
-      await notificationService.toPartner(couple, uid, {
-        type: both ? 'moment_both' : 'moment_posted', entityId: updated._id,
-        eventKey: `${updated._id}:${s.id}:${uid}`,
-        target: { kind: 'moment', dayId: String(updated._id), localDate: m.localDate, sessionId: s.id },
-        push: { body: both ? (name) => `${name} cũng đã chụp Khoảnh khắc. Xem ảnh của hai bạn` : (name) => `${name} đã chụp Khoảnh khắc. Chụp trước hạn thưởng để cùng nhận 40 Xu!`,
-          url: `/moments?date=${m.localDate}&session=${s.id}`, tag: `moment:${m.localDate}:${s.id}`, expiresAt: both ? undefined : rewardEndsAt.toISOString() },
-      });
-    }
-    return (await viewsOf(couple, [updated], userId, new Date()))[0];
+    const savedPost = updated.sessions!.find((x) => x.id === s.id)!.posts.find((p) => p.userId.equals(uid))!;
+    logger.info('Duo moment saved', { lateMin: savedPost.lateMin, headMs, commitMs, totalMs: performance.now() - started });
+    // The same CAS wrote durable effects/reward markers. Signing, inbox delivery and wallet recovery
+    // are deliberately not part of this commit acknowledgement.
+    return { saved: true, localDate: updated.localDate, sessionId: s.id, postedAt: savedPost.postedAt.toISOString() };
   },
   async toStory(couple: CoupleDoc, userId: string, target: MomentTarget): Promise<{ moment: MomentDayView; story: StoryView }> {
     const { m, s } = await getTarget(couple, target);

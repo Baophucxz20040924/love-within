@@ -2,6 +2,7 @@ import { ApiRequestError, assertCurrentSession } from '../../lib/apiClient';
 import { tokenStore } from '../../lib/tokenStore';
 import { detectDevice, isStandalone } from '../../lib/installPrompt';
 import { pushApi } from './api';
+import { setPushExplicitlyOff } from './onboardingPolicy';
 
 /** Permission is requested only from a tap. One device opt-in covers both spaces of the same account. */
 export type DeviceState = 'unsupported' | 'ios-install' | 'denied' | 'off' | 'on';
@@ -90,9 +91,14 @@ function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
 function registration(): Promise<ServiceWorkerRegistration> {
   return withTimeout(navigator.serviceWorker.ready, SW_TIMEOUT_MS);
 }
-async function browserSubscription(): Promise<PushSubscription | null> {
+async function browserSubscription(guard: () => void = () => undefined): Promise<PushSubscription | null> {
+  guard();
   if (pushAvailability() !== 'supported') return null;
-  return withTimeout((await registration()).pushManager.getSubscription(), SW_TIMEOUT_MS);
+  const reg = await registration();
+  guard();
+  const sub = await withTimeout(reg.pushManager.getSubscription(), SW_TIMEOUT_MS);
+  guard();
+  return sub;
 }
 export async function currentEndpoint(): Promise<string | null> {
   return (await browserSubscription().catch(() => null))?.endpoint ?? null;
@@ -110,7 +116,14 @@ function bodyOf(sub: PushSubscription) {
   const json = sub.toJSON();
   return { endpoint: sub.endpoint, keys: { p256dh: json.keys?.p256dh ?? '', auth: json.keys?.auth ?? '' } };
 }
-async function ensureBrowserSubscription(publicKey: string, guard: () => void): Promise<PushSubscription> {
+async function discardOrphan(sub: PushSubscription): Promise<void> {
+  // Called under the mutation lock. A later opt-in may have adopted a timed-out subscription.
+  if (readRecord()?.endpoint !== sub.endpoint) {
+    await withTimeout(sub.unsubscribe(), LOGOUT_STEP_MS).catch(() => false);
+  }
+}
+async function ensureBrowserSubscription(publicKey: string, guard: () => void): Promise<{ sub: PushSubscription; created: boolean }> {
+  guard();
   const reg = await registration();
   guard();
   const key = keyBytes(publicKey);
@@ -121,21 +134,24 @@ async function ensureBrowserSubscription(publicKey: string, guard: () => void): 
     guard();
     sub = null;
   }
-  if (sub) return sub;
-  // A timed-out browser request can still complete. Drop that orphan only if no newer opt-in owns it.
+  if (sub) return { sub, created: false };
+  // A timed-out browser request can still complete. Serialize cleanup behind any newer owner.
   const pending = reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key });
   let timedOut = false;
   void pending.then(late => {
-    if (timedOut) void serialize(async () => {
-      if (!readRecord()) await withTimeout(late.unsubscribe(), LOGOUT_STEP_MS).catch(() => false);
-    });
+    if (timedOut) void serialize(() => discardOrphan(late)).catch(() => undefined);
   }, () => undefined);
   try {
-    return await withTimeout(pending, SUBSCRIBE_TIMEOUT_MS);
+    sub = await withTimeout(pending, SUBSCRIBE_TIMEOUT_MS);
   } catch (error) {
     timedOut = true;
     throw error;
   }
+  try { guard(); } catch (error) {
+    await discardOrphan(sub);
+    throw error;
+  }
+  return { sub, created: true };
 }
 function isMine(record: DeviceRecord | null, userId: string): record is DeviceRecord {
   return record !== null && record.userId === userId;
@@ -156,38 +172,58 @@ export class PushSetupError extends Error {
   constructor(code: PushSetupErrorCode, message: string) { super(message); this.code = code; }
 }
 
-export async function enableOnThisDevice(userId: string): Promise<void> {
+export async function enableOnThisDevice(userId: string, guard: () => void = () => undefined): Promise<void> {
+  // Do not even invalidate another intent or open the OS prompt from a stale/locked UI.
+  guard();
   const generation = tokenStore.generation();
+  const accessToken = tokenStore.get()?.accessToken ?? null;
   const expected = ++intent;
+  const current = () => { check(generation, expected); guard(); };
+  current();
   if (pushAvailability() !== 'supported') throw new PushSetupError('unavailable', 'Máy này chưa nhận được thông báo.');
   // Invoke synchronously from the tap, before joining the mutation queue (required by Safari).
-  const permission = Notification.permission === 'granted' ? Promise.resolve('granted') : Notification.requestPermission();
+  const permission: Promise<NotificationPermission> = Notification.permission === 'granted' ? Promise.resolve('granted') : Notification.requestPermission();
   // An unanswered OS prompt must not hold the mutation queue or cross-tab device lock.
-  const granted = await permission;
-  check(generation, expected);
+  let granted: NotificationPermission;
+  try { granted = await permission; } catch (error) { current(); throw error; }
+  current();
   return serialize(async () => {
-    check(generation, expected);
+    current();
     if (granted === 'denied') {
       notifyDeviceChanged();
       throw new PushSetupError('denied', 'Thông báo đang bị chặn. Xem cách bật lại ở bên dưới.');
     }
     if (granted !== 'granted') throw new PushSetupError('dismissed', 'Bạn chưa cho phép thông báo.');
-    const config = await pushApi.config();
-    check(generation, expected);
-    if (!config.enabled || !config.publicKey) throw new PushSetupError('unavailable', 'Máy chủ chưa bật thông báo.');
-    const sub = await ensureBrowserSubscription(config.publicKey, () => check(generation, expected));
-    check(generation, expected);
+    let subscription: { sub: PushSubscription; created: boolean } | undefined;
+    let posted = false;
     try {
-      await pushApi.subscribe(bodyOf(sub));
+      const config = await pushApi.config();
+      current();
+      if (!config.enabled || !config.publicKey) throw new PushSetupError('unavailable', 'Máy chủ chưa bật thông báo.');
+      subscription = await ensureBrowserSubscription(config.publicKey, current);
+      current();
+      posted = true;
+      await pushApi.subscribe(bodyOf(subscription.sub));
+      current();
+      writeRecord({ userId, endpoint: subscription.sub.endpoint, syncedAt: Date.now(), version: RECORD_VERSION });
+      notifyDeviceChanged();
     } catch (error) {
-      if (tokenStore.isCurrent(generation) && intent === expected && error instanceof ApiRequestError && error.code === 'BAD_ENDPOINT') {
-        await withTimeout(sub.unsubscribe(), LOGOUT_STEP_MS).catch(() => false);
+      try { current(); } catch (stale) {
+        // Access can close while subscribe/POST is pending. Cleanup uses only captured credentials,
+        // under the same lock, and must not tear down a subscription already owned by another opt-in.
+        if (subscription && readRecord()?.endpoint !== subscription.sub.endpoint) {
+          if (posted) await deleteEndpoint(subscription.sub.endpoint, accessToken);
+          if (subscription.created) await discardOrphan(subscription.sub);
+        }
+        throw stale;
+      }
+      if (subscription && error instanceof ApiRequestError && error.code === 'BAD_ENDPOINT') {
+        await withTimeout(subscription.sub.unsubscribe(), LOGOUT_STEP_MS).catch(() => false);
+        current();
+        if (readRecord()?.endpoint === subscription.sub.endpoint) { writeRecord(null); notifyDeviceChanged(); }
       }
       throw error;
     }
-    check(generation, expected);
-    writeRecord({ userId, endpoint: sub.endpoint, syncedAt: Date.now(), version: RECORD_VERSION });
-    notifyDeviceChanged();
   });
 }
 
@@ -204,11 +240,13 @@ async function deleteEndpoint(endpoint: string | undefined, accessToken: string 
   } finally { window.clearTimeout(timer); }
 }
 
-export function disableOnThisDevice(): Promise<void> {
+export function disableOnThisDevice(userId?: string): Promise<void> {
   const generation = tokenStore.generation();
   const accessToken = tokenStore.get()?.accessToken ?? null;
   const expected = ++intent;
   const record = readRecord();
+  const owner = userId ?? record?.userId;
+  if (owner) setPushExplicitlyOff(owner);
   writeRecord(null);
   notifyDeviceChanged();
   return serialize(async () => {
@@ -245,39 +283,52 @@ export function forgetThisDevice(accessToken: string | null = tokenStore.get()?.
 }
 
 /** Refresh only an existing opt-in. A legacy same-user record upgrades once, regardless of its old space. */
-export function syncThisDevice(userId: string): Promise<void> {
+export function syncThisDevice(userId: string, guard: () => void = () => undefined): Promise<void> {
   const generation = tokenStore.generation();
   const expected = intent;
+  const current = () => { check(generation, expected); guard(); };
   return serialize(async () => {
-    check(generation, expected);
+    current();
     if (pushAvailability() !== 'supported') return;
     // A temporary SW failure must not erase consent or an otherwise healthy subscription.
     let sub: PushSubscription | null;
-    try { sub = await browserSubscription(); } catch { return; }
-    check(generation, expected);
+    try { sub = await browserSubscription(current); } catch { current(); return; }
+    current();
     const record = readRecord();
-    if (!sub || !isMine(record, userId) || Notification.permission !== 'granted') {
+    if (!sub || !isMine(record, userId) || sub.endpoint !== record.endpoint || Notification.permission !== 'granted') {
       if (isMine(record, userId)) await pushApi.unsubscribe(record.endpoint).catch(() => undefined);
-      check(generation, expected);
+      current();
       if (sub) await withTimeout(sub.unsubscribe(), LOGOUT_STEP_MS).catch(() => false);
-      check(generation, expected);
+      current();
       if (record) { writeRecord(null); notifyDeviceChanged(); }
       return;
     }
     const config = await pushApi.config().catch(() => null);
-    check(generation, expected);
+    current();
     if (!config?.enabled || !config.publicKey) return;
-    const current = sameKey(sub.options.applicationServerKey, keyBytes(config.publicKey))
-      ? sub : await ensureBrowserSubscription(config.publicKey, () => check(generation, expected));
-    check(generation, expected);
-    if (record.version === RECORD_VERSION && current.endpoint === record.endpoint && Date.now() - record.syncedAt < RESYNC_MS) return;
-    if (current.endpoint !== record.endpoint) {
+    if (!sameKey(sub.options.applicationServerKey, keyBytes(config.publicKey))) {
+      // Rotation requires a new browser subscription, which belongs exclusively to an explicit tap.
       await pushApi.unsubscribe(record.endpoint).catch(() => undefined);
-      check(generation, expected);
+      current();
+      await withTimeout(sub.unsubscribe(), LOGOUT_STEP_MS).catch(() => false);
+      current();
+      writeRecord(null);
+      notifyDeviceChanged();
+      return;
     }
-    await pushApi.subscribe(bodyOf(current));
-    check(generation, expected);
-    writeRecord({ userId, endpoint: current.endpoint, syncedAt: Date.now(), version: RECORD_VERSION });
+    if (record.version === RECORD_VERSION && Date.now() - record.syncedAt < RESYNC_MS) return;
+    try { await pushApi.subscribe(bodyOf(sub)); } catch (error) {
+      current();
+      if (error instanceof ApiRequestError && error.code === 'BAD_ENDPOINT') {
+        await withTimeout(sub.unsubscribe(), LOGOUT_STEP_MS).catch(() => false);
+        current();
+        writeRecord(null);
+        notifyDeviceChanged();
+      }
+      throw error;
+    }
+    current();
+    writeRecord({ userId, endpoint: sub.endpoint, syncedAt: Date.now(), version: RECORD_VERSION });
     notifyDeviceChanged();
   });
 }

@@ -12,9 +12,9 @@ import { useCouplePeople } from '../features/questions/useCouplePeople';
 import { STORY_FEED_KEY } from '../features/stories/api';
 import { ApiRequestError, currentAccessEpoch } from '../lib/apiClient';
 import { tokenStore } from '../lib/tokenStore';
-import { appLockEpoch } from '../features/appLock/store';
-import { dayHeading, formatTime, monthLabel, shiftMonth } from '../lib/format';
-import type { MomentDay, MomentSession } from '../lib/types';
+import { appLockEpoch, appLockState, subscribeAppLock } from '../features/appLock/store';
+import { dayHeading, formatDay, formatTime, monthLabel, shiftMonth } from '../lib/format';
+import type { DailyActivityRewardView, MomentDay, MomentSession } from '../lib/types';
 
 const WEEKDAYS = ['T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'CN'];
 type OpenPhoto = (urls: string[], index: number) => void;
@@ -47,8 +47,9 @@ function StoryButton({ session }: { session: MomentSession }) {
     {post.isPending ? <span className="spinner" aria-hidden="true" /> : <Icon name="bookOpen" size={18} />} Đăng khoảnh khắc lên Story
   </button>;
 }
-function SessionPanel({ session, partnerName, onOpenPhoto, highlighted = false }: {
-  session: MomentSession; partnerName: string; onOpenPhoto: OpenPhoto; highlighted?: boolean;
+function SessionPanel({ session, reward, partnerName, onOpenPhoto, highlighted = false, captureEnabled = true, onPendingChange }: {
+  session: MomentSession; reward?: DailyActivityRewardView; partnerName: string; onOpenPhoto: OpenPhoto; highlighted?: boolean;
+  captureEnabled?: boolean; onPendingChange?: (pending: boolean) => void;
 }) {
   const now = useMomentNow(session.closesAt, session.rewardEndsAt);
   const open = canCapture(session, now);
@@ -61,23 +62,32 @@ function SessionPanel({ session, partnerName, onOpenPhoto, highlighted = false }
       {session.state === 'both' && <span className="chip chip--success">Cả hai đã chụp</span>}
       {closed && session.state !== 'both' && <span className="chip">Đã kết thúc</span>}
     </div>
-    {!closed && session.state !== 'both' && <MomentTimer rewardEndsAt={session.rewardEndsAt} closesAt={session.closesAt} />}
+    {!closed && session.state !== 'both' && <MomentTimer reward={reward} rewardEndsAt={session.rewardEndsAt} closesAt={session.closesAt} />}
     <MomentPair day={view} partnerName={partnerName} onOpenPhoto={onOpenPhoto} />
-    <MomentRewardStatus session={view} />
-    {open && <CaptureButton key={session.sessionId} target={session} closesAt={session.closesAt} rewardEndsAt={session.rewardEndsAt}
-      label={rewardOpen ? 'Chụp ngay' : 'Chụp giữ chuỗi'} className={`btn ${rewardOpen ? 'btn-primary' : 'btn-secondary'} btn-lg btn-block`} />}
+    <MomentRewardStatus session={view} reward={reward} />
+    {session.scheduleVersion === 3 && <CaptureButton key={`capture-${session.sessionId}`} target={session} reward={reward}
+      available={open && captureEnabled} onPendingChange={onPendingChange} closesAt={session.closesAt} rewardEndsAt={session.rewardEndsAt}
+      label={rewardOpen ? 'Chụp ngay' : 'Chụp hôm nay'} className={`btn ${rewardOpen ? 'btn-primary' : 'btn-secondary'} btn-lg btn-block`} />}
     {session.state === 'posted' && !closed && <p className="text-sm text-muted">Chờ {partnerName} chụp hôm nay để xem ảnh của nhau và giữ chuỗi.</p>}
-    <StoryButton key={session.sessionId} session={session} />
+    <StoryButton key={`story-${session.sessionId}`} session={session} />
   </section>;
 }
-function DayPanel({ day, partnerName, onOpenPhoto, selectedSession }: { day: MomentDay; partnerName: string; onOpenPhoto: OpenPhoto; selectedSession?: string | null }) {
+function DayPanel({ day, partnerName, onOpenPhoto, selectedSession, captureEnabled = true, onPendingChange }: {
+  day: MomentDay; partnerName: string; onOpenPhoto: OpenPhoto; selectedSession?: string | null;
+  captureEnabled?: boolean; onPendingChange?: (pending: boolean) => void;
+}) {
   const now = useMomentNow(day.sessions.find((s) => !s.closed)?.closesAt);
   const active = day.sessions.some((s) => !s.closed && now < Date.parse(s.closesAt));
   return <div className="stack">
     {day.scheduleVersion !== 3 && <p className="text-sm text-muted">Ngày theo lịch cũ chỉ để xem; ảnh và Story vẫn được giữ. Lịch một lần mỗi ngày bắt đầu từ ngày địa phương tiếp theo.</p>}
-    {day.scheduleVersion === 3 && !active && <div className="card"><h2 className="card__title">{day.sessions.length ? 'Ngày chụp đã kết thúc' : 'Chưa đến giờ chụp hôm nay'}</h2><p className="text-sm text-muted">Một thông báo bất ngờ mỗi ngày. Cả hai chụp trong 30 phút đầu để nhận tổng 40 Xu (20 Xu mỗi người); sau đó vẫn chụp đến hết ngày để giữ chuỗi.</p></div>}
+    {day.reward && <p className="text-sm text-muted">Chính sách Xu mới từ {formatDay(day.reward.effectiveDate)}. {day.reward.policyVersion === 1 ? 'Ngày này giữ chính sách thưởng cũ.' : 'Xu tự cộng vào ví mỗi người; nhiệm vụ chỉ nhận thêm EXP.'}</p>}
+    {day.scheduleVersion === 3 && !active && <div className="card"><h2 className="card__title">{day.sessions.length ? 'Ngày chụp đã kết thúc' : 'Chưa đến giờ chụp hôm nay'}</h2><p className="text-sm text-muted">Một thông báo bất ngờ mỗi ngày. {day.reward?.policyVersion === 2
+      ? 'Ảnh hợp lệ đầu ngày của bạn nhận 10 Xu cơ bản, kể cả sau 30 phút. Cả hai chụp trong 30 phút đầu: thêm 10 Xu/người, tối đa 20 Xu/người/ngày.'
+      : day.reward?.policyVersion === 1
+        ? 'Theo chính sách cũ: cả hai chụp trong 30 phút đầu để đủ điều kiện nhận tổng 40 Xu (20 Xu mỗi người); sau đó vẫn chụp đến hết ngày để giữ chuỗi.'
+        : 'Cả hai chụp trong ngày để giữ chuỗi. Thưởng được xác nhận theo chính sách của ngày.'}</p></div>}
     {selectedSession && !day.sessions.some((s) => s.sessionId === selectedSession) && <p className="text-sm text-muted">Lượt này chưa có hoặc chưa mở. Không thể chụp từ liên kết này.</p>}
-    {day.sessions.filter((s) => !selectedSession || s.sessionId === selectedSession).map((s) => <SessionPanel key={s.sessionId} session={s} partnerName={partnerName} onOpenPhoto={onOpenPhoto} highlighted={s.sessionId === selectedSession} />)}
+    {day.sessions.filter((s) => !selectedSession || s.sessionId === selectedSession).map((s) => <SessionPanel key={s.sessionId} session={s} reward={day.reward} partnerName={partnerName} onOpenPhoto={onOpenPhoto} highlighted={s.sessionId === selectedSession} captureEnabled={captureEnabled} onPendingChange={onPendingChange} />)}
   </div>;
 }
 function MonthGrid({ month, today, days, onPick }: { month: string; today: string; days: MomentDay[]; onPick: (d: MomentDay) => void }) {
@@ -117,23 +127,45 @@ export function MomentsPage() {
   const [month, setMonth] = useState(validDate?.slice(0, 7) ?? localToday.slice(0, 7));
   const monthQ = useQuery({ queryKey: momentMonthKey(month), queryFn: () => momentsApi.month(month), staleTime: 0 });
   const [picked, setPicked] = useState<string | null>(validDate);
+  // Keep exactly one draft's original parent mounted across the server's midnight rollover.
+  // A no-PIN background resume preserves the draft, never the validity of an old request.
+  const [pendingDay, setPendingDay] = useState<{ day: MomentDay; source: 'today' | 'picked'; generation: string } | null>(null);
+  useEffect(() => {
+    const clearInvalid = () => setPendingDay((old) => old && (!tokenStore.isCurrent(old.generation) || appLockState().discard) ? null : old);
+    const unsubscribe = subscribeAppLock(clearInvalid);
+    window.addEventListener('storage', clearInvalid);
+    return () => { unsubscribe(); window.removeEventListener('storage', clearInvalid); };
+  }, []);
+  const retain = (day: MomentDay, source: 'today' | 'picked', pending: boolean) => {
+    setPendingDay((old) => pending
+      ? appLockState().discard ? null : old ?? { day, source, generation: tokenStore.generation() }
+      : old?.source === source && old.day.localDate === day.localDate ? null : old);
+  };
   useEffect(() => { if (validDate) { setMonth(validDate.slice(0, 7)); setPicked(validDate); } }, [validDate]);
   const [gallery, setGallery] = useState<{ urls: string[]; index: number } | null>(null);
   const openPhoto: OpenPhoto = (urls, index) => setGallery({ urls, index: Math.max(0, index) });
   const data = monthQ.data;
   const today = data?.today ?? localToday;
   const pickedDay = picked ? (picked === todayQ.data?.localDate ? todayQ.data : data?.days.find((d) => d.localDate === picked)) : undefined;
+  const retained = pendingDay && tokenStore.isCurrent(pendingDay.generation) && !appLockState().discard ? pendingDay : null;
+  const liveDays = [todayQ.data, retained?.source === 'today' && retained.day.localDate !== todayQ.data?.localDate ? retained.day : undefined].filter((day): day is MomentDay => Boolean(day));
+  const sheetDay = retained?.source === 'picked' ? (pickedDay?.localDate === retained.day.localDate ? pickedDay : retained.day) : pickedDay;
   const streak = data?.streak;
-  const closeDay = () => { setPicked(null); if (validDate) setSearch({}, { replace: true }); };
-  return <Page title="Khoảnh khắc" subtitle="Một lần mỗi ngày · 30 phút đầu nhận thưởng" onBack={() => {
+  const closeDay = () => { if (retained?.source === 'picked') return; setPicked(null); if (validDate) setSearch({}, { replace: true }); };
+  return <Page title="Khoảnh khắc" subtitle="Một ảnh mỗi người mỗi ngày · Thưởng theo hoạt động" onBack={() => {
     const idx = (window.history.state as { idx?: number } | null)?.idx ?? 0;
     if (idx > 0) navigate(-1); else navigate('/', { replace: true });
   }}>
     {todayQ.isLoading && <Skeleton height={260} />}
     {todayQ.isError && <ErrorState onRetry={() => void todayQ.refetch()} />}
-    {todayQ.data && <DayPanel day={todayQ.data} partnerName={partnerName} onOpenPhoto={openPhoto} />}
+    {liveDays.map((day) => <div key={day.localDate} className="stack">
+      {day.localDate !== todayQ.data?.localDate && <p className="text-sm text-muted">Ảnh ngày {formatDay(day.localDate)} còn chờ xác nhận. Kiểm tra lại trong màn gửi ảnh; không đăng lại sang ngày mới.</p>}
+      <DayPanel day={day} partnerName={partnerName} onOpenPhoto={openPhoto}
+        captureEnabled={!retained || (retained.source === 'today' && retained.day.localDate === day.localDate)}
+        onPendingChange={(pending) => retain(day, 'today', pending)} />
+    </div>)}
     {streak && <div className="card mo-streak"><span className="grow"><span className="mo-streak__num">{streak.current > 0 ? `${streak.current} ngày liên tiếp` : 'Chưa có chuỗi ngày nào'}</span>
-      <span className="text-sm text-muted mo-streak__hint">Cả hai chụp trong ngày là giữ chuỗi, kể cả sau hạn thưởng. Chỉ hai ảnh đúng giờ mới đủ điều kiện nhận 40 Xu.{streak.best > streak.current ? ` Kỷ lục ${streak.best} ngày.` : ''}</span>
+      <span className="text-sm text-muted mo-streak__hint">Cả hai chụp trong ngày là giữ chuỗi, kể cả sau 30 phút. Chuỗi ảnh độc lập với chuỗi thưởng điểm danh. Mức Xu xem theo chính sách của từng ngày.{streak.best > streak.current ? ` Kỷ lục ${streak.best} ngày.` : ''}</span>
     </span></div>}
     <section className="card mo-month" aria-labelledby="mo-month-title"><div className="mo-month__head">
       <button type="button" className="icon-btn" aria-label="Tháng trước" disabled={!data || month <= data.minMonth} onClick={() => setMonth((m) => shiftMonth(m, -1))}><Icon name="chevronLeft" /></button>
@@ -145,8 +177,10 @@ export function MomentsPage() {
       {data && <MonthGrid month={month} today={today} days={data.days} onPick={(d) => setPicked(d.localDate)} />}
       {data && data.days.every((d) => d.sessions.every((s) => !s.mine && !s.partner.posted)) && <p className="text-sm text-muted center">Tháng này chưa có ảnh nào.</p>}
     </section>
-    <BottomSheet open={Boolean(pickedDay)} title={pickedDay ? dayHeading(pickedDay.localDate, today) : ''} onClose={closeDay}>
-      {pickedDay && <DayPanel day={pickedDay} partnerName={partnerName} onOpenPhoto={openPhoto} selectedSession={picked === validDate ? selectedSession : undefined} />}
+    <BottomSheet open={Boolean(sheetDay)} title={sheetDay ? dayHeading(sheetDay.localDate, today) : ''} onClose={closeDay} busy={retained?.source === 'picked'}>
+      {sheetDay && <DayPanel key={sheetDay.localDate} day={sheetDay} partnerName={partnerName} onOpenPhoto={openPhoto}
+        selectedSession={picked === validDate ? selectedSession : undefined}
+        captureEnabled={!retained || retained.source === 'picked'} onPendingChange={(pending) => retain(sheetDay, 'picked', pending)} />}
     </BottomSheet>
     <GalleryViewer urls={gallery?.urls ?? []} index={gallery ? gallery.index : null} onClose={() => setGallery(null)} />
   </Page>;
