@@ -20,6 +20,32 @@ interface RequestOptions {
   body?: unknown;
   auth?: boolean;
   _retry?: boolean;
+  /** Opt-in deadline for the entire request, including shared refresh and response body. */
+  timeoutMs?: number;
+  signal?: AbortSignal;
+}
+
+/** Stop waiting without cancelling the underlying shared operation (notably token refresh). */
+export function waitForAbort<T>(promise: Promise<T>, signal?: AbortSignal | null): Promise<T> {
+  if (!signal) return promise;
+  return new Promise<T>((resolve, reject) => {
+    const aborted = () => reject(signal.reason ?? new DOMException('Aborted', 'AbortError'));
+    if (signal.aborted) { promise.catch(() => undefined); aborted(); return; }
+    signal.addEventListener('abort', aborted, { once: true });
+    promise.then(resolve, reject).finally(() => signal.removeEventListener('abort', aborted));
+  });
+}
+
+/** Scoped deadlines only: other app requests and the shared refresh retain their own lifetime. */
+export async function withRequestDeadline<T>(timeoutMs: number | undefined, signal: AbortSignal | undefined,
+  run: (signal: AbortSignal | undefined) => Promise<T>): Promise<T> {
+  if (timeoutMs === undefined) return waitForAbort(run(signal), signal);
+  const controller = new AbortController();
+  const abort = () => controller.abort(signal?.reason);
+  if (signal?.aborted) abort(); else signal?.addEventListener('abort', abort, { once: true });
+  const timer = setTimeout(() => controller.abort(new ApiRequestError(408, 'REQUEST_TIMEOUT', 'Thao tác quá thời gian chờ. Hãy kiểm tra lại trạng thái.')), timeoutMs);
+  try { return await waitForAbort(run(controller.signal), controller.signal); }
+  finally { clearTimeout(timer); signal?.removeEventListener('abort', abort); }
 }
 
 let refreshing: { generation: string; promise: Promise<AuthTokens | null> } | null = null;
@@ -79,7 +105,7 @@ export async function authenticatedResponse(path: string, init: RequestInit = {}
   const check = () => {
     assertCurrentSession(generation);
     if (requestEpoch !== undefined) assertAccessEpoch(requestEpoch);
-    if (init.signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+    if (init.signal?.aborted) throw init.signal.reason ?? new DOMException('Aborted', 'AbortError');
   };
   const send = () => {
     check();
@@ -89,25 +115,30 @@ export async function authenticatedResponse(path: string, init: RequestInit = {}
     if (tokens) headers.set('Authorization', `Bearer ${tokens.accessToken}`);
     return fetch(`${BASE}${path}`, { ...init, headers, cache: 'no-store' });
   };
-  let res = await send();
+  let res = await waitForAbort(send(), init.signal);
   check();
   if (res.status === 401 && auth && retry) {
-    const refreshed = await refreshTokens(generation);
+    const refreshed = await waitForAbort(refreshTokens(generation), init.signal);
     check();
     if (refreshed) {
-      res = await send();
+      res = await waitForAbort(send(), init.signal);
       check();
     }
   }
   return res;
 }
 
-export async function apiRequest<T>(path: string, options: RequestOptions = {}): Promise<T> {
-  const { method = 'GET', body, auth = true, _retry = false } = options;
+export function apiRequest<T>(path: string, options: RequestOptions = {}): Promise<T> {
+  return withRequestDeadline(options.timeoutMs, options.signal, (signal) => requestJson<T>(path, { ...options, signal }));
+}
+
+async function requestJson<T>(path: string, options: RequestOptions): Promise<T> {
+  const { method = 'GET', body, auth = true, _retry = false, signal } = options;
   const generation = tokenStore.generation();
   const epoch = currentAccessEpoch();
   const res = await authenticatedResponse(path, {
     method,
+    signal,
     headers: body !== undefined ? { 'Content-Type': 'application/json' } : undefined,
     body: body !== undefined ? JSON.stringify(body) : undefined,
   }, auth, !_retry, auth ? epoch : undefined);
@@ -116,8 +147,9 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
   if (!res.ok) {
     let payload: ApiError | null = null;
     try {
-      payload = (await res.json()) as ApiError;
-    } catch {
+      payload = (await waitForAbort(res.json(), signal)) as ApiError;
+    } catch (err) {
+      if (signal?.aborted) throw signal.reason ?? err;
       // Proxies can answer with HTML or an empty body.
     }
     assertCurrentSession(generation);
@@ -130,7 +162,7 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
     );
   }
   if (res.status === 204) return undefined as T;
-  const json = (await res.json()) as { data: T };
+  const json = (await waitForAbort(res.json(), signal)) as { data: T };
   assertCurrentSession(generation);
   if (auth) assertAccessEpoch(epoch);
   return json.data;

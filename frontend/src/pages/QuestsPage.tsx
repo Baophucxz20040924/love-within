@@ -11,13 +11,13 @@ import { WaterRing } from '../components/WaterRing';
 import { useAuth } from '../features/auth/AuthContext';
 import { useApprovals } from '../features/approvals/useApprovals';
 import { BucketCard } from '../features/bucket/BucketCard';
-import { CHECKIN_KEY, QUESTS_KEY, WALLET_KEY, questsApi } from '../features/quests/api';
+import { CHECKIN_KEY, QUESTS_KEY, questsApi, refreshQuestRewards } from '../features/quests/api';
 import { WATER_KEY, waterApi } from '../features/water/api';
 import { WaterPhotoFlow } from '../features/water/WaterPhotoFlow';
 import { ManualWaterSheet, WaterGoalSheet } from '../features/water/WaterSheets';
 import { ApiRequestError } from '../lib/apiClient';
-import { formatMl, formatToday, shortName } from '../lib/format';
-import type { Quest } from '../lib/types';
+import { formatDay, formatMl, formatNumber, formatToday, shortName } from '../lib/format';
+import type { CheckinResult, CheckinStatus, Quest } from '../lib/types';
 
 function StatusChip({ status }: { status: Quest['status'] }) {
   if (status === 'rewarded') {
@@ -31,13 +31,56 @@ function StatusChip({ status }: { status: Quest['status'] }) {
   return <span className="chip">Đang làm</span>;
 }
 
-function RewardChips({ q }: { q: Quest }) {
+export function isActivityExpQuest(q: Quest): boolean {
+  return q.rewardPolicy?.version === 2 && (q.type === 'checkin' || q.type === 'duo_moment');
+}
+
+export function RewardChips({ q }: { q: Quest }) {
   return (
     <div className="quest-card__rewards">
-      <span className="chip">🪙 {q.coinReward} Xu tổng · chia đều</span>
-      <span className="chip">✨ +{q.expReward} EXP</span>
+      <span className="chip">{isActivityExpQuest(q) ? '0 Xu từ nhiệm vụ · Xu tự cộng riêng' : `${formatNumber(q.coinReward)} Xu tổng · chia đều hai ví`}</span>
+      <span className="chip">+{formatNumber(q.expReward)} EXP chung</span>
     </div>
   );
+}
+
+export function checkinSuccessMessage(r: CheckinResult): string {
+  const reward = r.reward;
+  const coins = reward?.policyVersion !== 2
+    ? `+${formatNumber(r.coinAwarded)} Xu của bạn`
+    : reward.status === 'awarded'
+      ? `Đã cộng ${formatNumber(reward.coinAwarded)} Xu của bạn`
+      : reward.status === 'pending'
+        ? 'Đã lưu, đang xử lý Xu đủ đôi'
+        : 'Chờ cả hai điểm danh để nhận Xu';
+  return `Điểm danh xong! ${coins} · +${r.expAwarded} EXP${r.leveledUp ? ' · Lên cấp' : ''}`;
+}
+
+export function CheckinReward({ status: s }: { status: CheckinStatus }) {
+  const r = s.reward;
+  if (!r) return <p className="text-sm text-muted">Xu điểm danh theo chính sách của ngày; xem số thực nhận trong lịch sử ví.</p>;
+  if (r.policyVersion === 1) return <div className="stack">
+    <p className="text-sm">Ngày này dùng chính sách cũ: Xu điểm danh cá nhân và thưởng nhiệm vụ theo mức cũ. Xem số thực nhận trong lịch sử ví.</p>
+    <p className="text-sm text-muted">Chính sách mới từ {formatDay(r.effectiveDate)}: chỉ cộng Xu khi cả hai điểm danh. Lịch sử trước đó giữ nguyên.</p>
+  </div>;
+  const settledStreak = r.commonStreak !== null;
+  return <div className="stack" aria-live="polite">
+    <p className="text-sm strong">{settledStreak
+      ? `${formatNumber(r.baseCoin)} cơ bản + ${formatNumber(r.bonusCoin)} thưởng chuỗi = ${formatNumber(r.baseCoin + r.bonusCoin)} Xu của bạn`
+      : 'Mỗi người: 5 Xu cơ bản + thưởng chuỗi chung khi cả hai điểm danh.'}</p>
+    <p className="text-sm">{r.status === 'awarded'
+      ? `Đã cộng ${formatNumber(r.coinAwarded)} Xu vào ví của bạn.`
+      : r.status === 'pending'
+        ? 'Đã lưu điểm danh đủ đôi, đang xử lý cộng Xu. Không cần điểm danh lại.'
+        : !s.checkedInToday && !s.partnerCheckedIn
+          ? 'Chưa có Xu: cả hai cần điểm danh hôm nay.'
+          : !s.checkedInToday
+            ? 'Người ấy đã điểm danh. Đến lượt bạn để cả hai nhận Xu.'
+            : 'Bạn đã điểm danh. Chờ người ấy để cả hai nhận Xu.'}</p>
+    <p className="text-sm text-muted">Chuỗi chung ngày 1: 5 Xu/người; ngày 2: 6; ngày 3: 7… Thiếu một ngày đủ đôi thì bắt đầu lại.</p>
+    <p className="text-sm text-muted">EXP riêng luồng Xu: mỗi lần điểm danh +5 EXP; nhiệm vụ đủ đôi nhận thêm 5 EXP chung, không thêm Xu.</p>
+    <p className="text-sm text-muted">Áp dụng từ {formatDay(r.effectiveDate)}. Chuỗi thưởng chung mới không cộng bù ngày cũ.</p>
+  </div>;
 }
 
 function useClaim() {
@@ -46,10 +89,12 @@ function useClaim() {
   const { refreshMe } = useAuth();
   return useMutation({
     mutationFn: questsApi.claim,
-    onSuccess: async (q) => {
-      toast.success(`Thưởng chung: ${q.coinReward} Xu chia đều hai ví, +${q.expReward} EXP chung 🎉`);
-      await Promise.all([qc.invalidateQueries({ queryKey: QUESTS_KEY }), qc.invalidateQueries({ queryKey: WALLET_KEY })]);
-      await refreshMe();
+    onSuccess: (q) => {
+      toast.success(isActivityExpQuest(q)
+        ? `Đã nhận +${q.expReward} EXP chung. Xu hoạt động được tự cộng riêng, nhiệm vụ không cộng thêm Xu.`
+        : `Đã nhận ${q.coinReward} Xu tổng chia đều hai ví, +${q.expReward} EXP chung.`);
+      refreshQuestRewards(qc);
+      void refreshMe().catch(() => undefined);
     },
     onError: (err) => toast.error(err instanceof ApiRequestError ? err.message : 'Có lỗi xảy ra'),
   });
@@ -60,34 +105,41 @@ function CheckinCard() {
   const toast = useToast();
   const { me, refreshMe } = useAuth();
   const partner = me?.couple?.members.find((m) => m.id !== me.user.id);
-  const status = useQuery({ queryKey: CHECKIN_KEY, queryFn: questsApi.checkinStatus });
+  const status = useQuery({ queryKey: CHECKIN_KEY, queryFn: questsApi.checkinStatus,
+    refetchInterval: (query) => query.state.data?.reward?.status === 'pending' ? 5_000 : 30_000,
+    refetchOnWindowFocus: true,
+  });
 
   const checkin = useMutation({
     mutationFn: questsApi.checkin,
-    onSuccess: async (r) => {
-      toast.success(`Điểm danh xong! +${r.coinAwarded} Xu · +${r.expAwarded} EXP${r.leveledUp ? ' · Lên cấp 🎉' : ''}`);
-      await Promise.all([
-        qc.invalidateQueries({ queryKey: CHECKIN_KEY }),
-        qc.invalidateQueries({ queryKey: QUESTS_KEY }),
-        qc.invalidateQueries({ queryKey: WALLET_KEY }),
-      ]);
-      await refreshMe();
+    onSuccess: (r) => {
+      toast.success(checkinSuccessMessage(r));
+      // Use the confirmed receipt immediately, not the latency of a follow-up read.
+      qc.setQueryData<CheckinStatus>(CHECKIN_KEY, (old) => old?.localDate === r.localDate
+        ? { ...old, checkedInToday: true, streak: r.streak, reward: r.reward,
+          partnerCheckedIn: r.reward?.policyVersion === 2 && ['pending', 'awarded'].includes(r.reward.status) ? true : old.partnerCheckedIn }
+        : old);
+      refreshQuestRewards(qc);
+      void refreshMe().catch(() => undefined);
     },
     onError: (err) => toast.error(err instanceof ApiRequestError ? err.message : 'Có lỗi xảy ra'),
   });
 
   if (status.isLoading) return <Skeleton height={168} />;
+  if (status.isError && !status.data) return <ErrorState onRetry={() => void status.refetch()} />;
   const s = status.data;
   const done = Boolean(s?.checkedInToday);
+  const pairPolicy = s?.reward?.policyVersion === 2;
+  const streak = pairPolicy ? s.reward.commonStreak : s?.streak;
 
   return (
     <div className="card checkin-card">
       <div className="row row--between">
         <div>
-          <p className="text-sm text-muted">Chuỗi điểm danh</p>
+          <p className="text-sm text-muted">{pairPolicy ? 'Chuỗi thưởng chung' : 'Chuỗi điểm danh cá nhân'}</p>
           <div className="streak">
-            <span className="streak__num">{s?.streak ?? 0}</span>
-            <span className="strong">ngày{s && s.streak > 0 ? ' 🔥' : ''}</span>
+            <span className="streak__num">{streak ?? '—'}</span>
+            <span className="strong">{pairPolicy && streak == null ? 'chờ đủ đôi' : 'ngày'}</span>
           </div>
         </div>
         {partner && (
@@ -99,6 +151,7 @@ function CheckinCard() {
           </div>
         )}
       </div>
+      {s && <CheckinReward status={s} />}
       <button
         type="button"
         className={`btn btn-lg btn-block ${done ? 'btn-secondary' : 'btn-primary'}`}
@@ -216,6 +269,12 @@ function WaterQuestCard({ quest }: { quest: Quest | undefined }) {
 
 function QuestCard({ quest }: { quest: Quest }) {
   const claim = useClaim();
+  const expOnly = isActivityExpQuest(quest);
+  const description = expOnly
+    ? quest.type === 'checkin'
+      ? 'Cả hai điểm danh để nhận EXP chung. Xu đủ đôi và thưởng chuỗi tự cộng riêng vào mỗi ví.'
+      : 'Cả hai chụp đúng giờ để hoàn thành nhiệm vụ EXP. Mỗi ảnh đầu ngày tự cộng 10 Xu; đủ đôi đúng giờ thêm 10 Xu/người.'
+    : quest.description;
   const pct = (quest.progress / quest.target) * 100;
   const icon = quest.type === 'checkin' ? 'heart' : quest.type === 'daily_question' ? 'messageCircle' : quest.type === 'duo_moment' ? 'camera' : 'star';
   return (
@@ -226,7 +285,7 @@ function QuestCard({ quest }: { quest: Quest }) {
         </span>
         <div style={{ flex: 1, minWidth: 0 }}>
           <h3 className="card__title">{quest.title}</h3>
-          <p className="text-sm text-muted">{quest.description}</p>
+          <p className="text-sm text-muted">{description}</p>
         </div>
         <StatusChip status={quest.status} />
       </div>
@@ -238,11 +297,11 @@ function QuestCard({ quest }: { quest: Quest }) {
           {quest.progress}/{quest.target}
         </span>
       </div>
-      <div className="row row--between">
+      <div className="row row--between quest-card__actions">
         <RewardChips q={quest} />
         {quest.status === 'completed' && (
           <button type="button" className="btn btn-primary" disabled={claim.isPending} onClick={() => claim.mutate(quest.key)}>
-            <Icon name="gift" size={18} /> Nhận
+            <Icon name="gift" size={18} /> {expOnly ? 'Nhận EXP' : 'Nhận thưởng'}
           </button>
         )}
         {quest.type === 'daily_question' && quest.status === 'in_progress' && (
@@ -265,10 +324,12 @@ export function QuestsPage() {
   const water = quests.data?.find((q) => q.type === 'water_goal');
   const others = quests.data?.filter((q) => q.type !== 'water_goal') ?? [];
   const done = quests.data?.filter((q) => q.status !== 'in_progress').length ?? 0;
+  const policy = quests.data?.find((q) => q.rewardPolicy)?.rewardPolicy;
 
   return (
     <Page title="Nhiệm vụ" subtitle={formatToday()} actions={<CoinChip />}>
       <CheckinCard />
+      {policy && <p className="text-sm text-muted">Chính sách Xu mới {policy.version === 2 ? 'áp dụng' : 'bắt đầu'} từ {formatDay(policy.effectiveDate)} ({policy.timezone}). Điểm danh và Khoảnh khắc tự cộng Xu theo hoạt động; nhiệm vụ tương ứng chỉ nhận EXP từ ngày này. Nước và các nhiệm vụ khác giữ nguyên thưởng.</p>}
 
       <div className="section">
         <h2 className="section__title">

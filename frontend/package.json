@@ -27,7 +27,8 @@
     "test:mentions:browser": "node tests/post-mentions/browser.mjs",
     "test:event-mentions": "node tests/event-mentions/event.cjs",
     "test:event-mentions:browser": "node tests/event-mentions/browser.mjs --local-mock-runtime",
-    "test:moments": "node tests/moments.cjs",
+    "test:moments": "node tests/moments.cjs && node --test tests/moments/transport.cjs",
+    "test:daily-rewards": "node tests/reward-ui.cjs && node tests/water/manual-proof.cjs",
     "test:moments:browser": "node tests/moments/browser.mjs --local-mock-runtime",
     "test:media": "node tests/post-media/media.cjs && node tests/post-media/upload.cjs && node tests/post-media/player.cjs && node tests/post-media/composer.cjs",
     "test:media:browser": "node tests/post-media/browser.mjs"

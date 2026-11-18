@@ -1,5 +1,6 @@
 import type { Types } from 'mongoose';
 import { Couple, type CoupleDoc } from '../models/Couple.js';
+import { newDailyRewardPolicy } from '../services/rewardPolicy.service.js';
 
 export const coupleRepository = {
   findById(id: Types.ObjectId): Promise<CoupleDoc | null> {
@@ -11,7 +12,7 @@ export const coupleRepository = {
   },
 
   create(input: { memberIds: Types.ObjectId[]; timezone: string }): Promise<CoupleDoc> {
-    return Couple.create({ ...input, anniversaryDate: new Date() });
+    return Couple.create({ ...input, anniversaryDate: new Date(), dailyRewardPolicy: newDailyRewardPolicy(input.timezone) });
   },
 
   async archive(id: Types.ObjectId): Promise<void> {

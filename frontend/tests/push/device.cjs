@@ -124,6 +124,7 @@ function harness(options = {}) {
       } };
       if (name === '../../lib/installPrompt') return { detectDevice: () => ({ platform: options.platform ?? 'android' }), isStandalone: () => options.standalone ?? true };
       if (name === './api') return { pushApi: api };
+      if (name === './onboardingPolicy') return { setPushExplicitlyOff: userId => calls.push({ name: 'policy.off', args: [userId] }) };
       throw new Error(`Unexpected import ${name}`);
     },
     window: {
@@ -250,16 +251,22 @@ for (const permission of ['denied', 'default']) {
   });
 }
 
-test('VAPID rotation replaces browser endpoint and forces registration inside throttle window', async () => {
+test('VAPID rotation removes stale consent but never enrolls from background sync', async () => {
   const h = harness({ record: record() });
   h.config.publicKey = ROTATED_KEY;
   await h.device.syncThisDevice('alice');
   assert.equal(h.count('browser.unsubscribe'), 1);
-  assert.equal(h.count('browser.subscribe'), 1);
-  assert.equal(h.count('api.subscribe'), 1);
+  assert.equal(h.count('browser.subscribe'), 0);
+  assert.equal(h.count('api.subscribe'), 0);
   assert.deepEqual(h.events('api.unsubscribe')[0].args, [ENDPOINT]);
-  assert.notEqual(h.sub.endpoint, ENDPOINT);
-  assert.equal(h.record().endpoint, h.sub.endpoint);
+  assert.equal(h.sub, null);
+  assert.equal(h.record(), null);
+  assert.equal(await h.device.readDeviceState('alice'), 'off');
+  await h.device.syncThisDevice('alice');
+  assert.equal(h.count('browser.subscribe'), 0);
+  assert.equal(h.count('policy.off'), 0, 'repair is not an explicit opt-out');
+  await h.device.enableOnThisDevice('alice');
+  assert.equal(h.count('browser.subscribe'), 1);
   assert.equal(await h.device.readDeviceState('alice'), 'on');
 });
 
@@ -319,16 +326,16 @@ test('failed sync preserves timestamp for retry instead of throttling a failed s
   assert.equal(h.record().syncedAt, NOW);
 });
 
-test('rotation followed by failed registration remains off and retries the new endpoint', async () => {
+test('explicit rotation followed by failed registration remains off and retries only by tap', async () => {
   const h = harness({ record: record() });
   h.config.publicKey = ROTATED_KEY;
   h.hooks['api.subscribe'] = () => Promise.reject(new Error('offline'));
-  await assert.rejects(h.device.syncThisDevice('alice'), /offline/);
+  await assert.rejects(h.device.enableOnThisDevice('alice'), /offline/);
   assert.equal(h.record().endpoint, ENDPOINT);
   assert.notEqual(h.sub.endpoint, ENDPOINT);
   assert.equal(await h.device.readDeviceState('alice'), 'off');
   delete h.hooks['api.subscribe'];
-  await h.device.syncThisDevice('alice');
+  await h.device.enableOnThisDevice('alice');
   assert.equal(h.record().endpoint, h.sub.endpoint);
   assert.equal(await h.device.readDeviceState('alice'), 'on');
 });
@@ -455,12 +462,12 @@ test('logout cleanup retains old credentials and precedes a new account explicit
   assert.equal(await h.device.readDeviceState('alice'), 'off');
 });
 
-test('logout during rotated sync removes the actual newly registered endpoint, not just the stale record', async () => {
+test('logout during explicit rotation removes the actual newly registered endpoint, not just the stale record', async () => {
   const h = harness({ record: record() });
   h.config.publicKey = ROTATED_KEY;
   const gate = deferred();
   h.hooks['api.subscribe'] = () => gate.promise;
-  const old = settle(h.device.syncThisDevice('alice'));
+  const old = settle(h.device.enableOnThisDevice('alice'));
   await until(() => h.count('api.subscribe') === 1);
   const rotatedEndpoint = h.sub.endpoint;
   assert.notEqual(rotatedEndpoint, ENDPOINT);
@@ -638,4 +645,82 @@ test('state notifications reflect successful enable and immediate disable; remov
   await disabling;
   assert.equal(notices, 2);
   assert.equal(h.device.deviceVersion(), 3);
+});
+
+test('stale tap guard runs synchronously before OS permission or device work', async () => {
+  const h = harness({ permission: 'default', subscription: false });
+  let checked = 0;
+  const pending = h.device.enableOnThisDevice('alice', () => {
+    checked++;
+    throw new h.ApiRequestError(409, 'ACCESS_CHANGED', 'locked');
+  });
+  assert.equal(checked, 1);
+  assert.equal(h.calls.length, 0);
+  await assert.rejects(pending, { code: 'ACCESS_CHANGED' });
+});
+
+for (const boundary of ['permission', 'api.config', 'browser.get', 'browser.subscribe', 'api.subscribe']) {
+  test(`caller access guard cancels explicit enable after ${boundary}`, async () => {
+    const h = harness({ permission: 'default', subscription: false });
+    const gate = deferred();
+    let allowed = true;
+    h.hooks[boundary] = () => gate.promise;
+    const old = settle(h.device.enableOnThisDevice('alice', () => {
+      if (!allowed) throw new h.ApiRequestError(409, 'ACCESS_CHANGED', 'locked');
+    }));
+    await until(() => h.count(boundary) === 1);
+    allowed = false;
+    if (boundary === 'browser.subscribe') h.sub = h.makeSub();
+    gate.resolve(boundary === 'permission' ? 'granted' : boundary === 'api.config' ? h.config : boundary === 'browser.subscribe' ? h.sub : null);
+    assert.equal((await old).error?.code, 'ACCESS_CHANGED');
+    assert.equal(h.record(), null);
+    assert.equal(h.sub, null, 'late-created subscription must not survive access loss');
+    assert.equal(h.count('api.subscribe'), boundary === 'api.subscribe' ? 1 : 0);
+    if (boundary === 'api.subscribe') {
+      assert.equal(h.events('fetch')[0].args[1].headers.Authorization, 'Bearer alice-access');
+    }
+  });
+}
+
+test('guard-failed late browser subscription preserves a newer published owner', async () => {
+  const h = harness({ subscription: false });
+  const gate = deferred();
+  let allowed = true;
+  h.hooks['browser.subscribe'] = () => gate.promise;
+  const old = settle(h.device.enableOnThisDevice('alice', () => { if (!allowed) throw Error('stale'); }));
+  await until(() => h.count('browser.subscribe') === 1);
+  allowed = false;
+  h.sub = h.makeSub();
+  h.storage.set(KEY, JSON.stringify(record({ userId: 'bob' })));
+  gate.resolve(h.sub);
+  assert.match((await old).error.message, /stale/);
+  assert.equal(h.count('browser.unsubscribe'), 0);
+  assert.equal(h.record().userId, 'bob');
+});
+
+test('only explicit disable records opt-out, including when a device record is missing', async () => {
+  const h = harness({ record: record() });
+  await h.device.forgetThisDevice();
+  await h.device.syncThisDevice('alice');
+  assert.equal(h.count('policy.off'), 0);
+  await h.device.disableOnThisDevice('alice');
+  assert.deepEqual(h.events('policy.off').map(call => call.args), [['alice']]);
+});
+
+test('sync access guard stops before config and never enrolls a mismatched endpoint', async () => {
+  const h = harness({ record: record() });
+  const gate = deferred();
+  let allowed = true;
+  h.hooks['browser.get'] = () => gate.promise;
+  const old = settle(h.device.syncThisDevice('alice', () => { if (!allowed) throw Error('locked'); }));
+  await until(() => h.count('browser.get') === 1);
+  allowed = false; gate.resolve(h.sub);
+  assert.match((await old).error.message, /locked/);
+  assert.equal(h.count('api.config'), 0);
+  delete h.hooks['browser.get'];
+  h.sub = h.makeSub('https://push.example.test/unowned');
+  await h.device.syncThisDevice('alice');
+  assert.equal(h.record(), null);
+  assert.equal(h.count('browser.subscribe'), 0);
+  assert.equal(h.count('api.subscribe'), 0);
 });

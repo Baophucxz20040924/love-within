@@ -22,6 +22,7 @@ function LogStatus({ log, myId }: { log: WaterLogView; myId: string | undefined 
 }
 
 function LogThumb({ log, onOpen }: { log: WaterLogView; onOpen: (url: string) => void }) {
+  const [imageFailed, setImageFailed] = useState(false);
   const image = useQuery({
     queryKey: waterImageKey(log.id),
     queryFn: () => waterApi.imageUrl(log.id),
@@ -35,10 +36,15 @@ function LogThumb({ log, onOpen }: { log: WaterLogView; onOpen: (url: string) =>
       </span>
     );
   }
+  if (image.isError || imageFailed) return (
+    <button type="button" className="btn btn-ghost" disabled={image.isFetching} aria-label="Không tải được minh chứng. Thử tải ảnh lại" onClick={() => {
+      void image.refetch().then(result => { if (!result.isError) setImageFailed(false); });
+    }}>{image.isFetching ? 'Đang tải…' : 'Tải lại ảnh'}</button>
+  );
   if (!image.data) return <span className="thumb skeleton" aria-hidden="true" />;
   return (
     <button type="button" className="icon-btn" style={{ padding: 0 }} onClick={() => onOpen(image.data.url)} aria-label="Xem ảnh">
-      <img className="thumb" src={image.data.url} alt="" loading="lazy" />
+      <img className="thumb" src={image.data.url} alt="" loading="lazy" onError={() => setImageFailed(true)} />
     </button>
   );
 }
@@ -103,8 +109,7 @@ export function WaterQuestPage() {
           <div className="callout">
             <Icon name="shield" size={16} />
             <span>
-              Ảnh được lưu riêng tư trên AWS S3 và gửi tới AI (beeknoee) để ước lượng ml. Chỉ hai bạn xem được ảnh;{' '}
-              {partnerName} xem ảnh để xác nhận.
+              Nhập thủ công có thể kèm một ảnh minh chứng hoặc không ảnh; không gửi tới AI. Chỉ chế độ AI ước lượng mới gửi ảnh tới AI (beeknoee). Ảnh được lưu riêng tư, chỉ hai bạn xem được; {partnerName} xác nhận trước khi cộng ml.
             </span>
           </div>
 
@@ -112,7 +117,7 @@ export function WaterQuestPage() {
             <h2 className="section__title">Hôm nay của bạn</h2>
             {today.data.logs.length === 0 ? (
               <div className="card">
-                <EmptyState art="💧" title="Chưa có lượt nào" hint="Chụp ảnh ly nước đầu tiên trong ngày nhé." />
+                <EmptyState art="💧" title="Chưa có lượt nào" hint="Nhập lượng nước đầu tiên, có thể kèm ảnh minh chứng nhé." />
               </div>
             ) : (
               <div className="list">
@@ -122,7 +127,7 @@ export function WaterQuestPage() {
                     <div className="list__body">
                       <p className={`log-row__amount${log.status === 'rejected' ? ' is-void' : ''}`}>{formatMl(log.amountMl)}</p>
                       <p className="list__meta">
-                        {log.source === 'ai' ? 'AI ước lượng' : 'Nhập tay'} · {formatTime(log.createdAt)}
+                        {log.source === 'ai' ? 'AI ước lượng' : log.hasImage ? 'Nhập tay · Có minh chứng' : 'Nhập tay · Không ảnh'} · {formatTime(log.createdAt)}
                       </p>
                     </div>
                     <LogStatus log={log} myId={me?.user.id} />

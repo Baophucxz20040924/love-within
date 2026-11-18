@@ -1,10 +1,12 @@
 import { Schema, model, type Document, type Types } from 'mongoose';
 
 export type CoupleStatus = 'active' | 'archived';
+export interface DailyRewardPolicy { version: 2; effectiveDate: string; timezone: string; activatedAt: Date }
 
 export interface CoupleDoc extends Document {
   _id: Types.ObjectId;
   memberIds: Types.ObjectId[]; // exactly 2
+  dailyRewardPolicy?: DailyRewardPolicy | null;
   anniversaryDate: Date | null;
   level: number;
   exp: number;
@@ -29,6 +31,8 @@ const coupleSchema = new Schema<CoupleDoc>(
         message: 'A couple must have exactly 2 members',
       },
     },
+    // CAS create-once policy; no default inferred from time or source-row presence.
+    dailyRewardPolicy: { type: Schema.Types.Mixed, default: null },
     pinnedSavingsGoalId: { type: Schema.Types.ObjectId, ref: 'SavingsGoal', default: null },
     // Non-expiring: an unknown write outcome requires offline reconciliation, never lease stealing.
     savingsWriteToken: { type: String, default: null },

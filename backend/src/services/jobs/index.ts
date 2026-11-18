@@ -1,4 +1,5 @@
 import { registerJob } from '../scheduler.service.js';
+import { dailyRewardsJob } from './dailyRewards.job.js';
 import { coupleEventsRemindJob } from './coupleEventsRemind.job.js';
 import { duoMomentPromptJob } from './duoMomentPrompt.job.js';
 import { friendEventsRemindJob } from './friendEventsRemind.job.js';
@@ -15,4 +16,5 @@ export function registerAllJobs(): void {
   registerJob(pollsClosedJob);
   registerJob(friendEventsRemindJob);
   registerJob(duoMomentPromptJob);
+  registerJob(dailyRewardsJob);
 }

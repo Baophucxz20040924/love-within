@@ -10,7 +10,8 @@ import { bucketRewardDayRepository } from '../repositories/bucket.repository.js'
 import { finishBucketCompletion } from './bucketCompletion.service.js';
 import type { LedgerEntryDoc, LedgerReason, LedgerType } from '../models/LedgerEntry.js';
 import type { WalletDoc, WalletPending } from '../models/Wallet.js';
-import type { OperationPayload, OperationResult, WalletOperationDoc } from '../models/WalletOperation.js';
+import type { OperationPayload, OperationResult, WalletOperationDoc, RewardProvenance } from '../models/WalletOperation.js';
+import { dailyRewardService } from './dailyReward.service.js';
 import { walletRepository, splitCoin, walletReview } from '../repositories/wallet.repository.js';
 import { Errors } from '../utils/errors.js';
 
@@ -22,6 +23,7 @@ export interface ApplyInput {
   delta: number;
   reason: LedgerReason;
   refId?: Types.ObjectId | null;
+  provenance?: RewardProvenance;
 }
 export interface WalletView {
   coinBalance: number;
@@ -35,11 +37,13 @@ export interface LedgerView {
   id: string; type: LedgerType; delta: number; balanceAfter: number; reason: LedgerReason;
   refId: string | null; actorUserId: string; ownerUserId: string | null;
   scope: 'personal' | 'shared_exp' | 'legacy_shared'; createdAt: string;
+  provenance?: RewardProvenance;
 }
 function toLedgerView(e: LedgerEntryDoc): LedgerView {
   return { id: e._id.toString(), type: e.type, delta: e.delta, balanceAfter: e.balanceAfter,
     reason: e.reason, refId: e.refId?.toString() ?? null, actorUserId: e.actorUserId.toString(),
     ownerUserId: e.ownerUserId?.toString() ?? null,
+    ...(e.provenance ? { provenance: e.provenance } : {}),
     scope: e.type === 'exp' ? 'shared_exp' : e.ownerUserId ? 'personal' : 'legacy_shared', createdAt: e.createdAt.toISOString() };
 }
 function fingerprint(payload: OperationPayload) {
@@ -106,12 +110,14 @@ async function finish(coupleId: Types.ObjectId, pending: WalletPending): Promise
         await walletRepository.appendLedger({ operationKey: `${op._id}:coin:${owner}`, coupleId, type: 'coin', delta,
           balanceAfter: pending.balances[owner], reason: op.payload.reason,
           refId: op.payload.refId ? new Types.ObjectId(op.payload.refId) : null,
-          actorUserId: new Types.ObjectId(op.payload.actorUserId), ownerUserId: new Types.ObjectId(owner) });
+          actorUserId: new Types.ObjectId(op.payload.actorUserId), ownerUserId: new Types.ObjectId(owner),
+          ...(op.payload.provenance ? { provenance: op.payload.provenance } : {}) });
       }
       if (op.payload.exp > 0) await walletRepository.appendLedger({ operationKey: `${op._id}:exp`, coupleId, type: 'exp',
         delta: op.payload.exp, balanceAfter: result.exp!, reason: op.payload.reason,
         refId: op.payload.refId ? new Types.ObjectId(op.payload.refId) : null,
-        actorUserId: new Types.ObjectId(op.payload.actorUserId), ownerUserId: null });
+        actorUserId: new Types.ObjectId(op.payload.actorUserId), ownerUserId: null,
+        ...(op.payload.provenance ? { provenance: op.payload.provenance } : {}) });
     }
     // Durable terminal tombstone MUST precede clearing either bounded journal.
     await walletRepository.commit(op._id, result, pending.rejected);
@@ -198,6 +204,8 @@ export const walletService = {
         await source.complete(row._id);
       }
     }
+    const couple = await Couple.findById(coupleId).exec();
+    if (couple) await dailyRewardService.recoverCouple(couple);
   },
   async applyCoin(input: ApplyInput): Promise<{ balance: number }> {
     if (!Number.isSafeInteger(input.delta) || input.delta === 0) throw Errors.badRequest('Delta phải là số nguyên khác 0');
@@ -206,13 +214,16 @@ export const walletService = {
     await realtimeAudience.couple(input.coupleId, ['wallet', 'couple']);
     return { balance: result.balances[input.ownerUserId] };
   },
-  async reward(input: Omit<ApplyInput, 'delta' | 'ownerUserId'> & { coin: number; exp: number; ownerUserId?: string | null }) {
+  async reward(input: Omit<ApplyInput, 'delta' | 'ownerUserId'> & { coin: number; exp: number; ownerUserId?: string | null; allocations?: Record<string, number> }) {
     const couple = await Couple.findById(input.coupleId).exec();
     if (!couple) throw Errors.notFound('Couple không tồn tại');
     if (!Number.isSafeInteger(input.coin) || input.coin < 0) throw Errors.badRequest('Số Xu không hợp lệ');
-    const allocations = input.ownerUserId ? { [input.ownerUserId]: input.coin } : splitCoin(input.coin, couple.memberIds);
+    const allocations = input.allocations ?? (input.ownerUserId ? { [input.ownerUserId]: input.coin } : splitCoin(input.coin, couple.memberIds));
+    if (Object.values(allocations).some(value => !Number.isSafeInteger(value) || value < 0)
+      || Object.values(allocations).reduce((sum, value) => sum + value, 0) !== input.coin) throw Errors.badRequest('Phân bổ Xu không hợp lệ');
     const result = await execute(input.coupleId, input.operationId, { actorUserId: input.actorUserId, allocations,
-      exp: input.exp, reason: input.reason, refId: input.refId?.toString() ?? null });
+      exp: input.exp, reason: input.reason, refId: input.refId?.toString() ?? null,
+      ...(input.provenance ? { provenance: input.provenance } : {}) });
     await realtimeAudience.couple(input.coupleId, ['wallet', 'couple']);
     return { coin: result.balances[input.actorUserId], exp: result.exp, level: result.level, leveledUp: result.leveledUp };
   },

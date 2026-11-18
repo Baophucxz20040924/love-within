@@ -39,6 +39,8 @@ export interface FriendsNotifyInput extends NotifyBase {
 /** Durable Love inbox first, optional push second. Origin and event identity must come from the saved source. */
 export interface CoupleNotifyInput extends NotifyBase {
   space: 'couple';
+  /** Durable source workers must retry inbox persistence failures. */
+  requirePersistence?: boolean;
   coupleId: Types.ObjectId;
   type: CoupleNotificationType;
   actorId: Types.ObjectId | null;
@@ -141,6 +143,7 @@ export const notificationService = {
       } catch (err) {
         // A saved photo / approval / monetary action must survive any inbox or push failure.
         logger.warn('Couple notification not delivered', { userId: String(input.to), type: input.type, message: (err as Error).message });
+        if (input.requirePersistence) throw err;
       }
       return;
     }
@@ -191,7 +194,7 @@ export const notificationService = {
   async toPartner(
     couple: CoupleDoc,
     actorId: string | Types.ObjectId,
-    n: Pick<CoupleNotifyInput, 'type' | 'entityId' | 'eventKey' | 'target' | 'push'>,
+    n: Pick<CoupleNotifyInput, 'type' | 'entityId' | 'eventKey' | 'target' | 'push' | 'requirePersistence'>,
   ): Promise<void> {
     try {
       const actor = typeof actorId === 'string' ? new Types.ObjectId(actorId) : actorId;
@@ -201,6 +204,7 @@ export const notificationService = {
       await notificationService.emit({ ...n, space: 'couple', coupleId: couple._id, to, actorId: actor });
     } catch (err) {
       logger.warn('Couple notification not delivered', { coupleId: String(couple._id), type: n.type, message: (err as Error).message });
+      if (n.requirePersistence) throw err;
     }
   },
 

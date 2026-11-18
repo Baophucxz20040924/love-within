@@ -26,6 +26,12 @@ export const ALLOWED_IMAGE_TYPES: Record<string, string> = {
 };
 
 export const MAX_MANUAL_ML = 3000;
+export const MANUAL_PROOF_TYPES: Record<string, string> = {
+  'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp',
+};
+/** Header plausibility only, not a full image decoder or malware scan. Never read the full object. */
+export const MANUAL_PROOF_PREFIX_BYTES = 32;
+export type WaterUploadPurpose = 'ai' | 'manual_proof';
 
 export interface WaterLogView {
   id: string;
@@ -103,6 +109,46 @@ function assertOwnKey(coupleId: Types.ObjectId, imageKey: string): void {
   if (!imageKey.startsWith(keyPrefix(coupleId)) || imageKey.includes('..')) {
     logger.warn('Rejected foreign imageKey', { coupleId: coupleId.toString(), imageKey });
     throw Errors.forbidden('imageKey không thuộc couple của bạn');
+  }
+}
+
+function proofPrefix(coupleId: Types.ObjectId, userId: string): string {
+  // A sibling of /water/, not a child: AI photo submissions cannot consume manual proof keys.
+  return `couples/${coupleId.toString()}/water-proofs/${userId}/`;
+}
+
+function assertProofKey(coupleId: Types.ObjectId, userId: string, key: string): string {
+  const prefix = proofPrefix(coupleId, userId);
+  const suffix = key.startsWith(prefix) ? key.slice(prefix.length) : '';
+  const match = /^(\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01]))\/[a-f\d]{8}-[a-f\d]{4}-4[a-f\d]{3}-[89ab][a-f\d]{3}-[a-f\d]{12}\.(jpg|png|webp)$/.exec(suffix);
+  if (!match || match[0] !== suffix || new Date(`${match[1]}T00:00:00Z`).toISOString().slice(0, 10) !== match[1]) {
+    throw Errors.forbidden('Ảnh minh chứng không thuộc bạn hoặc đường dẫn không hợp lệ');
+  }
+  return match[2];
+}
+
+function plausibleProof(bytes: Buffer, ext: string, size: number): boolean {
+  if (ext === 'jpg') return bytes.length >= 4 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff && bytes[3] !== 0 && bytes[3] !== 0xff;
+  if (ext === 'png') return bytes.length >= 24 && bytes.subarray(0, 8).equals(Buffer.from('89504e470d0a1a0a', 'hex')) &&
+    bytes.readUInt32BE(8) === 13 && bytes.toString('ascii', 12, 16) === 'IHDR' && bytes.readUInt32BE(16) > 0 && bytes.readUInt32BE(20) > 0;
+  return bytes.length >= 16 && bytes.toString('ascii', 0, 4) === 'RIFF' && bytes.readUInt32LE(4) + 8 === size &&
+    bytes.toString('ascii', 8, 12) === 'WEBP' && ['VP8 ', 'VP8L', 'VP8X'].includes(bytes.toString('ascii', 12, 16));
+}
+
+async function validateManualProof(couple: CoupleDoc, userId: string, key: string): Promise<void> {
+  const ext = assertProofKey(couple._id, userId, key);
+  const storage = getStorage();
+  const head = await storage.headObject(key);
+  if (!head) throw Errors.badRequest('Ảnh minh chứng chưa tải lên xong. Hãy thử lại.');
+  if (!Number.isSafeInteger(head.size) || head.size <= 0 || head.size > env.s3.maxUploadBytes) {
+    throw Errors.badRequest('Ảnh minh chứng trống hoặc vượt kích thước cho phép');
+  }
+  if (!Object.hasOwn(MANUAL_PROOF_TYPES, head.mimeType) || MANUAL_PROOF_TYPES[head.mimeType] !== ext) {
+    throw Errors.badRequest('Định dạng ảnh minh chứng không khớp với tệp đã tải lên');
+  }
+  const bytes = await storage.getObjectPrefix(key, MANUAL_PROOF_PREFIX_BYTES);
+  if (!Buffer.isBuffer(bytes) || bytes.length > MANUAL_PROOF_PREFIX_BYTES || bytes.length > head.size || !plausibleProof(bytes, ext, head.size)) {
+    throw Errors.badRequest('Tệp minh chứng không có phần đầu ảnh JPEG/PNG/WebP hợp lệ');
   }
 }
 
@@ -196,14 +242,18 @@ export const waterService = {
   },
 
   /** Step 1: issue a presigned PUT. The key is couple-prefixed and server-generated. */
-  async createUploadUrl(couple: CoupleDoc, mimeType: string, sizeBytes: number) {
-    const ext = ALLOWED_IMAGE_TYPES[mimeType];
-    if (!ext) throw Errors.badRequest('Chỉ chấp nhận ảnh JPEG/PNG/WebP/HEIC');
-    if (sizeBytes <= 0 || sizeBytes > env.s3.maxUploadBytes) {
+  async createUploadUrl(couple: CoupleDoc, userId: string, mimeType: string, sizeBytes: number, purpose: WaterUploadPurpose = 'ai') {
+    if (purpose !== 'ai' && purpose !== 'manual_proof') throw Errors.badRequest('Mục đích tải ảnh không hợp lệ');
+    if (!couple.memberIds.some((id) => id.toString() === userId)) throw Errors.forbidden('Bạn không thuộc couple này');
+    const types = purpose === 'manual_proof' ? MANUAL_PROOF_TYPES : ALLOWED_IMAGE_TYPES;
+    const ext = Object.hasOwn(types, mimeType) ? types[mimeType] : undefined;
+    if (!ext) throw Errors.badRequest(purpose === 'manual_proof' ? 'Minh chứng chỉ chấp nhận ảnh JPEG/PNG/WebP' : 'Chỉ chấp nhận ảnh JPEG/PNG/WebP/HEIC');
+    if (!Number.isSafeInteger(sizeBytes) || sizeBytes <= 0 || sizeBytes > env.s3.maxUploadBytes) {
       throw Errors.badRequest(`Ảnh phải ≤ ${Math.round(env.s3.maxUploadBytes / 1024 / 1024)} MB`);
     }
     const localDate = getLocalDate(new Date(), couple.timezone);
-    const imageKey = `${keyPrefix(couple._id)}${localDate}/${randomUUID()}.${ext}`;
+    const prefix = purpose === 'manual_proof' ? proofPrefix(couple._id, userId) : keyPrefix(couple._id);
+    const imageKey = `${prefix}${localDate}/${randomUUID()}.${ext}`;
     const { uploadUrl, expiresIn } = await getStorage().getUploadUrl({ key: imageKey, mimeType, sizeBytes });
     return { uploadUrl, imageKey, expiresIn, maxBytes: env.s3.maxUploadBytes };
   },
@@ -254,8 +304,11 @@ export const waterService = {
   },
 
   /** Manual entries also need the partner's approval — otherwise they would bypass the check. */
-  async submitManual(couple: CoupleDoc, userId: string, amountMl: number): Promise<WaterSubmitResult> {
-    return submit(couple, userId, amountMl, 'manual', null, null);
+  async submitManual(couple: CoupleDoc, userId: string, amountMl: number, imageKey?: string): Promise<WaterSubmitResult> {
+    if (!couple.memberIds.some((id) => id.toString() === userId)) throw Errors.forbidden('Bạn không thuộc couple này');
+    if (!Number.isSafeInteger(amountMl) || amountMl < 10 || amountMl > MAX_MANUAL_ML) throw Errors.badRequest('Lượng nước phải từ 10 đến 3.000 ml');
+    if (imageKey !== undefined) await validateManualProof(couple, userId, imageKey);
+    return submit(couple, userId, amountMl, 'manual', imageKey ?? null, null);
   },
 
   /**
@@ -325,7 +378,8 @@ export const waterService = {
   async imageUrl(couple: CoupleDoc, logId: string) {
     const log = await waterRepository.findLog(couple._id, logId);
     if (!log || !log.imageKey) throw Errors.notFound('Không có ảnh cho bản ghi này');
-    assertOwnKey(couple._id, log.imageKey);
+    if (log.source === 'manual') assertProofKey(couple._id, log.userId.toString(), log.imageKey);
+    else assertOwnKey(couple._id, log.imageKey);
     return getStorage().getDownloadUrl(log.imageKey);
   },
 };

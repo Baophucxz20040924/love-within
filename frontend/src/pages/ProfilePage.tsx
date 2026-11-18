@@ -15,11 +15,13 @@ import { PROPOSAL_KEY, proposalsApi } from '../features/proposals/api';
 import { LEDGER_KEY, walletApi } from '../features/quests/api';
 import { WATER_KEY, waterApi } from '../features/water/api';
 import { ApiRequestError } from '../lib/apiClient';
-import { formatDate, formatMl, formatNumber, shortName, timeAgo } from '../lib/format';
+import { formatDate, formatDay, formatMl, formatNumber, shortName, timeAgo } from '../lib/format';
+import type { LedgerEntry } from '../lib/types';
 import { isStandalone } from '../lib/installPrompt';
 
 const REASON: Record<string, string> = {
   checkin: 'Điểm danh',
+  moment: 'Khoảnh khắc',
   quest: 'Nhiệm vụ',
   market_purchase: 'Đổi hàng',
   market_refund: 'Hoàn Xu',
@@ -71,6 +73,37 @@ function AnniversarySheet({ open, onClose, current }: { open: boolean; onClose: 
   );
 }
 
+const REWARD_COMPONENT: Record<NonNullable<LedgerEntry['provenance']>['component'], string> = {
+  checkin_pair: 'Điểm danh đủ đôi · Xu của bạn',
+  checkin_exp: 'Điểm danh cá nhân · EXP',
+  photo_base: 'Khoảnh khắc · ảnh đầu ngày',
+  timely_pair_bonus: 'Khoảnh khắc · đủ đôi đúng giờ',
+  quest_exp: 'Nhiệm vụ · EXP chung',
+};
+
+export function LedgerRewardDetail({ entry }: { entry: LedgerEntry }) {
+  const p = entry.provenance;
+  if (!p) return null;
+  return <p className="list__meta">
+    Ngày thưởng {formatDay(p.localDate)} · Chính sách v{p.policyVersion}
+    {entry.type === 'coin' && <> · {formatNumber(p.baseCoin)} cơ bản + {formatNumber(p.bonusCoin)} thưởng{p.component === 'checkin_pair' ? ' chuỗi' : p.component === 'timely_pair_bonus' ? ' đủ đôi' : ''}</>}
+    {p.commonStreak != null && <> · Chuỗi chung {formatNumber(p.commonStreak)} ngày</>}
+  </p>;
+}
+
+export function LedgerRow({ entry: e }: { entry: LedgerEntry }) {
+  return <div className="list__item">
+    <div className="list__body">
+      <p className="list__label">{(e.provenance && REWARD_COMPONENT[e.provenance.component]) || REASON[e.reason] || e.reason}</p>
+      <p className="list__meta">{e.scope === 'legacy_shared' ? 'Ví chung trước chuyển đổi' : e.scope === 'shared_exp' ? 'EXP chung' : 'Ví Xu của bạn'} · {timeAgo(e.createdAt)}</p>
+      <LedgerRewardDetail entry={e} />
+    </div>
+    <span className={`strong num${e.delta < 0 ? ' text-danger' : ''}`}>
+      {e.delta > 0 ? '+' : e.delta < 0 ? '−' : ''}{formatNumber(Math.abs(e.delta))} {e.type === 'coin' ? 'Xu' : 'EXP'}
+    </span>
+  </div>;
+}
+
 function Ledger() {
   const ledger = useQuery({ queryKey: LEDGER_KEY, queryFn: () => walletApi.ledger() });
   if (ledger.isLoading) return <Skeleton height={56} count={3} />;
@@ -83,19 +116,11 @@ function Ledger() {
     );
   }
   return (
-    <div className="list">
-      {ledger.data.slice(0, 15).map((e) => (
-        <div key={e.id} className="list__item">
-          <div className="list__body">
-            <p className="list__label">{REASON[e.reason] ?? e.reason}</p>
-            <p className="list__meta">{e.scope === 'legacy_shared' ? 'Ví chung trước chuyển đổi' : e.scope === 'shared_exp' ? 'EXP chung' : 'Ví Xu của bạn'} · {timeAgo(e.createdAt)}</p>
-          </div>
-          <span className={`strong num${e.delta < 0 ? ' text-danger' : ''}`}>
-            {e.delta > 0 ? '+' : '−'}
-            {formatNumber(Math.abs(e.delta))} {e.type === 'coin' ? 'Xu' : 'EXP'}
-          </span>
-        </div>
-      ))}
+    <div className="stack">
+      <p className="text-sm text-muted">Mỗi dòng là số Xu hoặc EXP thực nhận. Giao dịch cũ giữ nguyên số đã ghi, không suy thành tổng thưởng của hai người.</p>
+      <div className="list">
+        {ledger.data.slice(0, 15).map((e) => <LedgerRow key={e.id} entry={e} />)}
+      </div>
     </div>
   );
 }

@@ -1,10 +1,19 @@
-# ── Only backend/, frontend/ and .github/ (CI/CD workflows) are pushed ─
+# ── App, CI and explicitly allowed verification sources ─
 # Everything else at the repo root is ignored (plan/, spec/, infra/, README.md, secret.md, notes...)
 /*
 !/.gitignore
 !/.github/
 !/backend/
 !/frontend/
+
+# Focused browser regression source; tooling/evidence remain external.
+!/scripts/
+/scripts/*
+!/scripts/browser/
+/scripts/browser/*
+!/scripts/browser/harness.mjs
+!/scripts/browser/daily-rewards-water.mjs
+!/scripts/browser/README.md
 
 # ── Inside backend/ and frontend/ ──────────────────────────────────────
 node_modules/
@@ -26,6 +35,7 @@ coverage/
 # Dev-only helper scripts and notes: not needed to build or run
 backend/scripts/*
 !backend/scripts/bootstrap-admin.ts
+!backend/scripts/measure-daily-activities.cjs
 backend/README.md
 frontend/README.md
 

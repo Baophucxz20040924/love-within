@@ -1,3 +1,4 @@
+import type { QueryClient } from '@tanstack/react-query';
 import { apiRequest } from '../../lib/apiClient';
 import type { CheckinResult, CheckinStatus, LedgerEntry, Quest, WalletView } from '../../lib/types';
 
@@ -17,3 +18,10 @@ export const QUESTS_KEY = ['quests', 'today'] as const;
 export const CHECKIN_KEY = ['checkin'] as const;
 export const WALLET_KEY = ['wallet'] as const;
 export const LEDGER_KEY = ['ledger'] as const;
+
+/** Refresh confirmed rewards in the background; a slow read must not hold a successful action open. */
+export function refreshQuestRewards(qc: QueryClient): void {
+  for (const queryKey of [CHECKIN_KEY, QUESTS_KEY, WALLET_KEY, LEDGER_KEY]) {
+    void qc.invalidateQueries({ queryKey }).catch(() => undefined);
+  }
+}

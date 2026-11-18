@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { Types } from 'mongoose';
 import { DuoMoment, MOMENT_SCHEDULE_VERSION, type DuoMomentDoc, type MomentPost, type MomentSession } from '../models/DuoMoment.js';
 
@@ -88,6 +89,8 @@ export const momentRepository = {
       ]),
     }, [{
       $set: {
+        effectsPending: true,
+        rewardSettlementPending: true,
         sessions: {
           $map: {
             input: '$sessions', as: 's',
@@ -103,6 +106,8 @@ export const momentRepository = {
                           { $literal: { userId: post.userId, key: post.key, width: post.width, height: post.height, caption: post.caption } },
                           {
                             postedAt: '$$NOW',
+                            effectsCompletedAt: null,
+                            effectsBoth: { $gte: [{ $size: '$$s.posts' }, 1] },
                             lateMin: {
                               $cond: [
                                 { $lt: ['$$NOW', '$$s.rewardEndsAt'] }, 0,
@@ -122,6 +127,32 @@ export const momentRepository = {
         },
       },
     }], { new: true }).exec();
+  },
+  async claimEffects(coupleId?: Types.ObjectId): Promise<DuoMomentDoc | null> {
+    const token = randomUUID();
+    return DuoMoment.findOneAndUpdate({
+      effectsPending: true, ...(coupleId ? { coupleId } : {}),
+      $expr: { $lte: [{ $ifNull: ['$effectsLeaseUntil', new Date(0)] }, '$$NOW'] },
+    }, [{ $set: { effectsLeaseToken: { $literal: token }, effectsLeaseUntil: { $add: ['$$NOW', 60_000] } } }],
+    // Untouched/null deadlines come first; failed work moves behind earlier-due work, not back to the oldest ID.
+    { new: true, sort: { effectsLeaseUntil: 1, _id: 1 }, timestamps: false }).exec();
+  },
+  async completePostEffects(id: Types.ObjectId, token: string, sessionId: string, userId: Types.ObjectId): Promise<void> {
+    await DuoMoment.updateOne({ _id: id, effectsLeaseToken: token }, {
+      $currentDate: { 'sessions.$[s].posts.$[p].effectsCompletedAt': true },
+    }, { arrayFilters: [{ 's.id': sessionId }, { 'p.userId': userId, 'p.effectsCompletedAt': null, 'p.effectsBoth': { $exists: true } }], timestamps: false }).exec();
+  },
+  async releaseEffects(id: Types.ObjectId, token: string, completed: boolean): Promise<void> {
+    if (completed) {
+      // Never clear a concurrent partner's newly committed work.
+      await DuoMoment.updateOne({ _id: id, effectsLeaseToken: token,
+        sessions: { $not: { $elemMatch: { posts: { $elemMatch: { effectsCompletedAt: null, effectsBoth: { $exists: true } } } } } },
+      }, { $set: { effectsPending: false } }, { timestamps: false }).exec();
+    }
+    // Retry deadlines use the same DB clock as claims, independent of worker clock skew.
+    await DuoMoment.updateOne({ _id: id, effectsLeaseToken: token }, [{
+      $set: { effectsLeaseToken: null, effectsLeaseUntil: completed ? null : { $add: ['$$NOW', 60_000] } },
+    }], { timestamps: false }).exec();
   },
   listRange(coupleId: Types.ObjectId, from: string, to: string): Promise<DuoMomentDoc[]> {
     return DuoMoment.find({ coupleId, localDate: { $gte: from, $lte: to } }).sort({ localDate: 1 }).limit(40).exec();

@@ -35,7 +35,7 @@ interface Props {
  * Camera button + guided sheet: photo preview → (compress, upload, AI) steps → result
  * "sent to partner for approval", or a friendly error with retry / manual entry.
  */
-export function WaterPhotoFlow({ label = 'Chụp ảnh ly nước', className = 'btn btn-water btn-lg btn-block', onManual }: Props) {
+export function WaterPhotoFlow({ label = 'Chụp ảnh để AI ước lượng', className = 'btn btn-water btn-lg btn-block', onManual }: Props) {
   const qc = useQueryClient();
   const toast = useToast();
   const { me } = useAuth();

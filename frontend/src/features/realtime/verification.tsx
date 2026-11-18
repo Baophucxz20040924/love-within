@@ -4,7 +4,10 @@ import { setAppMask, setVerificationHost } from '../appLock/mask';
 import { VerificationScreen } from './VerificationScreen';
 
 type Status = 'clear' | 'checking' | 'failed';
+interface VerifiedIdentity { generation: string; userId: string; space: 'couple' | 'friends' }
+let verifiedIdentity: VerifiedIdentity | null = null;
 let status: Status = 'clear';
+export function getVerifiedIdentity(): VerifiedIdentity | null { return verifiedIdentity; }
 let retry: (() => void) | undefined;
 let statusHost: HTMLElement | null = null;
 const listeners = new Set<() => void>();
@@ -13,7 +16,8 @@ export function subscribeVerification(listener: () => void): () => void {
   return () => { listeners.delete(listener); };
 }
 export function getVerificationStatus(): Status { return status; }
-export function setVerification(next: Status, onRetry?: () => void): void {
+export function setVerification(next: Status, onRetry?: () => void, identity?: VerifiedIdentity): void {
+  verifiedIdentity = next === 'clear' && identity ? identity : null;
   retry = onRetry;
   if (next !== 'clear' && !statusHost) {
     statusHost = document.createElement('div');

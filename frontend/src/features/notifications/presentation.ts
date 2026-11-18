@@ -2,7 +2,7 @@ import type { IconName } from '../../components/Icon';
 import type { CoupleNotification } from './api';
 
 const LABELS: Record<string, string> = {
-  water_pending: 'đã gửi ảnh uống nước cần bạn duyệt.',
+  water_pending: 'đã gửi lượng nước uống cần bạn duyệt.',
   proposal_created: 'đã gửi một đề xuất cần bạn duyệt.',
   redemption_requested: 'đã gửi yêu cầu đổi quà.',
   redemption_answered: 'đã trả lời yêu cầu đổi quà.',

@@ -27,7 +27,18 @@ function loader(overrides = {}) {
   };
 }
 const noop = async () => {};
+// Legacy suites intentionally stay on v1; v2 policy/settlement has its own fail-closed fixtures.
+const legacyPolicy = couple => ({ version: 2, effectiveDate: '9999-12-31', timezone: couple.timezone ?? 'UTC', activatedAt: new Date(0) });
 const quiet = {
+  'services/rewardPolicy.service.ts': { rewardPolicyService: {
+    ensure: async couple => legacyPolicy(couple),
+    forDay: async couple => ({ ...legacyPolicy(couple), version: 1 }),
+  } },
+  'services/dailyReward.service.ts': { dailyRewardService: {
+    recoverCouple: noop, settleCheckins: async () => true,
+    getCheckinRewardView: async (_couple, localDate) => ({ policyVersion: 1, effectiveDate: '9999-12-31', localDate,
+      status: 'legacy', baseCoin: 0, bonusCoin: 0, coinAwarded: 0, commonStreak: null }),
+  } },
   'services/bucketCompletion.service.ts': { finishBucketCompletion: async () => true },
   'services/realtimeAudience.service.ts': { realtimeAudience: { couple: noop, own: noop } },
   'services/notification.service.ts': { notificationService: { toPartner: noop, emit: noop } },

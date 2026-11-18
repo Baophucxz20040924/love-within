@@ -14,6 +14,8 @@ import { walletService } from './wallet.service.js';
 import { getLocalDate } from '../utils/date.js';
 import { Errors } from '../utils/errors.js';
 import { logger } from '../utils/logger.js';
+import { rewardPolicyService, type RewardPolicyView } from './rewardPolicy.service.js';
+import { splitCoin } from '../repositories/wallet.repository.js';
 
 /**
  * A resolver computes the (progress, target) of one quest TYPE for a couple on a day.
@@ -121,19 +123,26 @@ export interface QuestView {
   target: number;
   status: QuestProgressStatus;
   localDate: string;
+  rewardPolicy: RewardPolicyView;
 }
 
-interface QuestReward { coin: number; exp: number; description?: string }
+interface QuestReward { coin: number; exp: number; description?: string; rewardPolicy: RewardPolicyView }
 
 async function rewardFor(q: QuestDoc, couple: CoupleDoc, localDate: string): Promise<QuestReward> {
+  const rewardPolicy = await rewardPolicyService.forDay(couple, localDate);
+  if (rewardPolicy.version === 2 && (q.key === 'daily_checkin' || q.key === DUO_MOMENT_QUEST_KEY)) {
+    return { ...ECONOMY.dailyRewards.quest, rewardPolicy, description: q.key === 'daily_checkin'
+      ? 'Xu điểm danh tự cộng khi đủ đôi: mỗi người 5 Xu cơ bản + thưởng chuỗi chung. Nhận thêm 5 EXP tại đây.'
+      : 'Ảnh đầu ngày tự cộng 10 Xu; đủ đôi đúng giờ thêm 10 Xu mỗi người. Nhận thêm 5 EXP tại đây.' };
+  }
   if (q.key === DUO_MOMENT_QUEST_KEY) {
     const day = await momentRepository.findDay(couple._id, localDate);
     if (day && day.scheduleVersion !== MOMENT_SCHEDULE_VERSION) {
-      return { ...ECONOMY.legacyDuoMoment, description: 'Khoảnh khắc theo lịch cũ: giữ nguyên điều kiện và thưởng của ngày này.' };
+      return { ...ECONOMY.legacyDuoMoment, rewardPolicy, description: 'Khoảnh khắc theo lịch cũ: giữ nguyên điều kiện và thưởng của ngày này.' };
     }
-    return { ...ECONOMY.quests.duo_moment, description: DEFAULT_QUESTS.find(d => d.key === DUO_MOMENT_QUEST_KEY)!.description };
+    return { ...ECONOMY.quests.duo_moment, rewardPolicy, description: DEFAULT_QUESTS.find(d => d.key === DUO_MOMENT_QUEST_KEY)!.description };
   }
-  return ECONOMY.quests[q.key] ?? { coin: q.coinReward, exp: q.expReward };
+  return { ...(ECONOMY.quests[q.key] ?? { coin: q.coinReward, exp: q.expReward }), rewardPolicy };
 }
 
 function toView(q: QuestDoc, p: QuestProgressDoc, reward: QuestReward): QuestView {
@@ -151,6 +160,8 @@ function toView(q: QuestDoc, p: QuestProgressDoc, reward: QuestReward): QuestVie
     target: p.target,
     status: p.status === 'rewarded' && p.rewardIntent && !p.rewardCompletedAt ? 'completed' : p.status,
     localDate: p.localDate,
+    rewardPolicy: p.rewardIntent && !p.rewardIntent.provenance && (q.key === 'daily_checkin' || q.key === DUO_MOMENT_QUEST_KEY)
+      ? { ...reward.rewardPolicy, version: 1 } : reward.rewardPolicy,
   };
 }
 
@@ -162,7 +173,8 @@ export const questService = {
 
   /** Initialize (if needed) and refresh today's quests for the couple. */
   async getToday(couple: CoupleDoc): Promise<QuestView[]> {
-    const localDate = getLocalDate(new Date(), couple.timezone);
+    const policy = await rewardPolicyService.ensure(couple);
+    const localDate = getLocalDate(new Date(), policy.timezone);
     const quests = await questRepository.listActive();
     // Quests are independent (different progress rows), so resolve them in parallel; order is kept.
     const views = await Promise.all(
@@ -192,7 +204,8 @@ export const questService = {
 
   /** Claim the reward of a completed quest exactly once (atomic status transition). */
   async claim(couple: CoupleDoc, userId: string, questKey: string): Promise<QuestView> {
-    const localDate = getLocalDate(new Date(), couple.timezone);
+    const policy = await rewardPolicyService.ensure(couple);
+    const localDate = getLocalDate(new Date(), policy.timezone);
     const q = await questRepository.findByKey(questKey);
     if (!q || !q.active) throw Errors.notFound('Nhiệm vụ không tồn tại');
 
@@ -204,7 +217,10 @@ export const questService = {
     if (current.status !== 'completed' && current.status !== 'rewarded') throw Errors.conflict('Nhiệm vụ chưa hoàn thành');
 
     const r = await rewardFor(q, couple, localDate);
-    const intent = { operationId: `quest:${current._id}`, actorUserId: userId, ownerUserId: null, coin: r.coin, exp: r.exp };
+    const intent = { operationId: `quest:${current._id}`, actorUserId: userId, ownerUserId: null, coin: r.coin, exp: r.exp,
+      ...(r.rewardPolicy.version === 2 && (questKey === 'daily_checkin' || questKey === DUO_MOMENT_QUEST_KEY)
+        ? { allocations: splitCoin(r.coin, couple.memberIds), provenance: { version: 1 as const, source: 'quest' as const, localDate, policyVersion: 2 as const,
+          component: 'quest_exp' as const, baseCoin: 0, bonusCoin: 0 } } : {}) };
     const rewarded = current.status === 'rewarded' ? current :
       (await questRepository.markRewarded(couple._id, questKey, localDate, new Types.ObjectId(userId), intent)) ??
       await questRepository.findOne(couple._id, questKey, localDate);

@@ -66,7 +66,7 @@ momentRouter.post(
   }),
 );
 
-/** POST /api/moments/today { key, width, height, caption } → today's view; 409 MOMENT_NOT_YET / MOMENT_ALREADY_POSTED. */
+/** POST /api/moments/today → durable { saved, localDate, sessionId, postedAt } receipt; views are refreshed separately. */
 momentRouter.post(
   '/today',
   validate({ body: postSchema }),

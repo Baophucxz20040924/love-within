@@ -77,5 +77,15 @@ const coin = (operationId, delta, ownerUserId = ids[0]) => service.applyCoin({ c
   reset(); applyHook = async () => { await reward(); }; await reward(); assert.equal(couple.exp, 9); assert.equal(wallet.balances[ids[0]], 13);
   // Same stale-worker schedule immediately before EXP CAS, after B has cleared Couple receipt.
   reset(); expHook = async () => { await reward(); }; await reward(); assert.equal(couple.exp, 9); assert.equal(ledger.size, 3);
-  console.log('PASS personal wallet service: split, ownership, durable faults, concurrent replay, terminal lookup, wallet/EXP fencing');
+  reset(); await reward('legacy-fingerprint');
+  const legacyPayload = { actorUserId: ids[1], allocations: { [ids[0]]: 3, [ids[1]]: 2 }, exp: 9, reason: 'quest', refId: null };
+  assert.deepEqual(ops.get(`${coupleId}:legacy-fingerprint`).payload, legacyPayload);
+  assert.equal(ops.get(`${coupleId}:legacy-fingerprint`).fingerprint, require('node:crypto').createHash('sha256').update(JSON.stringify(legacyPayload)).digest('hex'));
+  assert.ok([...ledger.values()].every(row => !Object.hasOwn(row,'provenance')), 'legacy ledger has no inferred metadata');
+  const provenance = {version:1,source:'moment',localDate:'2026-01-01',policyVersion:2,component:'photo_base',baseCoin:10,bonusCoin:0};
+  await reward('new-provenance',{coin:10,exp:0,reason:'moment',ownerUserId:ids[0],allocations:{[ids[0]]:10},provenance});
+  assert.deepEqual(ops.get(`${coupleId}:new-provenance`).payload.provenance,provenance);
+  assert.deepEqual((await service.listLedger(coupleId,ids[0])).find(row=>row.reason==='moment').provenance,provenance);
+  await assert.rejects(reward('new-provenance',{coin:10,exp:0,reason:'moment',ownerUserId:ids[0],allocations:{[ids[0]]:10},provenance:{...provenance,bonusCoin:1}}),e=>e.status===409);
+  console.log('PASS personal wallet service: split, ownership, durable faults, concurrent replay, terminal lookup, wallet/EXP fencing, exact legacy fingerprints and immutable provenance');
 })().catch(error => { console.error(error); process.exitCode = 1; });
