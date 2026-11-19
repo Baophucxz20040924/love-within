@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import '../stories/form-interactions.css';
-import type { FormEvent, KeyboardEvent as ReactKeyboardEvent } from 'react';
+import type { FormEvent, ReactNode, KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { Avatar } from '../../components/Avatar';
@@ -11,7 +11,8 @@ import { useToast } from '../../components/Toast';
 import { useAuth } from '../auth/AuthContext';
 import { ApiRequestError } from '../../lib/apiClient';
 import { timeAgo } from '../../lib/format';
-import type { FriendComment, FriendCommentInput, FriendCommentThread, FriendEventDetail } from '../../lib/types';
+import type { FriendComment, FriendCommentInput, FriendEventDetail } from '../../lib/types';
+import type { FriendCommentPage, FriendCommentContext } from './api';
 import { friendCommentsKey, friendEventCommentsKey, friendEventKey, friendEventsApi, friendStoriesApi } from './api';
 import { updateFriendStoryInCache } from './cache';
 import { MentionField, type MentionSearch } from './MentionField';
@@ -19,8 +20,6 @@ import { prefillMention, segments, toPayload, type DraftMention } from './mentio
 import { BlockSheet, ReportSheet, type ReportTargetInfo } from './SafetySheets';
 
 const errorText = (err: unknown) => (err instanceof ApiRequestError ? err.message : 'Có lỗi xảy ra, thử lại nhé.');
-/** More replies than this under one comment: folded behind "Xem N câu trả lời" (plan BB8). */
-const SHOWN_REPLIES = 2;
 
 /**
  * Where the comments live: a post or an event discussion, each with its own mention eligibility. The "bộ hàm API":
@@ -28,7 +27,9 @@ const SHOWN_REPLIES = 2;
  */
 export interface CommentApi {
   key: readonly unknown[];
-  list: () => Promise<FriendCommentThread[]>;
+  rootsPage: (cursor?: string, signal?: AbortSignal) => Promise<FriendCommentPage>;
+  repliesPage: (rootId: string, cursor?: string, signal?: AbortSignal) => Promise<FriendCommentPage>;
+  context: (commentId: string, signal?: AbortSignal) => Promise<FriendCommentContext>;
   add: (input: FriendCommentInput) => Promise<FriendComment>;
   remove: (commentId: string) => Promise<{ removed: number }>;
   /** "@" picker; left out = plain box. */
@@ -41,7 +42,9 @@ export interface CommentApi {
 export function storyCommentApi(storyId: string): CommentApi {
   return {
     key: friendCommentsKey(storyId),
-    list: () => friendStoriesApi.comments(storyId),
+    rootsPage: (cursor, signal) => friendStoriesApi.commentsPage(storyId, cursor, signal),
+    repliesPage: (rootId, cursor, signal) => friendStoriesApi.repliesPage(storyId, rootId, cursor, signal),
+    context: (commentId, signal) => friendStoriesApi.commentContext(storyId, commentId, signal),
     add: (input) => friendStoriesApi.addComment(storyId, input),
     remove: (commentId) => friendStoriesApi.deleteComment(storyId, commentId),
     mention: { id: storyId, fn: (q) => friendStoriesApi.mentionable(storyId, q) },
@@ -53,7 +56,9 @@ export function storyCommentApi(storyId: string): CommentApi {
 export function eventCommentApi(eventId: string): CommentApi {
   return {
     key: friendEventCommentsKey(eventId),
-    list: () => friendEventsApi.comments(eventId),
+    rootsPage: (cursor, signal) => friendEventsApi.commentsPage(eventId, cursor, signal),
+    repliesPage: (rootId, cursor, signal) => friendEventsApi.repliesPage(eventId, rootId, cursor, signal),
+    context: (commentId, signal) => friendEventsApi.commentContext(eventId, commentId, signal),
     add: (input) => friendEventsApi.addComment(eventId, input),
     remove: (commentId) => friendEventsApi.deleteComment(eventId, commentId),
     mention: { id: eventId, resource: 'event', fn: (q) => friendEventsApi.mentionable(eventId, q) },
@@ -137,7 +142,43 @@ interface Props {
   focusCommentId?: string | null;
 }
 
-export function FriendComments({ api, focusKey, focusCommentId }: Props) {
+function PageNav({ older, newer, newest }: { older?: () => void; newer?: () => void; newest?: () => void }) {
+  return <nav className="row wrap" aria-label="Trang bình luận">
+    {newer && <button type="button" className="btn btn-ghost" onClick={newer}>Mới hơn</button>}
+    {older && <button type="button" className="btn btn-ghost" onClick={older}>Cũ hơn</button>}
+    {newest && <button type="button" className="btn btn-ghost" onClick={newest}>Mới nhất</button>}
+  </nav>;
+}
+
+function Replies({ api, scope, rootId, seed, render }: {
+  api: CommentApi; scope: string; rootId: string; seed?: FriendCommentPage;
+  render: (c: FriendComment, reply: boolean) => ReactNode;
+}) {
+  // null denotes the notification page, not the newest page (undefined).
+  const [cursors, setCursors] = useState<(string | null | undefined)[]>([seed ? null : undefined]);
+  const selected = cursors[cursors.length - 1];
+  const useSeed = selected === null;
+  const cursor = selected ?? undefined;
+  const query = useQuery({ queryKey: [...api.key, 'replies', scope, rootId, cursor ?? null],
+    queryFn: ({ signal }) => api.repliesPage(rootId, cursor, signal), enabled: !useSeed });
+  const data = useSeed ? seed : query.isError ? undefined : query.data;
+  return <div className="comment-replies">
+    {!useSeed && query.isLoading && <Skeleton height={40} />}
+    {!useSeed && query.isError && <p role="status">Không tải được trả lời. <button type="button" onClick={() => void query.refetch()}>Thử lại</button></p>}
+    {data?.items.length === 0 && <p className="text-muted text-sm">Không có trả lời trong trang này.</p>}
+    {data && [...data.items].reverse().map(c => render(c, true))}
+    <PageNav older={data?.nextCursor ? () => setCursors(s => [...s, data.nextCursor!]) : undefined}
+      newer={cursors.length > 1 ? () => setCursors(s => s.slice(0, -1)) : undefined}
+      newest={useSeed || cursors.length > 1 ? () => setCursors([undefined]) : undefined} />
+  </div>;
+}
+
+export function FriendComments(props: Props) {
+  const { me } = useAuth();
+  return <ScopedFriendComments key={`${me?.user.id}:${JSON.stringify(props.api.key)}`} {...props} />;
+}
+
+function ScopedFriendComments({ api, focusKey, focusCommentId }: Props) {
   const qc = useQueryClient();
   const toast = useToast();
   const { me } = useAuth();
@@ -154,15 +195,31 @@ export function FriendComments({ api, focusKey, focusCommentId }: Props) {
   const [reporting, setReporting] = useState<ReportTargetInfo | null>(null);
   const [blocking, setBlocking] = useState<{ id: string; displayName: string } | null>(null);
   const focusedOnce = useRef<string | null>(null);
+  const [blockedAuthors, setBlockedAuthors] = useState<Set<string>>(() => new Set());
+  const visible = (c: FriendComment) => !blockedAuthors.has(c.author.id);
 
   const key = api.key;
+  const scope = me?.user.id ?? '';
+  const [cursors, setCursors] = useState<(string | undefined)[]>([undefined]);
+  const [contextId, setContextId] = useState<string | null>(focusCommentId ?? null);
+  const [replyVersion, setReplyVersion] = useState(0);
+  useEffect(() => { setContextId(focusCommentId ?? null); focusedOnce.current = null; }, [focusCommentId]);
+  const cursor = cursors[cursors.length - 1];
   const comments = useQuery({
-    queryKey: key,
-    queryFn: api.list,
+    queryKey: [...key, 'page', scope, cursor ?? null],
+    queryFn: ({ signal }) => api.rootsPage(cursor, signal),
+    enabled: !contextId,
     refetchInterval: 20_000,
     refetchOnWindowFocus: true,
   });
-  const threads = comments.data ?? [];
+  const context = useQuery({ queryKey: [...key, 'context', scope, contextId],
+    queryFn: ({ signal }) => api.context(contextId!, signal), enabled: Boolean(contextId),
+    refetchInterval: 20_000, refetchOnWindowFocus: true });
+  const current = contextId ? context : comments;
+  const threads = (current.isError ? [] : contextId ? (context.data ? [context.data.root] : []) : [...(comments.data?.items ?? [])].reverse()).filter(visible);
+  const invalidate = () => void qc.invalidateQueries({ queryKey: key, refetchType: 'active' });
+  const newest = () => { setContextId(null); setCursors([undefined]); setExpanded(new Set()); };
+  const navigate = (next: (string | undefined)[]) => { setCursors(next); setExpanded(new Set()); };
 
   useEffect(() => {
     if (focusKey > 0) inputRef.current?.focus();
@@ -172,19 +229,17 @@ export function FriendComments({ api, focusKey, focusCommentId }: Props) {
 
   // From a notification: unfold the thread, scroll to the comment and highlight it for a moment (once per id).
   useEffect(() => {
-    if (!focusCommentId || focusedOnce.current === focusCommentId || !comments.data) return;
-    const thread = comments.data.find((t) => t.id === focusCommentId || t.replies.some((r) => r.id === focusCommentId));
-    if (!thread) return;
-    expand(thread.id);
-    setHighlight(focusCommentId);
+    if (!contextId || context.isError || focusedOnce.current === contextId || !context.data) return;
+    expand(context.data.root.id);
+    setHighlight(contextId);
     const frame = requestAnimationFrame(() => {
-      const target = document.getElementById(`comment-${focusCommentId}`);
+      const target = document.getElementById(`comment-${contextId}`);
       if (!target) return;
-      focusedOnce.current = focusCommentId;
+      focusedOnce.current = contextId;
       target.scrollIntoView({ block: 'center', behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
     });
     return () => cancelAnimationFrame(frame);
-  }, [focusCommentId, comments.data, comments.dataUpdatedAt]);
+  }, [contextId, context.data, context.isError, expanded]);
 
   useEffect(() => {
     if (!highlight) return;
@@ -200,12 +255,12 @@ export function FriendComments({ api, focusKey, focusCommentId }: Props) {
       setMentions([]);
       setReplyTo(null);
       requestAnimationFrame(() => resize(inputRef.current));
-      qc.setQueryData<FriendCommentThread[]>(key, (list) => {
-        const items = list ?? [];
-        if (!c.parentId) return [...items, { ...c, replies: [] }];
-        return items.map((t) => (t.id === c.parentId ? { ...t, replies: [...t.replies, c] } : t));
-      });
-      if (c.parentId) expand(c.parentId);
+      if (c.parentId) {
+        setContextId(c.parentId);
+        expand(c.parentId);
+        setReplyVersion(v => v + 1);
+      } else newest();
+      invalidate();
       api.onCount(qc, 1);
     },
     onError: () => { sending.current = false; },
@@ -222,11 +277,8 @@ export function FriendComments({ api, focusKey, focusCommentId }: Props) {
     mutationFn: (c: FriendComment) => api.remove(c.id),
     onSuccess: (res, c) => {
       setToDelete(null);
-      qc.setQueryData<FriendCommentThread[]>(key, (list) =>
-        c.parentId
-          ? list?.map((t) => (t.id === c.parentId ? { ...t, replies: t.replies.filter((r) => r.id !== c.id) } : t))
-          : list?.filter((t) => t.id !== c.id),
-      );
+      if (contextId === c.id || (!c.parentId && context.data?.root.id === c.id)) newest();
+      invalidate();
       setReplyTo((r) => (r && r.rootId === c.id ? null : r));
       api.onCount(qc, -(res.removed ?? 1));
       toast.info('Đã xóa bình luận');
@@ -272,45 +324,37 @@ export function FriendComments({ api, focusKey, focusCommentId }: Props) {
   }
 
   const report = (c: FriendComment) => setReporting({ type: api.reportType, id: c.id, owner: c.author });
-  const item = (c: FriendComment, reply: boolean) => (
+  const item = (c: FriendComment, reply: boolean) => visible(c) ? (
     <CommentItem key={c.id} c={c} reply={reply} focused={highlight === c.id} onReply={startReply} onDelete={setToDelete} onReport={report} />
-  );
-  const deletingReplies = toDelete && !toDelete.parentId ? (threads.find((t) => t.id === toDelete.id)?.replies.length ?? 0) : 0;
+  ) : null;
 
   return (
     <section className="comments comments--form" aria-label="Bình luận">
-      {comments.isLoading && <Skeleton height={56} count={2} />}
-      {comments.isError && (
+      {contextId && <p className="text-muted text-sm">Bình luận từ thông báo <button type="button" className="btn btn-ghost" onClick={newest}>Về danh sách</button></p>}
+      {!contextId && cursors.length > 1 && <p className="text-muted text-sm">Đang xem bình luận cũ</p>}
+      {current.isLoading && <Skeleton height={56} count={2} />}
+      {current.isError && (
         <p className="form-feedback comment-feedback" role="status">
           Không tải được bình luận.{' '}
-          <button type="button" className="btn btn-ghost" disabled={comments.isFetching} onClick={() => void comments.refetch()}>
-            {comments.isFetching ? 'Đang tải…' : 'Thử lại'}
+          <button type="button" className="btn btn-ghost" disabled={current.isFetching} onClick={() => void current.refetch()}>
+            {current.isFetching ? 'Đang tải…' : 'Thử lại'}
           </button>
         </p>
       )}
-      {comments.isSuccess && threads.length === 0 && (
-        <p className="text-sm text-muted center">Chưa có bình luận nào. Hãy là người đầu tiên!</p>
+      {current.isSuccess && threads.length === 0 && (
+        <p className="text-sm text-muted center">{cursors.length > 1 ? 'Không có bình luận trong trang này.' : 'Chưa có bình luận nào. Hãy là người đầu tiên!'}</p>
       )}
-      {threads.map((t) => {
-        const folded = t.replies.length > SHOWN_REPLIES && !expanded.has(t.id);
-        return (
-          <div key={t.id} className="comment-thread">
-            {item(t, false)}
-            {t.replies.length > 0 && (
-              <div className="comment-replies">
-                {folded ? (
-                  <button type="button" className="comment-replies__more" aria-expanded="false" onClick={() => expand(t.id)}>
-                    <Icon name="cornerDownRight" size={16} />
-                    Xem {t.replies.length} câu trả lời
-                  </button>
-                ) : (
-                  t.replies.map((r) => item(r, true))
-                )}
-              </div>
-            )}
-          </div>
-        );
-      })}
+      {threads.map(t => <div key={t.id} className="comment-thread">
+        {item(t, false)}
+        <button type="button" className="comment-replies__more" aria-expanded={expanded.has(t.id)} onClick={() => setExpanded(s => {
+          const next = new Set(s); if (next.has(t.id)) next.delete(t.id); else next.add(t.id); return next;
+        })}>{expanded.has(t.id) ? 'Ẩn trả lời' : 'Xem trả lời'}</button>
+        {expanded.has(t.id) && <Replies key={`${t.id}:${replyVersion}:${contextId ?? ''}`} api={api} scope={scope} rootId={t.id}
+          seed={contextId ? context.data?.replies : undefined} render={item} />}
+      </div>)}
+      {!contextId && <PageNav older={!comments.isError && comments.data?.nextCursor ? () => navigate([...cursors, comments.data!.nextCursor!]) : undefined}
+        newer={cursors.length > 1 ? () => navigate(cursors.slice(0, -1)) : undefined}
+        newest={cursors.length > 1 ? newest : undefined} />}
 
       <form className={`comment-bar${replyTo ? ' comment-bar--reply' : ''}`} onSubmit={submit}>
         <fieldset className="comment-bar__fields" disabled={add.isPending} aria-label="Viết bình luận" aria-describedby={`${formId}-hint${add.isError ? ` ${formId}-error` : ''}`}>
@@ -353,7 +397,7 @@ export function FriendComments({ api, focusKey, focusCommentId }: Props) {
             {toDelete && !toDelete.isMine
               ? `Bình luận của ${toDelete.author.displayName} sẽ bị gỡ khỏi ${api.reportType === 'event_comment' ? 'kèo' : 'bài viết'} của bạn.`
               : 'Bình luận sẽ không còn hiển thị với mọi người.'}
-            {deletingReplies > 0 && ` ${deletingReplies} câu trả lời bên dưới cũng bị xóa.`}
+            {toDelete && !toDelete.parentId && ' Các câu trả lời bên dưới cũng bị xóa.'}
           </p>
           {del.isError && <p className="form-feedback" role="alert">{errorText(del.error)}</p>}
           <div className="btn-row">
@@ -368,7 +412,12 @@ export function FriendComments({ api, focusKey, focusCommentId }: Props) {
       </BottomSheet>
 
       <ReportSheet target={reporting} onClose={() => setReporting(null)} onBlock={setBlocking} />
-      <BlockSheet user={blocking} onClose={() => setBlocking(null)} onBlocked={() => void comments.refetch()} />
+      <BlockSheet user={blocking} onClose={() => setBlocking(null)} onBlocked={() => {
+        if (blocking) setBlockedAuthors(s => new Set(s).add(blocking.id));
+        setExpanded(new Set());
+        setReplyTo(null);
+        invalidate();
+      }} />
     </section>
   );
 }

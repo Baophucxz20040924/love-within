@@ -141,6 +141,18 @@ function concealed(f, discard = false) {
   hidden(f.app);
 }
 
+test('a mounted Friends palette subscriber cannot expose a locked theme', async () => {
+  const f = fixture({ space: 'friends' }); await verified(f);
+  const unsubscribe = f.store.subscribeAppLock(() => f.store.setAppTheme(true));
+  f.store.resetAppLock();
+  assert.equal(f.root.dataset.theme, undefined, 'reset remains neutral even when Friends requests its palette');
+  const refresh = f.store.refreshLockSettings(); await f.respond(status(true, true)); await refresh;
+  assert.equal(f.store.appLockState().phase, 'locked'); assert.equal(f.root.dataset.theme, undefined);
+  const unlock = f.store.unlockApp('001234'); await f.respond({ space: 'friends', revision: 1 }); await unlock;
+  f.store.finishAppUnlock(); assert.equal(f.root.dataset.theme, 'friends');
+  unsubscribe();
+});
+
 for (const method of ['pin', 'password']) for (const space of ['couple', 'friends']) {
   test(`${method} verified ${space} resumes under 10000ms only after current status`, async () => {
     const f = fixture({ space }); await verified(f, status(true, true), method);

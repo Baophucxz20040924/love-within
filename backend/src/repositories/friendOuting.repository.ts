@@ -49,6 +49,24 @@ export const friendOutingRepository = {
     return FriendOuting.find({ deletedAt: null, 'participants.userId': { $all: [a, b] } })
       .select(headerProjection).lean<OutingHeader[]>().exec();
   },
+  /** Exact roster clauses avoid treating a block across unrelated outings as a shared restriction. */
+  async blockedRosterIndexes(rosters: readonly (readonly string[])[]): Promise<Set<number>> {
+    const blocked = new Set<number>();
+    const chunkSize = 25;
+    for (let offset = 0; offset < rosters.length; offset += chunkSize) {
+      const chunk = rosters.slice(offset, offset + chunkSize).map(ids => new Set(ids));
+      const clauses = chunk.filter(ids => ids.size > 1).map(ids => {
+        const objectIds = [...ids].map(id => new Types.ObjectId(id));
+        return { blockerId: { $in: objectIds }, blockedId: { $in: objectIds } };
+      });
+      if (!clauses.length) continue;
+      const edges = await FriendBlock.find({ $or: clauses }).select('-_id blockerId blockedId').lean().exec();
+      chunk.forEach((ids, index) => {
+        if (edges.some(edge => ids.has(String(edge.blockerId)) && ids.has(String(edge.blockedId)))) blocked.add(offset + index);
+      });
+    }
+    return blocked;
+  },
   /** Bounded to the <=50 members, unlike loading every user's entire block history. */
   async groupHasBlock(ids: string[]): Promise<boolean> {
     const objectIds = ids.map((id) => new Types.ObjectId(id));

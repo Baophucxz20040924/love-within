@@ -19,10 +19,10 @@ function loader(overrides = {}) {
       if (Object.hasOwn(overrides, key)) return overrides[key];
       if (name === 'mongoose') return mongoose;
       if (name === 'node:crypto') return require(name);
-      assert.ok(/^(models\/|repositories\/(wallet|market|checkin|quest|bucket|story)\.repository\.ts$|services\/bucketCompletion\.service\.ts$|config\/economy\.ts$|utils\/(errors|date)\.ts$)/.test(key), `Unmocked unsafe import ${key}`);
+      assert.ok(/^(models\/|repositories\/(wallet|market|checkin|quest|bucket|story)\.repository\.ts$|services\/bucketCompletion\.service\.ts$|config\/economy\.ts$|utils\/(errors|date|historyCursor)\.ts$)/.test(key), `Unmocked unsafe import ${key}`);
       return load(key);
     };
-    vm.runInNewContext(code, { module: mod, exports: mod.exports, require: requireSafe, Date, console, setTimeout, clearTimeout }, { filename });
+    vm.runInNewContext(code, { module: mod, exports: mod.exports, require: requireSafe, Date, Buffer, console, setTimeout, clearTimeout }, { filename });
     return mod.exports;
   };
 }
@@ -43,6 +43,7 @@ const quiet = {
   'services/realtimeAudience.service.ts': { realtimeAudience: { couple: noop, own: noop } },
   'services/notification.service.ts': { notificationService: { toPartner: noop, emit: noop } },
   'utils/logger.ts': { logger: { info() {}, warn() {}, error() {} } },
+  'utils/monitor.ts': { recoveryNow: () => 0, observeRecovery() {} },
   'repositories/user.repository.ts': { userRepository: { findDisplayNames: async ids => new Map(ids.map(id => [String(id), 'Fixture'])) } },
 };
 module.exports = { loader, quiet, mongoose };

@@ -15,8 +15,10 @@ import { alreadySent, claimSend, type SchedulerJob } from '../scheduler.service.
 // a server that was down past the start sends nothing for it. Cancelled and deleted events are skipped.
 
 const WINDOW_MS = 2 * 3_600_000;
-/** Events reminded per run, soonest first; more wait for the next run (5 minutes later, still inside their window). */
+/** Candidate budget, including already-claimed events. Continuation is process-local, not delivery state. */
 const BATCH = 500;
+let continuation: { startAt: Date; id: Types.ObjectId } | undefined;
+let activeRun: Promise<number> | null = null;
 
 export function friendEventReminderKey(eventId: Types.ObjectId | string, startAt: Date): string {
   return `bb-event:${eventId.toString()}:${startAt.toISOString()}:h2`;
@@ -35,36 +37,50 @@ export function reminderRecipients(ev: RemindableFriendEvent, creatorFriends: Re
   return out;
 }
 
+async function runReminderPage(now: Date): Promise<number> {
+  const events = await friendEventRepository.listStartingBetween(now, new Date(now.getTime() + WINDOW_MS), BATCH, continuation);
+  if (events.length === 0) { continuation = undefined; return 0; }
+  if (events.length >= BATCH) logger.warn('Friend event reminders: batch cut at the limit', { batch: BATCH });
+  const keys = events.map((e) => friendEventReminderKey(e._id, e.startAt));
+  const done = await alreadySent(keys);
+  const friendsOf = new Map<string, Set<string>>();
+  let sent = 0;
+  for (let i = 0; i < events.length; i++) {
+    const ev = events[i];
+    const key = keys[i];
+    if (done.has(key) || !(await claimSend(key))) {
+      continuation = { startAt: ev.startAt, id: ev._id };
+      continue;
+    }
+    const creator = ev.creatorId.toString();
+    let friends = friendsOf.get(creator);
+    if (!friends) {
+      friends = new Set((await friendshipRepository.friendIds(ev.creatorId)).map((id) => id.toString()));
+      friendsOf.set(creator, friends);
+    }
+    const to = reminderRecipients(ev, friends);
+    logger.debug('Friend event reminder due', { eventId: ev._id.toString(), recipients: to.length, key });
+    for (const userId of to) {
+      // System notifications have no actor, so independently enforce the creator's block boundary.
+      if (!userId.equals(ev.creatorId) && await friendBlockRepository.isBlockedBetween(userId, ev.creatorId)) continue;
+      await notificationService.emit({ space: 'friends', to: userId, type: 'event_reminder', actorId: null, entityId: ev._id });
+    }
+    sent += 1;
+    continuation = { startAt: ev.startAt, id: ev._id };
+  }
+  if (events.length < BATCH) continuation = undefined;
+  return sent;
+}
+
 export const friendEventsRemindJob: SchedulerJob = {
   name: 'friend-events.remind',
   everyMin: 5,
-  async run(now) {
-    const events = await friendEventRepository.listStartingBetween(now, new Date(now.getTime() + WINDOW_MS), BATCH);
-    if (events.length === 0) return 0;
-    if (events.length >= BATCH) logger.warn('Friend event reminders: batch cut at the limit', { batch: BATCH });
-    const keys = events.map((e) => friendEventReminderKey(e._id, e.startAt));
-    const done = await alreadySent(keys);
-    const friendsOf = new Map<string, Set<string>>();
-    let sent = 0;
-    for (let i = 0; i < events.length; i++) {
-      const ev = events[i];
-      const key = keys[i];
-      if (done.has(key) || !(await claimSend(key))) continue;
-      const creator = ev.creatorId.toString();
-      let friends = friendsOf.get(creator);
-      if (!friends) {
-        friends = new Set((await friendshipRepository.friendIds(ev.creatorId)).map((id) => id.toString()));
-        friendsOf.set(creator, friends);
-      }
-      const to = reminderRecipients(ev, friends);
-      logger.debug('Friend event reminder due', { eventId: ev._id.toString(), recipients: to.length, key });
-      for (const userId of to) {
-        // System notifications have no actor, so independently enforce the creator's block boundary.
-        if (!userId.equals(ev.creatorId) && await friendBlockRepository.isBlockedBetween(userId, ev.creatorId)) continue;
-        await notificationService.emit({ space: 'friends', to: userId, type: 'event_reminder', actorId: null, entityId: ev._id });
-      }
-      sent += 1;
-    }
-    return sent;
+  run(now) {
+    if (activeRun) return activeRun;
+    const run = runReminderPage(now);
+    activeRun = run;
+    const clear = () => { if (activeRun === run) activeRun = null; };
+    void run.then(clear, clear);
+    return run;
   },
 };

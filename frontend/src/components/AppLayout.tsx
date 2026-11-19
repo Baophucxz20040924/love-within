@@ -1,8 +1,9 @@
-import { Suspense, useEffect } from 'react';
-import { Outlet } from 'react-router-dom';
+import { Suspense, useEffect, useRef } from 'react';
+import { Outlet, useLocation } from 'react-router-dom';
 import { BottomNav } from './BottomNav';
 import { Loading } from './StatusViews';
-import { prefetchPages } from '../app/lazyPages';
+import { couplePrefetchCandidates } from '../app/lazyPages';
+import { scheduleRoutePrefetch } from '../lib/routePrefetch';
 import { useApprovalSignals } from '../features/approvals/useApprovals';
 import { useCoupleNotificationUnread } from '../features/notifications/useCoupleNotifications';
 
@@ -11,15 +12,10 @@ export function AppLayout() {
   const { data } = useCoupleNotificationUnread();
   useApprovalSignals(data?.notifications ?? 0, 'Love Within', data?.notificationsSaturated ?? false);
 
-  // Once the first screen is up, fetch the other pages' code while the browser is idle.
-  useEffect(() => {
-    if (typeof window.requestIdleCallback === 'function') {
-      const id = window.requestIdleCallback(prefetchPages, { timeout: 5000 });
-      return () => window.cancelIdleCallback(id);
-    }
-    const t = window.setTimeout(prefetchPages, 2000);
-    return () => window.clearTimeout(t);
-  }, []);
+  const pathname = useLocation().pathname;
+  const pathRef = useRef(pathname);
+  pathRef.current = pathname;
+  useEffect(() => scheduleRoutePrefetch(couplePrefetchCandidates, () => pathRef.current), []);
 
   return (
     <div className="app-shell">

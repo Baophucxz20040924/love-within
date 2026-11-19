@@ -1,4 +1,6 @@
 import { Types } from 'mongoose';
+import { commentPageFilter } from '../utils/commentPage.js';
+import type { HistoryPosition } from '../utils/historyCursor.js';
 import { FriendStory, type FriendStoryDoc, type PollOption } from '../models/FriendStory.js';
 import { FriendStoryComment, type CommentMention, type FriendStoryCommentDoc } from '../models/FriendStoryComment.js';
 import type { ReactionType, StoryPhoto, StoryVideo } from '../models/Story.js';
@@ -179,6 +181,12 @@ export interface CommentBrief {
 }
 
 export const friendStoryCommentRepository = {
+  listPage(storyId: Types.ObjectId, parentId: Types.ObjectId | null, viewerId: Types.ObjectId,
+    blocked: Types.ObjectId[], limit: number, before?: HistoryPosition, inclusive = false): Promise<FriendStoryCommentDoc[]> {
+    return FriendStoryComment.find({ storyId, parentId, ...commentPageFilter(viewerId, blocked, before, inclusive) })
+      .sort({ createdAt: -1, _id: -1 }).limit(limit + 1).exec();
+  },
+
   create(input: {
     storyId: Types.ObjectId;
     authorId: Types.ObjectId;

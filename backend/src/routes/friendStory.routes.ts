@@ -223,7 +223,18 @@ friendStoryRouter.get(
   }),
 );
 
-/** GET /api/friends/stories/:id/comments → root comments (oldest first) with `replies[]`, at most 500 comments in all. */
+/** Additive bounded root/reply pages and direct notification context. */
+const commentPageQuery = z.object({ limit: z.coerce.number().int().min(1).max(50).default(20), cursor: z.string().min(1).max(1024).optional() });
+friendStoryRouter.get('/:id/comments/page', expensiveReadLimiter, validate({ params: idParam, query: commentPageQuery }),
+  asyncHandler(async (req, res) => ok(res, await friendStoryService.listCommentsPage(req.friendsMember!, req.params.id,
+    req.query as unknown as { limit: number; cursor?: string }))));
+friendStoryRouter.get('/:id/comments/:commentId/replies/page', expensiveReadLimiter, validate({ params: commentParams, query: commentPageQuery }),
+  asyncHandler(async (req, res) => ok(res, await friendStoryService.listCommentsPage(req.friendsMember!, req.params.id,
+    req.query as unknown as { limit: number; cursor?: string }, req.params.commentId))));
+friendStoryRouter.get('/:id/comments/:commentId/context', expensiveReadLimiter, validate({ params: commentParams }),
+  asyncHandler(async (req, res) => ok(res, await friendStoryService.commentContext(req.friendsMember!, req.params.id, req.params.commentId))));
+
+/** Legacy oldest-first roots with replies, at most 500 comments in all. */
 friendStoryRouter.get(
   '/:id/comments', expensiveReadLimiter,
   validate({ params: idParam }),

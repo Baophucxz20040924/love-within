@@ -104,23 +104,28 @@ export function LedgerRow({ entry: e }: { entry: LedgerEntry }) {
   </div>;
 }
 
-function Ledger() {
-  const ledger = useQuery({ queryKey: LEDGER_KEY, queryFn: () => walletApi.ledger() });
-  if (ledger.isLoading) return <Skeleton height={56} count={3} />;
-  if (ledger.isError) return <ErrorState onRetry={() => ledger.refetch()} />;
-  if (!ledger.data?.length) {
-    return (
-      <div className="card">
-        <EmptyState art="🪙" title="Chưa có giao dịch" hint="Điểm danh và làm nhiệm vụ để nhận Xu." />
-      </div>
-    );
-  }
+export function Ledger({ scope }: { scope: string }) {
+  const [cursors, setCursors] = useState<(string | undefined)[]>([undefined]);
+  const cursor = cursors[cursors.length - 1];
+  const historical = cursors.length > 1;
+  const ledger = useQuery({
+    queryKey: [...LEDGER_KEY, 'page', scope, cursor ?? null],
+    queryFn: ({ signal }) => walletApi.ledgerPage(cursor, undefined, signal),
+  });
   return (
     <div className="stack">
       <p className="text-sm text-muted">Mỗi dòng là số Xu hoặc EXP thực nhận. Giao dịch cũ giữ nguyên số đã ghi, không suy thành tổng thưởng của hai người.</p>
-      <div className="list">
-        {ledger.data.slice(0, 15).map((e) => <LedgerRow key={e.id} entry={e} />)}
-      </div>
+      {historical && <p className="text-sm text-muted">Đang xem lịch sử cũ.</p>}
+      {ledger.isLoading ? <Skeleton height={56} count={3} /> : ledger.isError ? <ErrorState onRetry={() => ledger.refetch()} /> : !ledger.data?.items.length ? (
+        <EmptyState art="🪙" title={historical ? 'Trang này không còn giao dịch' : 'Chưa có giao dịch'} hint={historical ? 'Quay về trang mới hơn để tiếp tục.' : 'Điểm danh và làm nhiệm vụ để nhận Xu.'} />
+      ) : <div className="list">{ledger.data.items.map((e) => <LedgerRow key={e.id} entry={e} />)}</div>}
+      <nav className="row wrap" aria-label="Phân trang lịch sử ví">
+        <button type="button" className="btn btn-ghost" disabled={!historical} onClick={() => setCursors((all) => all.slice(0, -1))}>Mới hơn</button>
+        <button type="button" className="btn btn-ghost" disabled={ledger.isFetching || ledger.isError || !ledger.data?.nextCursor} onClick={() => {
+          if (ledger.data?.nextCursor) setCursors((all) => [...all, ledger.data.nextCursor!]);
+        }}>Cũ hơn</button>
+        {historical && <button type="button" className="btn btn-ghost" onClick={() => setCursors([undefined])}>Mới nhất</button>}
+      </nav>
     </div>
   );
 }
@@ -227,7 +232,7 @@ export function ProfilePage() {
             {showLedger ? 'Ẩn' : 'Xem'}
           </button>
         </h2>
-        {showLedger && <Ledger />}
+        {showLedger && me && couple && <Ledger key={`${me.user.id}:${couple.id}`} scope={`${me.user.id}:${couple.id}`} />}
       </div>
 
       <div className="section">

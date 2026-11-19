@@ -20,9 +20,9 @@ export function FriendPostPage() {
   const [focusKey, setFocusKey] = useState(0);
   const commentApi = useMemo(() => storyCommentApi(id), [id]);
 
-  const story = useQuery({
+  const story = useQuery<FriendStory>({
     queryKey: friendStoryKey(id),
-    queryFn: () => friendStoriesApi.get(id),
+    queryFn: ({ signal }) => friendStoriesApi.get(id, signal),
     // Show the copy already in the feed instantly while the fresh one loads.
     placeholderData: () =>
       qc

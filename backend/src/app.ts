@@ -43,6 +43,7 @@ import { registerFriendOutingNotifications } from './services/friendOutingNotifi
 import { realtimeRouter } from './routes/realtime.routes.js';
 import { adminRouter } from './routes/admin.routes.js';
 import { coupleNotificationsRouter } from './routes/coupleNotifications.routes.js';
+import { scamGameRouter } from './routes/scamGame.routes.js';
 
 export function createApp(): Express {
   // Validation errors are shown to users: give zod's built-in messages in Vietnamese (custom messages are unaffected).
@@ -82,13 +83,13 @@ export function createApp(): Express {
   app.use('/api/pairing', pairingRouter);
   app.use('/api/couple', coupleRouter);
   app.use('/api/proposals', proposalRouter);
-  // Before the '/api'-mounted wallet/quest routers: their router-level requireCouple would otherwise
-  // run for /api/finance too, and own cash flow must work without a couple.
+  // Own cash flow works without a couple.
   app.use('/api/finance', financeRouter);
   // Hidden friends space: no couple needed either. Stories and events first (more specific prefixes).
   app.use('/api/friends/stories', metricArea('friends.stories'), friendStoryRouter);
   app.use('/api/friends/events', metricArea('friends.events'), friendEventRouter);
   app.use('/api/friends/outings', metricArea('friends.outings'), friendOutingRouter);
+  app.use('/api/friends/scam', metricArea('friends'), scamGameRouter);
   app.use('/api/friends', metricArea('friends'), friendsRouter);
   // No login at all (invite-link previews).
   app.use('/api/public', publicRouter);

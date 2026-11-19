@@ -183,6 +183,16 @@ friendEventRouter.get(
   asyncHandler(async (req, res) => ok(res, await friendEventService.mentionable(req.friendsMember!, req.params.id, String(req.query.q ?? '')))),
 );
 
+const commentPageQuery = z.object({ limit: z.coerce.number().int().min(1).max(50).default(20), cursor: z.string().min(1).max(1024).optional() });
+friendEventRouter.get('/:id/comments/page', expensiveReadLimiter, validate({ params: idParam, query: commentPageQuery }),
+  asyncHandler(async (req, res) => ok(res, await friendEventService.listCommentsPage(req.friendsMember!, req.params.id,
+    req.query as unknown as { limit: number; cursor?: string }))));
+friendEventRouter.get('/:id/comments/:commentId/replies/page', expensiveReadLimiter, validate({ params: commentParams, query: commentPageQuery }),
+  asyncHandler(async (req, res) => ok(res, await friendEventService.listCommentsPage(req.friendsMember!, req.params.id,
+    req.query as unknown as { limit: number; cursor?: string }, req.params.commentId))));
+friendEventRouter.get('/:id/comments/:commentId/context', expensiveReadLimiter, validate({ params: commentParams }),
+  asyncHandler(async (req, res) => ok(res, await friendEventService.commentContext(req.friendsMember!, req.params.id, req.params.commentId))));
+
 friendEventRouter.get(
   '/:id/comments',
   expensiveReadLimiter,

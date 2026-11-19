@@ -41,9 +41,15 @@ export function CommentSection({ storyId, focusKey }: Props) {
   const [text, setText] = useState('');
   const [toDelete, setToDelete] = useState<StoryComment | null>(null);
 
+  const scope = `${me?.user.id ?? ''}:${me?.couple?.id ?? ''}:${storyId}`;
+  const [navigation, setNavigation] = useState<{ scope: string; cursors: (string | undefined)[] }>({ scope, cursors: [undefined] });
+  const cursors = navigation.scope === scope ? navigation.cursors : [undefined];
+  const cursor = cursors[cursors.length - 1];
+  const historical = cursors.length > 1;
+  const navigate = (next: (string | undefined)[]) => setNavigation({ scope, cursors: next });
   const comments = useQuery({
-    queryKey: storyCommentsKey(storyId),
-    queryFn: () => storiesApi.comments(storyId),
+    queryKey: [...storyCommentsKey(storyId), 'page', scope, cursor ?? null],
+    queryFn: ({ signal }) => storiesApi.commentsPage(storyId, cursor, signal),
     refetchInterval: 20_000,
     refetchOnWindowFocus: true,
   });
@@ -54,11 +60,12 @@ export function CommentSection({ storyId, focusKey }: Props) {
 
   const add = useMutation({
     mutationFn: (body: string) => storiesApi.addComment(storyId, body),
-    onSuccess: (c) => {
+    onSuccess: () => {
       sending.current = false;
       setText('');
       requestAnimationFrame(() => resize(inputRef.current));
-      qc.setQueryData<StoryComment[]>(storyCommentsKey(storyId), (list) => [...(list ?? []), c]);
+      navigate([undefined]);
+      void qc.invalidateQueries({ queryKey: storyCommentsKey(storyId), refetchType: 'active' }).catch(() => undefined);
       updateStoryInCache(qc, storyId, (s) => ({ ...s, commentCount: s.commentCount + 1 }));
     },
     onError: () => { sending.current = false; },
@@ -73,9 +80,9 @@ export function CommentSection({ storyId, focusKey }: Props) {
 
   const del = useMutation({
     mutationFn: (id: string) => storiesApi.deleteComment(storyId, id),
-    onSuccess: (_r, id) => {
+    onSuccess: () => {
       setToDelete(null);
-      qc.setQueryData<StoryComment[]>(storyCommentsKey(storyId), (list) => list?.filter((c) => c.id !== id));
+      void qc.invalidateQueries({ queryKey: storyCommentsKey(storyId), refetchType: 'active' }).catch(() => undefined);
       updateStoryInCache(qc, storyId, (s) => ({ ...s, commentCount: Math.max(0, s.commentCount - 1) }));
       toast.info('Đã xóa bình luận');
     },
@@ -109,10 +116,11 @@ export function CommentSection({ storyId, focusKey }: Props) {
           </button>
         </div>
       )}
-      {comments.isSuccess && comments.data.length === 0 && (
-        <p className="text-sm text-muted center">Chưa có bình luận nào. Hãy là người đầu tiên!</p>
+      {historical && <p className="text-sm text-muted center">Đang xem bình luận cũ. Chọn Mới nhất để xem bình luận vừa gửi.</p>}
+      {comments.isSuccess && comments.data.items.length === 0 && (
+        <p className="text-sm text-muted center">{historical ? 'Trang này không còn bình luận. Hãy quay về trang mới hơn.' : 'Chưa có bình luận nào. Hãy là người đầu tiên!'}</p>
       )}
-      {comments.data?.map((c) => (
+      {!comments.isError && [...(comments.data?.items ?? [])].reverse().map((c) => (
         <div key={c.id} className="comment">
           <Avatar name={c.author.displayName} src={avatarOf(c.author.id)} size={34} />
           <div className="comment__main">
@@ -131,6 +139,14 @@ export function CommentSection({ storyId, focusKey }: Props) {
           </div>
         </div>
       ))}
+
+      <nav className="btn-row" aria-label="Phân trang bình luận">
+        <button type="button" className="btn btn-ghost" disabled={!historical} onClick={() => navigate(cursors.slice(0, -1))}>Mới hơn</button>
+        <button type="button" className="btn btn-ghost" disabled={comments.isFetching || comments.isError || !comments.data?.nextCursor} onClick={() => {
+          if (comments.data?.nextCursor) navigate([...cursors, comments.data.nextCursor]);
+        }}>Bình luận cũ hơn</button>
+        {historical && <button type="button" className="btn btn-ghost" onClick={() => navigate([undefined])}>Mới nhất</button>}
+      </nav>
 
       <form className="comment-bar" onSubmit={submit}>
         <Avatar name={me?.user.displayName ?? ''} src={me?.user.avatarUrl} size={32} />

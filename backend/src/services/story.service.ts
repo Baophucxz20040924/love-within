@@ -13,6 +13,7 @@ import { notificationService } from './notification.service.js';
 import { getLocalDate } from '../utils/date.js';
 import { Errors } from '../utils/errors.js';
 import { logger } from '../utils/logger.js';
+import { decodeHistoryCursor, encodeHistoryCursor } from '../utils/historyCursor.js';
 
 export const STORY_IMAGE_TYPES: Record<string, string> = {
   'image/jpeg': 'jpg',
@@ -320,6 +321,18 @@ export const storyService = {
     if (!story) throw Errors.notFound('Bài viết không tồn tại hoặc đã bị xóa');
     await realtimeAudience.couple(couple._id, ['stories']);
     return toView(story, userId, await memberNames(couple));
+  },
+
+  async listCommentsPage(couple: CoupleDoc, userId: string, storyId: string, input: { limit: number; cursor?: string }) {
+    const scope = `story-comments:${couple._id}:${storyId.toLowerCase()}`;
+    const before = decodeHistoryCursor(input.cursor, scope);
+    const story = await requireStory(couple, storyId);
+    const [rows, names] = await Promise.all([
+      storyCommentRepository.listPage(couple._id, story._id, input.limit, before), memberNames(couple),
+    ]);
+    const page = rows.slice(0, input.limit), last = page[page.length - 1];
+    return { items: page.map(c => toCommentView(c, userId, names)), nextCursor: rows.length > input.limit && last
+      ? encodeHistoryCursor(scope, { createdAt: last.createdAt, id: last._id.toString() }) : null };
   },
 
   async listComments(couple: CoupleDoc, userId: string, storyId: string): Promise<CommentView[]> {

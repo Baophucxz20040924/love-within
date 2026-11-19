@@ -1,11 +1,12 @@
-import { Suspense, useEffect } from 'react';
-import { NavLink, Outlet } from 'react-router-dom';
+import { Suspense, useEffect, useRef } from 'react';
+import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { Icon, type IconName } from '../../components/Icon';
 import { Loading } from '../../components/StatusViews';
 import { useApprovalSignals } from '../approvals/useApprovals';
 import { FRIENDS_UNREAD_KEY, friendsApi } from './api';
-import { prefetchFriendsPages } from './lazyPages';
+import { friendsPrefetchCandidates } from './lazyPages';
+import { scheduleRoutePrefetch } from '../../lib/routePrefetch';
 
 type Badge = 'friendRequests' | 'notifications';
 
@@ -65,14 +66,10 @@ function FriendsNav() {
 
 /** Shell of the hidden friends space: page content + its own bottom navigation (blue theme set by App). */
 export function FriendsLayout() {
-  useEffect(() => {
-    if (typeof window.requestIdleCallback === 'function') {
-      const id = window.requestIdleCallback(prefetchFriendsPages, { timeout: 5000 });
-      return () => window.cancelIdleCallback(id);
-    }
-    const t = window.setTimeout(prefetchFriendsPages, 2000);
-    return () => window.clearTimeout(t);
-  }, []);
+  const pathname = useLocation().pathname;
+  const pathRef = useRef(pathname);
+  pathRef.current = pathname;
+  useEffect(() => scheduleRoutePrefetch(friendsPrefetchCandidates, () => pathRef.current), []);
 
   return (
     <div className="app-shell">

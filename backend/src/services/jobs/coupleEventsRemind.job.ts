@@ -26,8 +26,7 @@ import { alreadySent, claimSend, type SchedulerJob } from '../scheduler.service.
 export const REMIND_FROM = '08:00';
 const HOUR_MS = 3_600_000;
 const COUPLES_PER_PAGE = 50;
-/** Safety bound on the events read for one page of couples (a couple has a few dozen). */
-const MAX_EVENTS_PER_PAGE = 5_000;
+const EVENTS_PER_RUN = 500;
 
 export type ReminderSlot = 'd7' | 'd1' | 'd0' | 'h1';
 const DAY_SLOTS: readonly (readonly [ReminderSlot, number])[] = [
@@ -61,7 +60,7 @@ function occursOn(e: { date: string; repeat: EventRepeat }, day: string): boolea
 }
 
 /** The reminders due for one couple at `now` (no database access). */
-export function dueReminders(couple: CoupleDoc, events: RemindableEvent[], now: Date): EventReminder[] {
+export function dueReminders(couple: CoupleDoc, events: RemindableEvent[], now: Date, includeAuto = true): EventReminder[] {
   const tz = couple.timezone;
   const today = getLocalDate(now, tz);
   const tomorrow = addDays(today, 1);
@@ -93,7 +92,7 @@ export function dueReminders(couple: CoupleDoc, events: RemindableEvent[], now: 
     }
   }
 
-  if (dayRemindersOpen) {
+  if (includeAuto && dayRemindersOpen) {
     for (const m of autoMilestones(couple, today)) {
       const slot: ReminderSlot | null = m.nextDate === today ? 'd0' : m.nextDate === tomorrow ? 'd1' : null;
       if (!slot) continue;
@@ -148,48 +147,69 @@ export async function deliverEventReminder(r: EventReminder): Promise<void> {
   }
 }
 
+// Process-local positions only; claims remain the durable duplicate guard, not delivery receipts.
+let afterCouple: Types.ObjectId | null = null;
+let current: { id: Types.ObjectId; afterEvent?: Types.ObjectId; autoScope?: string } | null = null;
+let activeRun: Promise<number> | null = null;
+
+async function sendDue(due: EventReminder[]): Promise<number> {
+  if (!due.length) return 0;
+  const done = await alreadySent(due.map(r => r.key));
+  let sent = 0;
+  for (const r of due) {
+    if (done.has(r.key) || !(await claimSend(r.key))) continue;
+    await realtimeAudience.couple(r.coupleId, ['events']);
+    await deliverEventReminder(r);
+    sent++;
+  }
+  return sent;
+}
+
+async function run(now: Date): Promise<number> {
+  const utcToday = getLocalDate(now, 'UTC');
+  const fromDay = addDays(utcToday, -1), toDay = addDays(utcToday, 9);
+  let sent = 0, candidates = 0, couples = 0;
+  while (couples < COUPLES_PER_PAGE && candidates < EVENTS_PER_RUN) {
+    let couple: CoupleDoc | null;
+    if (current) couple = await coupleRepository.findActiveById(current.id);
+    else {
+      const page = await coupleRepository.listActivePage(afterCouple, 1);
+      if (!page.length) { afterCouple = null; break; }
+      couple = page[0];
+      current = { id: couple._id };
+    }
+    couples++;
+    if (!couple) { afterCouple = current!.id; current = null; continue; }
+    const localDay = getLocalDate(now, couple.timezone);
+    // A long traversal may cross 08:00, midnight or a timezone edit. Do not
+    // remember a pre-window empty result as completed for the next window.
+    const autoScope = `${couple.timezone}:${localDay}`;
+    if (now.getTime() >= zonedTimeToUtc(localDay, REMIND_FROM, couple.timezone).getTime()
+      && current!.autoScope !== autoScope) {
+      sent += await sendDue(dueReminders(couple, [], now));
+      current!.autoScope = autoScope;
+    }
+    const remaining = EVENTS_PER_RUN - candidates;
+    const rows = await eventRepository.listRemindablePage(couple._id, fromDay, toDay, remaining, current!.afterEvent);
+    for (const event of rows.slice(0, remaining)) {
+      sent += await sendDue(dueReminders(couple, [event], now, false));
+      current!.afterEvent = event._id;
+      candidates++;
+    }
+    if (rows.length > remaining) break;
+    afterCouple = couple._id;
+    current = null;
+  }
+  return sent;
+}
+
 export const coupleEventsRemindJob: SchedulerJob = {
   name: 'couple-events.remind',
   everyMin: 10,
-  async run(now) {
-    // Every timezone's "today" lies within a day of the UTC date; d7 reaches 7 days past it.
-    const utcToday = getLocalDate(now, 'UTC');
-    const fromDay = addDays(utcToday, -1);
-    const toDay = addDays(utcToday, 9);
-    let after: Types.ObjectId | null = null;
-    let sent = 0;
-    for (;;) {
-      const couples = await coupleRepository.listActivePage(after, COUPLES_PER_PAGE);
-      if (couples.length === 0) break;
-      after = couples[couples.length - 1]._id;
-
-      const events = await eventRepository.listRemindable(
-        couples.map((c) => c._id),
-        fromDay,
-        toDay,
-        MAX_EVENTS_PER_PAGE,
-      );
-      if (events.length >= MAX_EVENTS_PER_PAGE) logger.warn('Event reminders: event page cut at the limit', { couples: couples.length });
-      const byCouple = new Map<string, RemindableEvent[]>();
-      for (const e of events) {
-        const k = e.coupleId.toString();
-        const list = byCouple.get(k);
-        if (list) list.push(e);
-        else byCouple.set(k, [e]);
-      }
-
-      const due = couples.flatMap((c) => dueReminders(c, byCouple.get(c._id.toString()) ?? [], now));
-      if (due.length > 0) {
-        const done = await alreadySent(due.map((r) => r.key));
-        for (const r of due) {
-          if (done.has(r.key) || !(await claimSend(r.key))) continue;
-          await realtimeAudience.couple(r.coupleId, ['events']);
-          await deliverEventReminder(r);
-          sent += 1;
-        }
-      }
-      if (couples.length < COUPLES_PER_PAGE) break;
-    }
-    return sent;
+  run(now) {
+    if (activeRun) return activeRun;
+    const promise = run(now).finally(() => { if (activeRun === promise) activeRun = null; });
+    activeRun = promise;
+    return promise;
   },
 };

@@ -13,6 +13,9 @@
 /scripts/browser/*
 !/scripts/browser/harness.mjs
 !/scripts/browser/daily-rewards-water.mjs
+!/scripts/browser/history-pages.mjs
+!/scripts/browser/friend-comment-pages.mjs
+!/scripts/browser/scam-game.mjs
 !/scripts/browser/README.md
 
 # ── Inside backend/ and frontend/ ──────────────────────────────────────

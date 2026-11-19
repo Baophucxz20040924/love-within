@@ -8,14 +8,16 @@ const ALLOWED = ['image/jpeg', 'image/png', 'image/webp'];
 const enc = encodeURIComponent;
 
 export const storiesApi = {
-  feed: (cursor?: string) => apiRequest<StoryPage>(`/stories?limit=10${cursor ? `&cursor=${enc(cursor)}` : ''}`),
-  get: (id: string) => apiRequest<Story>(`/stories/${enc(id)}`),
+  feed: (cursor?: string, signal?: AbortSignal) => apiRequest<StoryPage>(`/stories?limit=10${cursor ? `&cursor=${enc(cursor)}` : ''}`, { signal }),
+  get: (id: string, signal?: AbortSignal) => apiRequest<Story>(`/stories/${enc(id)}`, { signal }),
   create: (input: StoryContentInput) => apiRequest<Story>('/stories', { method: 'POST', body: input }),
   update: (id: string, input: StoryContentInput) => apiRequest<Story>(`/stories/${enc(id)}`, { method: 'PATCH', body: input }),
   remove: (id: string) => apiRequest<{ ok: true }>(`/stories/${enc(id)}`, { method: 'DELETE' }),
   react: (id: string, type: string) => apiRequest<Story>(`/stories/${enc(id)}/reaction`, { method: 'PUT', body: { type } }),
   unreact: (id: string) => apiRequest<Story>(`/stories/${enc(id)}/reaction`, { method: 'DELETE' }),
   comments: (id: string) => apiRequest<StoryComment[]>(`/stories/${enc(id)}/comments`),
+  commentsPage: (id: string, cursor?: string, signal?: AbortSignal) =>
+    apiRequest<{ items: StoryComment[]; nextCursor: string | null }>(`/stories/${enc(id)}/comments/page?limit=20${cursor ? `&cursor=${enc(cursor)}` : ''}`, { signal }),
   addComment: (id: string, body: string) =>
     apiRequest<StoryComment>(`/stories/${enc(id)}/comments`, { method: 'POST', body: { body } }),
   deleteComment: (id: string, commentId: string) =>

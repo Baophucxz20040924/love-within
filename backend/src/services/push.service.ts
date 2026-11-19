@@ -251,6 +251,25 @@ let pending = 0;
 let active = 0;
 const waiting: (() => void)[] = [];
 let droppedWarned = false;
+let accepting = true;
+let drainPromise: Promise<void> | null = null;
+const drained = new Set<() => void>();
+
+/** Close admission only after HTTP/background producers have joined. Timeout is not completion. */
+export function drainPush(): Promise<void> {
+  accepting = false;
+  if (drainPromise) return drainPromise;
+  if (pending === 0) return Promise.resolve();
+  drainPromise = new Promise<void>(resolve => {
+    const finish = () => { clearTimeout(timer); drained.delete(finish); resolve(); };
+    const timer = setTimeout(() => {
+      logger.warn('Push drain timed out', { pending, active });
+      finish();
+    }, 10_000);
+    drained.add(finish);
+  });
+  return drainPromise;
+}
 
 async function run(job: PushJob): Promise<void> {
   if (active >= MAX_IN_FLIGHT) await new Promise<void>((resolve) => waiting.push(resolve));
@@ -263,6 +282,7 @@ async function run(job: PushJob): Promise<void> {
     active -= 1;
     pending -= 1;
     waiting.shift()?.();
+    if (pending === 0) for (const finish of drained) finish();
   }
 }
 
@@ -288,7 +308,7 @@ export const pushService = {
    * response sees the push as pending until it is done.
    */
   enqueue(job: PushJob): void {
-    if (!getPush().enabled) return;
+    if (!accepting || !getPush().enabled) return;
     if (pending >= MAX_PENDING) {
       if (!droppedWarned) logger.warn('Push backlog full, dropping pushes', { pending });
       droppedWarned = true;

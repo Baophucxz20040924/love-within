@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Avatar } from '../components/Avatar';
 import { BottomSheet } from '../components/BottomSheet';
@@ -51,6 +51,8 @@ function GuestGroup({ label, people }: { label: string; people: FriendEventGuest
 /** /friends/events/:id — one event: info, Đi · Có thể · Không đi, guests by answer, discussion, calendar and map. */
 export function FriendEventPage() {
   const { id = '' } = useParams();
+  const [params] = useSearchParams();
+  const focusCommentId = params.get('comment');
   const qc = useQueryClient();
   const toast = useToast();
   const navigate = useNavigate();
@@ -254,7 +256,7 @@ export function FriendEventPage() {
             <h2 id="fev-discussion-title" className="section__title">
               Thảo luận
             </h2>
-            <FriendComments api={commentApi} focusKey={0} />
+            <FriendComments api={commentApi} focusKey={0} focusCommentId={focusCommentId} />
           </section>
 
           <FriendEventSheet open={editing} editing={ev} onClose={() => setEditing(false)} onSaved={saved} />

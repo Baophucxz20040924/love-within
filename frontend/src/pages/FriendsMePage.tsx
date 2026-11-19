@@ -119,6 +119,7 @@ export function FriendsMePage() {
         <Row to={`/friends/u/${myId}`} icon="user" label="Xem trang cá nhân" meta="Như bạn bè nhìn thấy" />
         <Row to="/friends/people" icon="users" label="Bạn bè" value={incoming > 0 ? `${incoming} lời mời` : undefined} />
         <Row to="/friends/outings" icon="coins" label="Chia tiền buổi đi chơi" meta="Ghi chi phí, chốt sổ và xác nhận thanh toán" />
+        <Row to="/friends/scam" icon="messageCircle" label="Scam with Famous People" meta="Chơi ngay · Chat với nhân vật AI · BXH chung" />
         <Row to="/friends/me/invites" icon="userPlus" label="Mời bạn vào hội" meta="Gửi link để bạn bè vào và kết bạn với bạn" />
         <Row to="/friends/me/blocked" icon="shield" label="Đã chặn" />
         <Row to="/friends/me/app-lock" icon="shield" label="Mã khóa ứng dụng" meta="Mã 6 số khi mở lại ứng dụng" />

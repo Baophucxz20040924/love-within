@@ -29,7 +29,7 @@ import {
 import {
   FriendEventPage, FriendEventsPage, FriendOutingsPage, FriendOutingPage, FriendPostPage,
   FriendProfilePage, FriendsBlockedPage, FriendsFeedPage, FriendsInvitesPage, FriendsLayout,
-  FriendsMePage, FriendsNotificationSettingsPage, FriendsNotificationsPage, FriendsPeoplePage, InviteLandingPage,
+  FriendsMePage, FriendsNotificationSettingsPage, FriendsNotificationsPage, FriendsPeoplePage, InviteLandingPage, ScamGamePage,
 } from '../features/friends/lazyPages';
 
 const queryClient = new QueryClient({ defaultOptions: { queries: { retry: 1, staleTime: 30_000, refetchOnWindowFocus: false } } });
@@ -124,6 +124,7 @@ function PersonalContent() {
       <Route path="/friends" element={<ProtectedRoute><RequireSpace space="friends"><Suspense fallback={<Loading />}><FriendsLayout /></Suspense></RequireSpace></ProtectedRoute>}>
         <Route index element={<FriendsFeedPage />} />
         <Route path="people" element={<FriendsPeoplePage />} />
+        <Route path="scam" element={<ScamGamePage />} />
         <Route path="posts/:id" element={<FriendPostPage />} />
         <Route path="events" element={<FriendEventsPage />} />
         <Route path="events/:id" element={<FriendEventPage />} />

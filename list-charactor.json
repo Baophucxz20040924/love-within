@@ -1,0 +1,207 @@
+
+{
+  "characters": [
+    {
+      "id": 1,
+      "name": "Cristiano Ronaldo",
+      "type": "real_person"
+    },
+    {
+      "id": 2,
+      "name": "Lionel Messi",
+      "type": "real_person"
+    },
+    {
+      "id": 3,
+      "name": "Donald Trump",
+      "type": "real_person"
+    },
+    {
+      "id": 4,
+      "name": "Barack Obama",
+      "type": "real_person"
+    },
+    {
+      "id": 5,
+      "name": "Elon Musk",
+      "type": "real_person"
+    },
+    {
+      "id": 6,
+      "name": "Taylor Swift",
+      "type": "real_person"
+    },
+    {
+      "id": 7,
+      "name": "Michael Jackson",
+      "type": "real_person"
+    },
+    {
+      "id": 8,
+      "name": "Jackie Chan",
+      "type": "real_person"
+    },
+    {
+      "id": 9,
+      "name": "Tom Cruise",
+      "type": "real_person"
+    },
+    {
+      "id": 10,
+      "name": "MrBeast",
+      "type": "real_person"
+    },
+    {
+      "id": 11,
+      "name": "Albert Einstein",
+      "type": "real_person"
+    },
+    {
+      "id": 12,
+      "name": "Steve Jobs",
+      "type": "real_person"
+    },
+    {
+      "id": 13,
+      "name": "Bill Gates",
+      "type": "real_person"
+    },
+    {
+      "id": 14,
+      "name": "David Beckham",
+      "type": "real_person"
+    },
+    {
+      "id": 15,
+      "name": "Bruce Lee",
+      "type": "real_person"
+    },
+    {
+      "id": 16,
+      "name": "Justin Bieber",
+      "type": "real_person"
+    },
+    {
+      "id": 17,
+      "name": "Mr. Bean",
+      "type": "real_person"
+    },
+    {
+      "id": 18,
+      "name": "Will Smith",
+      "type": "real_person"
+    },
+    {
+      "id": 19,
+      "name": "Eminem",
+      "type": "real_person"
+    },
+    {
+      "id": 20,
+      "name": "Lee Chong Wei",
+      "type": "real_person"
+    },
+    {
+      "id": 21,
+      "name": "Độ Mixi",
+      "type": "real_person"
+    },
+    {
+      "id": 22,
+      "name": "Rambo Việt Nam",
+      "full_name": "Rambo",
+      "group": "Refund Gaming",
+      "type": "real_person"
+    },
+    {
+      "id": 23,
+      "name": "Spider-Man",
+      "type": "fictional_character"
+    },
+    {
+      "id": 24,
+      "name": "Iron Man",
+      "type": "fictional_character"
+    },
+    {
+      "id": 25,
+      "name": "Batman",
+      "type": "fictional_character"
+    },
+    {
+      "id": 26,
+      "name": "Superman",
+      "type": "fictional_character"
+    },
+    {
+      "id": 27,
+      "name": "Harry Potter",
+      "type": "fictional_character"
+    },
+    {
+      "id": 28,
+      "name": "Mickey Mouse",
+      "type": "fictional_character"
+    },
+    {
+      "id": 29,
+      "name": "Doraemon",
+      "type": "fictional_character"
+    },
+    {
+      "id": 30,
+      "name": "Nobita",
+      "type": "fictional_character"
+    },
+    {
+      "id": 31,
+      "name": "Caption America",
+      "type": "fictional_character"
+    },
+    {
+      "id": 32,
+      "name": "Black Panther",
+      "type": "fictional_character"
+    },
+    {
+      "id": 33,
+      "name": "Naruto Uzumaki",
+      "type": "fictional_character"
+    },
+    {
+      "id": 34,
+      "name": "Goku",
+      "type": "fictional_character"
+    },
+    {
+      "id": 35,
+      "name": "Monkey D. Luffy",
+      "type": "fictional_character"
+    },
+    {
+      "id": 36,
+      "name": "Sasuke Uchiha",
+      "type": "fictional_character"
+    },
+    {
+      "id": 37,
+      "name": "Optimus Prime",
+      "type": "fictional_character"
+    },
+    {
+      "id": 38,
+      "name": "Tom (Tom and Jerry)",
+      "type": "fictional_character"
+    },
+    {
+      "id": 39,
+      "name": "Po (Kung Fu Panda)",
+      "type": "fictional_character"
+    },
+    {
+      "id": 40,
+      "name": "Jack Sparrow",
+      "type": "fictional_character"
+    }
+  ]
+}

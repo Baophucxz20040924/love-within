@@ -13,7 +13,7 @@ import { invalidateSuggestionCache } from './friendSuggestion.service.js';
 
 const invalidateOuting = (doc: FriendOutingRecord) => realtimeAudience.outing(doc, ['friend-outings']).catch(() => {});
 import { profileService } from './profile.service.js';
-import { outingAccess, outingInvitationEligible, outingRestricted, outingSummary, outingView } from './friendOuting.views.js';
+import { outingAccess, outingListAccess, outingInvitationEligible, outingRestricted, outingSummary, outingView } from './friendOuting.views.js';
 import { applyOutingMutation, outingOperationConflict, outingRevisionConflict, outingRestrictedError } from './friendOuting.mutations.js';
 import { outingPayloadHash, type OutingCreateInput, type OutingMutationInput, type OutingMutationKind, type OutingOperationInput } from './friendOuting.validation.js';
 export type { FriendOutingView, FriendOutingSummary } from './friendOuting.views.js';
@@ -207,9 +207,10 @@ export const friendOutingService = {
     // Bound work to one projected page. An empty page can still have a nextCursor when invitations lost social access.
     const rows = await friendOutingRepository.list(actorId, input.limit + 1, decodeCursor(input.cursor), input.eventId);
     const page = rows.slice(0, input.limit), items = [];
+    const access = await outingListAccess(page, actorId);
     for (const row of page) {
-      try { items.push(outingSummary(row, actorId, await outingAccess(row, actorId))); }
-      catch (err) { if (!(err instanceof AppError && err.status === 404)) throw err; }
+      const allowed = access.get(String(row._id));
+      if (allowed) items.push(outingSummary(row, actorId, allowed));
     }
     return { items, nextCursor: rows.length > input.limit ? Buffer.from(`v1:${page[page.length - 1]._id.toString()}`).toString('base64url') : null };
   },

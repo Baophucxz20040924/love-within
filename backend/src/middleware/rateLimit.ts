@@ -118,6 +118,10 @@ export const bankSyncLimiter = make(60_000, 10, 'Thao tác quá nhanh, thử l�
 /** Finance assistant chat: 30 questions / hour per user (protects AI cost). */
 export const assistantChatLimiter = make(60 * 60_000, 30, 'Bạn đã hỏi trợ lý quá nhiều trong giờ này, thử lại sau.', true);
 
+/** Short-window abuse controls, not a total-turn or per-game limit. */
+export const scamMessageLimiter = make(60_000, 20, 'Bạn gửi quá nhanh, đợi một chút rồi tiếp tục nhé.', true);
+export const scamWriteLimiter = make(60_000, 30, 'Bạn thao tác quá nhanh, đợi một chút nhé.', true);
+
 /** Finance assistant insights: 10 / hour per user (cached results also count). */
 export const assistantInsightsLimiter = make(60 * 60_000, 10, 'Bạn làm mới phân tích quá nhiều lần, thử lại sau.', true);
 

@@ -29,6 +29,7 @@ function harness() {
   const pair = (a, b) => [a.toString(), b.toString()].sort().join(':');
   const friends = (a, b) => state.friendships.get(pair(a, b)) ?? 'accepted';
   const friendshipRepository = {
+    acceptedUnblockedPairKeys: async (pairs) => new Set(pairs.filter(([a, b]) => friends(a, b) === 'accepted' && !state.blocks.some(([x, y]) => pair(a, b) === pair(x, y))).map(([a, b]) => pair(a, b))),
     listBetween: async (a, ids) => ids.filter((b) => friends(a, b) !== 'missing').map((b) => ({ status: friends(a, b) })),
     areFriends: async (a, b) => friends(a, b) === 'accepted', countIncomingPending: async () => 0,
   };
@@ -45,7 +46,7 @@ function harness() {
   };
   const mocks = {
     'models/FriendSafety.ts': { FriendBlock: {} },
-    'repositories/friendship.repository.ts': { friendshipRepository },
+    'repositories/friendship.repository.ts': { friendshipRepository, pairKeyOf: pair },
     'repositories/friendSafety.repository.ts': { friendBlockRepository },
     'repositories/friendNotification.repository.ts': { friendNotificationRepository },
     'repositories/user.repository.ts': { userRepository: {} },
@@ -112,6 +113,7 @@ function harness() {
       return true;
     },
     groupHasBlock: async (ids) => { state.blockChecks.push([...ids]); return state.blocks.some(([a, b]) => ids.includes(a) && ids.includes(b)); },
+    blockedRosterIndexes: async (rosters) => new Set(rosters.flatMap((ids, index) => state.blocks.some(([a, b]) => ids.includes(a) && ids.includes(b)) ? [index] : [])),
     list: async (who) => state.stored && !state.stored.deletedAt && state.stored.participants.some((p) => p.userId === who) ? [clone(state.stored)] : [],
     headers: async (who, ids) => state.stored && !state.stored.deletedAt && ids.includes(state.stored._id.toString()) && state.stored.participants.some((p) => p.userId === who) ? [clone(state.stored)] : [],
   });
@@ -513,6 +515,59 @@ test('real repository applies active filters and preserves event unique-index be
     const indexes = Model.schema.indexes();
     assert.ok(indexes.some(([fields, options]) => fields.eventId === 1 && options.unique && options.partialFilterExpression.eventId.$type === 'objectId'));
   } finally { Object.assign(Model, original); }
+});
+
+test('block batch repository uses exact roster clauses, chunk bounds and endpoint projection', async () => {
+  const h = harness(), Block = h.load('models/FriendSafety.ts').FriendBlock;
+  const queries = [];
+  Block.find = filter => {
+    queries.push(filter);
+    assert.ok(filter.$or.length <= 25);
+    return { select(fields) { assert.equal(fields, '-_id blockerId blockedId'); return this; }, lean() { return this; },
+      exec: async () => [{ blockerId: user(A)._id, blockedId: user(B)._id }, { blockerId: user(B)._id, blockedId: user(C)._id }] };
+  };
+  const rosters = Array.from({ length: 51 }, (_, i) => i % 2 ? [C, D] : [A, B]);
+  const blocked = await h.actualRepo.blockedRosterIndexes(rosters);
+  assert.equal(queries.length, 3); assert.equal(blocked.size, 26);
+  assert.ok([...blocked].every(i => i % 2 === 0), 'a cross-roster B/C edge does not restrict C/D');
+  for (const query of queries) for (const clause of query.$or) {
+    assert.deepEqual(clause.blockerId.$in.map(String), clause.blockedId.$in.map(String));
+    assert.equal(clause.blockerId.$in.length, 2);
+  }
+});
+
+test('list ACL snapshot matches live outcomes and never shares blocks across unrelated rosters', async () => {
+  const h = harness();
+  const { outingAccess, outingListAccess } = h.load('services/friendOuting.views.ts');
+  for (const status of ['accepted', 'pending', 'declined']) {
+    for (const missing of [false, true]) for (const blocks of [[], [[A, B]], [[B, C]], [[C, D]]]) {
+      h.state.friendships.clear(); if (missing) h.state.friendships.set(h.pair(A, B), 'missing'); h.state.blocks = blocks;
+      const page = [
+        { _id: user(id(800))._id, creatorId: A, participants: [participant(A), participant(B), participant(C, status)] },
+        { _id: user(id(801))._id, creatorId: D, participants: [participant(D), participant(C)] },
+      ];
+      const snapshot = await outingListAccess(page, C);
+      for (const row of page) {
+        let expected; try { expected = await outingAccess(row, C); } catch (err) { assert.equal(err.status, 404); }
+        assert.equal(snapshot.get(String(row._id)), expected);
+      }
+    }
+  }
+  h.repo.blockedRosterIndexes = async () => { throw Error('database unavailable'); };
+  await assert.rejects(outingListAccess([], C), /database unavailable/);
+});
+
+test('list preserves candidate continuation when every invitation in a page becomes invisible', async () => {
+  const h = harness();
+  const rows = Array.from({ length: 3 }, (_, i) => ({ _id: user(id(900 - i))._id, creatorId: A, participants: [participant(A), participant(C, 'pending')] }));
+  h.state.friendships.set(h.pair(A, C), 'missing');
+  let reads = 0;
+  h.repo.list = async (_actor, limit, before) => { reads++; assert.equal(limit, 3); return rows.filter(row => !before || String(row._id) < String(before)).slice(0, limit); };
+  const first = await h.service.list(user(C), { limit: 2 });
+  assert.equal(first.items.length, 0); assert.ok(first.nextCursor); assert.equal(reads, 1, 'no unbounded refill');
+  assert.equal(Buffer.from(first.nextCursor, 'base64url').toString(), `v1:${rows[1]._id}`);
+  const tail = await h.service.list(user(C), { limit: 2, cursor: first.nextCursor });
+  assert.equal(tail.items.length, 0); assert.equal(tail.nextCursor, null); assert.equal(reads, 2);
 });
 
 test('expense and delete resolve against the same revision in both race orders', async () => {

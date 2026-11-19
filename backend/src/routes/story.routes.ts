@@ -150,6 +150,16 @@ storyRouter.delete(
 );
 
 storyRouter.get(
+  '/:id/comments/page',
+  validate({ params: idParam, query: z.object({
+    limit: z.coerce.number().int().min(1).max(50).default(20),
+    cursor: z.string().min(1).max(1024).optional(),
+  }) }),
+  asyncHandler(async (req, res) => ok(res, await storyService.listCommentsPage(req.couple!, req.userId!, req.params.id,
+    req.query as unknown as { limit: number; cursor?: string }))),
+);
+
+storyRouter.get(
   '/:id/comments',
   validate({ params: idParam }),
   asyncHandler(async (req, res) => ok(res, await storyService.listComments(req.couple!, req.userId!, req.params.id))),

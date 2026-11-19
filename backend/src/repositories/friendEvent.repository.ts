@@ -1,4 +1,6 @@
 import { Types } from 'mongoose';
+import { commentPageFilter } from '../utils/commentPage.js';
+import type { HistoryPosition } from '../utils/historyCursor.js';
 import {
   FriendEvent,
   FriendEventComment,
@@ -143,9 +145,14 @@ export const friendEventRepository = {
   },
 
   /** Job: active, live events starting in (from, to], soonest first, at most `limit`. */
-  listStartingBetween(from: Date, to: Date, limit: number): Promise<RemindableFriendEvent[]> {
-    return FriendEvent.find({ status: 'active', startAt: { $gt: from, $lte: to }, ...alive })
-      .sort({ startAt: 1 })
+  listStartingBetween(from: Date, to: Date, limit: number, after?: { startAt: Date; id: Types.ObjectId }): Promise<RemindableFriendEvent[]> {
+    return FriendEvent.find({ status: 'active', startAt: { $gt: from, $lte: to }, ...alive,
+      ...(after ? { $or: [
+        { startAt: { $gt: after.startAt } },
+        { startAt: after.startAt, _id: { $gt: after.id } },
+      ] } : {}),
+    })
+      .sort({ startAt: 1, _id: 1 })
       .limit(limit)
       .select('creatorId inviteeIds rsvps startAt hiddenByReportsAt')
       .lean<RemindableFriendEvent[]>()
@@ -161,6 +168,12 @@ export const friendEventRepository = {
 const notHiddenFor = (viewerId: Types.ObjectId) => ({ $or: [{ hiddenByReportsAt: null }, { authorId: viewerId }] });
 
 export const friendEventCommentRepository = {
+  listPage(eventId: Types.ObjectId, parentId: Types.ObjectId | null, viewerId: Types.ObjectId,
+    blocked: Types.ObjectId[], limit: number, before?: HistoryPosition, inclusive = false): Promise<FriendEventCommentDoc[]> {
+    return FriendEventComment.find({ eventId, parentId, ...commentPageFilter(viewerId, blocked, before, inclusive) })
+      .sort({ createdAt: -1, _id: -1 }).limit(limit + 1).exec();
+  },
+
   create(input: { eventId: Types.ObjectId; authorId: Types.ObjectId; parentId: Types.ObjectId | null; body: string; mentions?: FriendEventCommentDoc['mentions'] }): Promise<FriendEventCommentDoc> {
     return FriendEventComment.create(input);
   },

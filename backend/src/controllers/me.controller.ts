@@ -13,9 +13,10 @@ export const meController = {
     if (!user) throw Errors.unauthorized('Tài khoản không tồn tại');
 
     const coupleDoc = user.coupleId ? await coupleRepository.findActiveById(user.coupleId) : null;
-    const [couple, wallet] = coupleDoc
-      ? await Promise.all([buildCoupleView(coupleDoc), walletService.getView(coupleDoc._id, req.userId!)])
-      : [null, null];
+    const settled = coupleDoc ? await walletService.getSettledView(coupleDoc._id, req.userId!) : null;
+    // The repair can award EXP; do not build the couple from the pre-repair document.
+    const wallet = settled?.wallet ?? null;
+    const couple = settled ? { ...await buildCoupleView(settled.couple), level: wallet!.level, exp: wallet!.exp } : null;
 
     ok(res, {
       user: {

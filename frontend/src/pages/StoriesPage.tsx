@@ -63,7 +63,7 @@ export function StoriesPage() {
 
   const feed = useInfiniteQuery({
     queryKey: STORY_FEED_KEY,
-    queryFn: ({ pageParam }) => storiesApi.feed(pageParam),
+    queryFn: ({ pageParam, signal }) => storiesApi.feed(pageParam, signal),
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (last) => last.nextCursor ?? undefined,
     staleTime: 0,

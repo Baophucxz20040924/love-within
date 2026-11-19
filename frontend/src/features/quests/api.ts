@@ -12,6 +12,12 @@ export const questsApi = {
 export const walletApi = {
   get: () => apiRequest<WalletView>('/wallet'),
   ledger: (type?: 'coin' | 'exp') => apiRequest<LedgerEntry[]>(`/ledger${type ? `?type=${type}` : ''}`),
+  ledgerPage: (cursor?: string, type?: 'coin' | 'exp', signal?: AbortSignal) => {
+    const query = new URLSearchParams({ limit: '20' });
+    if (cursor) query.set('cursor', cursor);
+    if (type) query.set('type', type);
+    return apiRequest<{ items: LedgerEntry[]; nextCursor: string | null }>(`/ledger/page?${query}`, { signal });
+  },
 };
 
 export const QUESTS_KEY = ['quests', 'today'] as const;

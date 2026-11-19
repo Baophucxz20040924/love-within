@@ -17,9 +17,9 @@ export function StoryDetailPage() {
   const [editing, setEditing] = useState<Story | null>(null);
   const [focusKey, setFocusKey] = useState(0);
 
-  const story = useQuery({
+  const story = useQuery<Story>({
     queryKey: storyKey(id),
-    queryFn: () => storiesApi.get(id),
+    queryFn: ({ signal }) => storiesApi.get(id, signal),
     // Show the copy already in the feed instantly while the fresh one loads.
     placeholderData: () =>
       qc

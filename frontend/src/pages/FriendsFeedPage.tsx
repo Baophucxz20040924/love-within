@@ -10,6 +10,7 @@ import { FRIEND_FEED_KEY, FRIENDS_OVERVIEW_KEY, friendStoriesApi, friendsApi } f
 import { FriendComposer } from '../features/friends/FriendComposer';
 import { POST_MEDIA_ACCEPT } from '../features/stories/postMedia';
 import { FriendEventStrip } from '../features/friends/FriendEventStrip';
+import { ScamEntryCard } from '../features/scam/ScamEntryCard';
 import { FriendStoryCard } from '../features/friends/FriendStoryCard';
 import { FriendSuggestions } from '../features/friends/FriendSuggestions';
 import { shortName } from '../lib/format';
@@ -29,7 +30,7 @@ export function FriendsFeedPage() {
 
   const feed = useInfiniteQuery({
     queryKey: FRIEND_FEED_KEY,
-    queryFn: ({ pageParam }) => friendStoriesApi.feed(pageParam),
+    queryFn: ({ pageParam, signal }) => friendStoriesApi.feed(pageParam, signal),
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (last) => last.nextCursor ?? undefined,
     staleTime: 0,
@@ -89,7 +90,8 @@ export function FriendsFeedPage() {
         </div>
       </section>
 
-      {/* BB5: after the composer (BB9's tray of "Tin" goes between them later), before the posts. */}
+      <ScamEntryCard />
+      {/* BB5: before the posts; independent of game discovery. */}
       <FriendEventStrip />
 
       {overview.isSuccess && friendCount === 0 && items.length > 0 && (

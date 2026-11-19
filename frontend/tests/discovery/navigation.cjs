@@ -29,7 +29,7 @@ function text(node) {
 }
 function home(pulse) {
   return load('pages/HomePage.tsx', {
-    react: { useState: value => [value, () => {}] }, 'react/jsx-runtime': runtime,
+    react: { useState: value => [value, () => {}], useEffect: () => {} }, 'react/jsx-runtime': runtime,
     'react-router-dom': { Link: 'Link' },
     '@tanstack/react-query': { useQuery: ({ queryKey }) => queryKey[0] === 'pulse' ? pulse : {} },
     '../components/Avatar': { Avatar: 'Avatar' }, '../components/Icon': { Icon: 'Icon' },
@@ -46,6 +46,8 @@ function home(pulse) {
     '../features/nudges/useNudgeSender': {}, '../features/questions/QuestionCard': { QuestionCard: 'QuestionCard' },
     '../features/savings/SavingsViews': {}, '../features/quests/api': {},
     '../lib/format': { formatToday: () => 'Hôm nay' },
+    '../lib/tokenStore': { tokenStore: { isCurrent: () => true, generation: () => 'generation' } },
+    '../features/appLock/store': { appLockState: () => ({ discard: false }), subscribeAppLock: () => () => {} },
   }).HomePage();
 }
 const scenarios = [
@@ -63,7 +65,12 @@ for (const [name, pulse] of scenarios) test(`Home keeps labeled navigation indep
   assert.deepEqual(links.map(link => link.props.to), ['/moments', '/events']);
   assert.match(text(links[0]), /Khoảnh khắc/); assert.match(text(links[1]), /Sự kiện/);
   assert.equal(nodes(nav[0], node => node.type === 'input' || node.props.onClick).length, 0);
-  assert.equal(nodes(tree, node => node.type === 'MomentCard').length, pulse.data?.moment?.state === 'open' ? 1 : 0);
+  const wrappers = nodes(tree, node => typeof node.type === 'function' && node.type.name === 'HomeMoment');
+  assert.equal(wrappers.length, 1);
+  assert.equal(wrappers[0].props.moment, pulse.data?.moment);
+  const momentCard = wrappers[0].type(wrappers[0].props);
+  assert.equal(momentCard?.type === 'MomentCard', pulse.data?.moment?.state === 'open');
+  if (momentCard) assert.equal(momentCard.props.moment, pulse.data.moment);
   assert.equal(nodes(tree, node => node.type === 'UpcomingCard').length, pulse.data?.nextEvent ? 1 : 0);
 });
 for (const state of ['loading', 'empty', 'error', 'stale-error']) test(`Friends Kèo entry and creation survive ${state}`, () => {

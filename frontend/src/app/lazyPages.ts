@@ -2,7 +2,7 @@ import { lazy, type ComponentType } from 'react';
 
 /**
  * Pages outside the first screen (login + home) are split into their own chunks so the initial
- * bundle stays small. prefetchPages() downloads them in the background once the app is idle.
+ * bundle stays small. Selected routes may be prefetched after the shell becomes idle.
  */
 const loaders = {
   pairing: () => import('../pages/PairingPage'),
@@ -60,7 +60,8 @@ export const MomentsPage = page(loaders.moments, 'MomentsPage');
 /** Public /install (N5): loaded on its own, not prefetched (most sessions open it once). */
 export const InstallPage = page(() => import('../pages/InstallPage'), 'InstallPage');
 
-/** Fetch every page chunk in the background (the browser caches them), so later tab switches are instant. */
-export function prefetchPages(): void {
-  for (const load of Object.values(loaders)) void load().catch(() => undefined);
-}
+/** The entire speculative budget for one couple shell activation. */
+export const couplePrefetchCandidates = [
+  { path: '/quests', load: loaders.quests },
+  { path: '/stories', load: loaders.stories },
+] as const;

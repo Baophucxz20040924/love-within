@@ -152,7 +152,10 @@ async function main() {
           return json(route, p === '/api/moments/today' ? value : { month: localDate.slice(0, 7), today: localDate, minMonth: localDate.slice(0, 7), days: [value], streak: { current: 3, best: 3 } });
         }
         if (water.log && p === `/api/water/logs/${water.log.id}/image-url`) { water.evidenceReads++; return json(route, { url: `${h.baseURL}/__daily_mock__/photo.png`, expiresIn: 300 }); }
-        if (p === '/api/ledger') return json(route, f.ledger.map(entry => ({ ...entry, actorUserId: f.users[i].id, ownerUserId: entry.type === 'coin' ? f.users[i].id : null })));
+        if (p === '/api/ledger' || p === '/api/ledger/page') {
+          const items = f.ledger.map(entry => ({ ...entry, actorUserId: f.users[i].id, ownerUserId: entry.type === 'coin' ? f.users[i].id : null }));
+          return json(route, p.endsWith('/page') ? { items, nextCursor: null } : items);
+        }
       }
       if (method === 'POST') {
         const body = request.postData() ? request.postDataJSON() : {};

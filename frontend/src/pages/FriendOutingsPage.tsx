@@ -12,7 +12,7 @@ import '../features/friends/outings/outings.css';
 export function FriendOutingsPage() {
   const navigate = useNavigate();
   const [creating, setCreating] = useState(false);
-  const query = useInfiniteQuery({ queryKey: OUTINGS_KEY, queryFn: ({ pageParam }) => outingsApi.list(pageParam), initialPageParam: undefined as string | undefined, getNextPageParam: page => page.nextCursor ?? undefined, refetchOnWindowFocus: true });
+  const query = useInfiniteQuery({ queryKey: OUTINGS_KEY, queryFn: ({ pageParam, signal }) => outingsApi.list(pageParam, signal), initialPageParam: undefined as string | undefined, getNextPageParam: page => page.nextCursor ?? undefined, refetchOnWindowFocus: true });
   const items = query.data?.pages.flatMap(page => page.items) ?? [];
   const invitations = items.filter(item => item.myMembership === 'pending');
   const joined = items.filter(item => item.myMembership !== 'pending');

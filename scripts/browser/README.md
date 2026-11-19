@@ -30,6 +30,84 @@ The fixture never starts/stops servers or uses API/Mongo/provider credentials. I
 
 This proves mocked UI integration only—not native permission, physical iPhone compatibility, real service-worker registration, HTTPS/VAPID delivery, production performance or Mongo concurrency. iOS user-agent emulation in Chromium is not Safari. Negative assertions are bounded observations. Isolated auth/readiness/StrictMode/cross-tab policy and async-fence regressions run with `npm --prefix frontend run test:push`; those use VM/fake hooks rather than a browser renderer. Stop only the preview process you own after verification; leave Vite running.
 
+## Discovery and bounded prefetch (production-build mock only)
+
+Use the same owned loopback production preview on port 5175 described above,
+with no API/Mongo process needed. Run sequentially, not alongside other browser
+or API regression lifecycles:
+
+```powershell
+$env:LW_UI_URL = 'http://127.0.0.1:5175'
+node frontend/tests/discovery/browser.mjs --local-mock-runtime
+```
+
+This fixture keeps Home/Friends discovery and outing deletion-boundary checks,
+then controls idle callbacks to inspect the two selected route entry chunks in
+couple/desktop and Friends/mobile shells. Data Saver and 3G gate scheduling;
+hidden/offline transitions are applied after startup verification and before the
+queued callback. A direct nonselected guide route remains available with prefetch
+disabled. Promise concurrency, cancellation/unmount and StrictMode replay are
+covered by `frontend/tests/prefetch/routes.cjs`, not claimed as browser checks.
+Inspect `result.json` and screenshots under the printed temporary evidence path.
+All sessions/APIs are synthetic; unknown API/external requests fail closed.
+Chunk-entry observations are not total dependency bytes or a production speedup.
+Stop only the preview you own and leave Vite 5173 running.
+
+## Ledger and couple-comment history (production-build mock only)
+
+Inspect ports4000/4001/5173/5175 first. With no API worker required, build and use only your own loopback production preview5175 as above; leave Vite5173 untouched. Existing external browser tooling is required, no dependency installation by this fixture:
+
+```powershell
+node scripts/browser/history-pages.mjs --validate
+$env:LW_UI_URL = 'http://127.0.0.1:5175'
+node scripts/browser/history-pages.mjs
+```
+
+The fail-closed fixture runs sequential mobile360×780 and desktop1280×800 contexts with synthetic auth/DTOs, blocks unknown API/external requests and websockets, and never starts servers or reads secrets. It checks ledger loading,20-row pages, older/newer/latest, provenance, empty/error retry; comment order, retained draft/error focus, successful send from history returning newest, deletion-to-empty-history and cached private rows hidden after an active20-second poll receives403. HTTP/console faults are explicitly budgeted. Read the printed `result.json` and screenshots; screenshots are viewport captures, not proof every row was visually reviewed. A deletion mock returning an empty page does not establish Mongo concurrent-delete behavior. Account switching and actual realtime transport are not exercised here; source/VM regressions cover additional fences.
+
+Latest run:12/12 checks, `%TEMP%/lw_history_browser/1795054328949`; no unbudgeted errors/unknown requests, mobile ledger navigation and desktop comments images inspected. The earlier selector failure remains in a separate evidence directory. This is browser integration evidence only—not backend ACL, query cost, throughput, physical iPhone or Safari evidence. Stop only your owned preview afterwards; leave Vite running.
+
+## Friends story/event comment pages (production-build mock only)
+
+Inspect ports4000/4001/5173/5175 and ownership before starting anything. No API or Mongo worker is required. Build the current frontend and use your own loopback production preview5175 as above; do not replace or stop the existing Vite5173. Use the already-installed external Playwright/Chromium tooling:
+
+```powershell
+node scripts/browser/friend-comment-pages.mjs --validate
+npm --prefix frontend run build
+# Start an owned preview as shown above, then in another terminal:
+$env:LW_UI_URL = 'http://127.0.0.1:5175'
+node scripts/browser/friend-comment-pages.mjs
+```
+
+`--validate` checks synthetic IDs/relationships before importing the browser harness. Runtime runs sequential360×780 mobile and1280×800 desktop contexts for both story and event, with Vietnamese locale/timezone and reduced motion. Every API/external request and websocket is intercepted; unknown requests fail closed. The fixture never reads credentials, starts/stops servers or persists real block/comment mutations. Direct synthetic UI document navigation is fulfilled from the same local index, including `?comment=`; this is not deployment deep-link verification.
+
+Six checks per device/resource cover root order/pages, lazy reply history, retained failed draft/error focus, add from history returning newest, delete-to-empty history, deep target focus/highlight and context-seed back navigation, reply success/newest, reply delete, a real20s context poll receiving403 and hiding cached rows, and actual report/block sheets immediately suppressing a cached root and its replies despite a deliberately stale mocked GET. The event consumer supports direct `?comment=` links; existing event inbox DTOs do not supply a comment ID and were not redesigned.
+
+Latest result: **24/24 checks**, `%TEMP%/lw_friend_comments/1795059526539`; JSON reviewed, mobile-story deep-context and desktop-event failed-draft screenshots inspected. No unknown/external requests or unbudgeted errors; injected503/403 HTTP and console errors matched exact budgets. The first preview document404 failure is retained at `%TEMP%/lw_friend_comments/1795059257332`, not counted as PASS. Only the two named screenshots were visually inspected, not all16 captured images.
+
+This proves synthetic UI/wrapper integration, not backend ACL, Mongo cost/concurrency, account switching, real realtime delivery, native push or physical iPhone/Safari behavior. Delete mocks model empty history, not concurrent database writes; block persistence is mocked. Run separately from API/browser regression lifecycles. Stop only the preview you own afterwards and leave Vite running.
+
+## Solo AI chat game (fully intercepted)
+
+Inspect ports4000/4001/5173/5175 and ownership, build frontend, use only an owned production preview5175 as above; leave Vite5173 untouched. No API/Mongo/provider is required:
+
+```powershell
+node scripts/browser/scam-game.mjs --validate
+npm --prefix frontend run build
+$env:LW_UI_URL = 'http://127.0.0.1:5175'
+node scripts/browser/scam-game.mjs
+```
+
+The fixture blocks unknown API/external requests and websockets; all game/auth responses are synthetic. Its intercepted SSE request is held open (no upstream connection) to avoid artificial EOF/reconnect access transitions during form tests. Terminal composer observation is atomic so removal on loss is not mistaken for an input timeout. Sequential360×780 and1280×800 checks cover Bảng tin → prominent Chơi ngay card → game, Tôi → game, direct/reload entry without auto-start, Friends palette after auth bootstrap, explicit consent/name, provider error draft retention, committed-write/lost-ack GET reconciliation, handle pointer drag plus Enter/Space, wrong form value retention, password reveal/OTP leading zero, three stages600 points, wins/BXH, trust-only meter, continuation at trust0 then AI hang-up retaining100 partial points without a new prop or extra win, read-only loss, reload of pending state, Dừng scam and replay with another character. Drag uses a mouse pointer at both viewport sizes, not physical touch. `--validate` exits before browser/harness import. Read result JSON and screenshots; automated no-overflow does not prove layout quality. No real provider persona intelligence, Mongo persistence/rank concurrency, native keyboard, Safari/device or production performance claim. Stop only the owned preview afterwards. Local mechanics and provider choices are documented in `backend/docs/scam-game.md`.
+
+Current fixture also asserts immediate outgoing bubbles before a held AI response, empty sent composer/new draft support, inline failed-message recovery, receipt-based deduplication, pending-bubble reconstruction after reload, all three unfinished inputs editable during pending, natural value replies, and shorter password labels. Completion waits for canonical state rather than an empty composer. This does not test actual provider output.
+
+Latest optimistic-send/context-contract UI result: **14/14 groups**, `%TEMP%/lw_scam_browser/1795086562399`. JSON reviewed: six injected503/422 faults, exactly12 budgeted HTTP/console errors, blocked list empty. Optimistic-pending, send-error and drawer-error screenshots inspected at both sizes (six of22 inventory captures). Pending user bubble appears before AI completes, newer draft remains independent, failures have nearby recovery controls, and natural account reply appears without a server prop bubble. Lower drawer/composer controls remain scroll-reachable, not all simultaneously visible above fixed navigation. Backend30+frontend29 offline suites/builds passed, with targeted recovery/context checks rerun; no API/provider/Mongo runtime. Owned5175 preview stopped, existing listeners left alone.
+
+Historical trust-only / AI hang-up result: **14/14 checks**, `%TEMP%/lw_scam_browser/1795082365530`. Result JSON reviewed: six injected503/422 faults, exactly12 budgeted HTTP/console errors, no unknown/external requests. One full-width blue trust meter replaces suspicion/warnings; trust0 continuation, AI hang-up after100 confirmed points with best600/wins1 unchanged, no new password and terminal read-only controls are asserted. Character header/trust, loss card and reachable composer/stop screenshots at both viewports were visually inspected (six of18 inventory images, not all captures). Backend30 and frontend29 audited offline suite files plus builds passed; no actual provider/API/Mongo call or win-rate claim. The owned preview was stopped and existing listeners left untouched.
+
+Historical UI-refresh result (before AI hang-up contract): **14/14 checks**, `%TEMP%/lw_scam_browser/1795080777494`; result JSON reviewed, six injected503/422 faults produced exactly12 budgeted HTTP/console errors, no unknown/external requests. The18 viewport captures are an inventory, not18 fully reviewed states. Visual review spans the same-source passing runs: feed/lobby/drawer/BXH/composer on both viewports at `1795080324632`, mobile/desktop character headers plus mobile consent at `1795080617052`, and final desktop consent at `1795080777494`. CTA/composer/stop are asserted scroll-reachable above navigation; textarea width, long wrapping/selectable bubbles and password-toggle draft retention are checked. They are not promised onscreen without scrolling or with a native keyboard open. Earlier failures remain separate (synthetic SSE EOF interrupted actions; a split count/input read raced terminal removal); the fixture now holds SSE and observes terminal input atomically. Latest frontend build and all29 offline suite files passed, including65 lock-store cases and the game VM suite. Backend30-suite evidence predates this frontend-only refresh; no backend runtime/provider probe ran here. Suite-file counts are not individual test counts. The owned preview was stopped; existing Vite was left untouched.
+
 ## Install external tooling
 
 PowerShell, from the repository root:

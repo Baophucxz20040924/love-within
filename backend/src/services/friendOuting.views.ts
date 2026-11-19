@@ -1,7 +1,7 @@
 import type { UserDoc } from '../models/User.js';
 import { OUTING_LIMITS, type FriendOutingRecord, type OutingParticipant } from '../models/FriendOuting.js';
 import { friendOutingRepository, type OutingHeader } from '../repositories/friendOuting.repository.js';
-import { friendshipRepository } from '../repositories/friendship.repository.js';
+import { friendshipRepository, pairKeyOf } from '../repositories/friendship.repository.js';
 import { Errors } from '../utils/errors.js';
 import { friendEventService } from './friendEvent.service.js';
 import { outingBalances, suggestTransfers } from './friendExpenseMath.js';
@@ -39,6 +39,36 @@ export async function outingAccess(doc: OutingHeader, userId: string): Promise<O
     return member.status === 'pending' ? 'invited' : 'declined';
   }
   return await outingRestricted(doc) ? 'restricted' : 'full';
+}
+/** List-only request snapshot. Never reuse for detail, mutation, replay or postcommit authorization. */
+export async function outingListAccess(page: readonly OutingHeader[], userId: string): Promise<Map<string, OutingAccess>> {
+  const pairs: [string, string][] = [], rosters: string[][] = [];
+  const candidates = page.map(doc => {
+    const member = doc.participants.find(p => p.userId === userId);
+    const active = [...new Set(doc.participants.filter(p => p.status === 'accepted').map(p => p.userId))];
+    const others = active.filter(id => id !== doc.creatorId);
+    pairs.push(...others.map(id => [doc.creatorId, id] as [string, string]));
+    const activeIndex = rosters.push(active) - 1;
+    let prospectiveIndex = activeIndex;
+    if (member && member.status !== 'accepted') {
+      pairs.push([doc.creatorId, userId]);
+      prospectiveIndex = rosters.push([...new Set([...active, userId])]) - 1;
+    }
+    return { doc, member, others, activeIndex, prospectiveIndex };
+  });
+  const [accepted, blocked] = await Promise.all([
+    friendshipRepository.acceptedUnblockedPairKeys(pairs), friendOutingRepository.blockedRosterIndexes(rosters),
+  ]);
+  const access = new Map<string, OutingAccess>();
+  for (const { doc, member, others, activeIndex, prospectiveIndex } of candidates) {
+    if (!member) continue;
+    const restricted = blocked.has(activeIndex) || others.some(id => !accepted.has(pairKeyOf(doc.creatorId, id)));
+    if (member.status === 'accepted') access.set(String(doc._id), restricted ? 'restricted' : 'full');
+    else if (!restricted && !blocked.has(prospectiveIndex) && accepted.has(pairKeyOf(doc.creatorId, userId))) {
+      access.set(String(doc._id), member.status === 'pending' ? 'invited' : 'declined');
+    }
+  }
+  return access;
 }
 function common(doc: OutingHeader, userId: string, access: OutingAccess) {
   return {

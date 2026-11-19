@@ -13,7 +13,7 @@ assert(['localhost', '127.0.0.1', '[::1]'].includes(UI.hostname), 'LW_UI_URL mus
 assert(['http:', 'https:'].includes(UI.protocol) && !UI.username && !UI.password && !UI.search && !UI.hash && UI.pathname === '/', 'LW_UI_URL must be a credential-free local origin');
 const tooling = process.env.LW_PW_HOME || path.join(os.tmpdir(), 'lw_pw');
 const evidence = path.join(os.tmpdir(), 'lw_discovery_browser', `${Date.now()}-${randomBytes(4).toString('hex')}`);
-const checks = [], errors = [], contexts = [];
+const checks = [], errors = [], contexts = [], prefetchResults = [];
 const limits = ['All APIs and sessions are synthetic. This tests frontend behavior, not backend authorization, persistence or real devices.', 'An already running owned local production frontend and external Playwright/Chromium are required.'];
 const uid = '000000000000000000000001', partnerId = '000000000000000000000002', coupleId = '000000000000000000000003';
 const outingId = '000000000000000000000004', token = 'synthetic-discovery-access', refreshToken = 'synthetic-discovery-refresh';
@@ -37,9 +37,27 @@ async function shot(page, name) {
 }
 let browser, activePage, currentStep = 'setup', releaseStreams;
 const streamsClosed = new Promise(resolve => { releaseStreams = resolve; });
-async function fixture({ pulseState = 'missing', friendError = false, member = false, history = false, space = 'couple' } = {}) {
-  const state = { deleted: false, deletes: 0, calls: [], failLists: false, outing: ledger({ member, history }) };
-  const context = await browser.newContext({ viewport: { width: 360, height: 780 }, isMobile: true, hasTouch: true, locale: 'vi-VN', timezoneId: 'Asia/Ho_Chi_Minh', reducedMotion: 'reduce', serviceWorkers: 'block' });
+async function fixture({ pulseState = 'missing', friendError = false, member = false, history = false, space = 'couple', prefetch = null, desktop = false } = {}) {
+  const state = { deleted: false, deletes: 0, calls: [], assets: [], failLists: false, outing: ledger({ member, history }) };
+  const context = await browser.newContext({ viewport: desktop ? { width: 1280, height: 800 } : { width: 360, height: 780 }, isMobile: !desktop, hasTouch: !desktop, locale: 'vi-VN', timezoneId: 'Asia/Ho_Chi_Minh', reducedMotion: 'reduce', serviceWorkers: 'block' });
+  if (prefetch) await context.addInitScript(options => {
+    const queue = new Map(); let next = 0;
+    let hidden = false, offline = false;
+    window.requestIdleCallback = callback => { queue.set(++next, callback); return next; };
+    window.cancelIdleCallback = id => queue.delete(id);
+    window.__prefetchFixture = {
+      queued: () => queue.size,
+      constrain: () => { hidden = !!options.hidden; offline = !!options.offline; },
+      run: () => {
+        const entry = queue.entries().next().value;
+        if (!entry) return false;
+        queue.delete(entry[0]); entry[1]({ didTimeout: false, timeRemaining: () => 50 }); return true;
+      },
+    };
+    Object.defineProperty(navigator, 'connection', { configurable: true, value: { saveData: !!options.saveData, effectiveType: options.effectiveType || '4g' } });
+    Object.defineProperty(navigator, 'onLine', { configurable: true, get: () => !offline });
+    if (options.hidden) Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => hidden ? 'hidden' : 'visible' });
+  }, prefetch);
   contexts.push(context);
   await context.addInitScript(({ origin, token, refreshToken, uid, space }) => {
     if (location.origin !== origin || sessionStorage.getItem('__discovery_fixture')) return;
@@ -53,7 +71,10 @@ async function fixture({ pulseState = 'missing', friendError = false, member = f
     const request = route.request(), url = new URL(request.url()), method = request.method(), p = url.pathname;
     if (url.origin !== UI.origin) { errors.push(`Blocked external ${request.resourceType()} request`); return route.abort('blockedbyclient'); }
     if (p !== '/api' && !p.startsWith('/api/')) {
-      if (request.resourceType() === 'document' || /^(\/assets\/|\/icons\/|\/icon\.svg$|\/favicon|\/manifest|\/app-lock-bootstrap\.(js|css)$|\/sw\.js$)/.test(p)) return route.continue();
+      if (request.resourceType() === 'document' || /^(\/assets\/|\/icons\/|\/icon\.svg$|\/favicon|\/manifest|\/app-lock-bootstrap\.(js|css)$|\/sw\.js$)/.test(p)) {
+        if (p.startsWith('/assets/')) state.assets.push(p);
+        return route.continue();
+      }
       errors.push(`Unexpected static request ${p}`); return route.abort('blockedbyclient');
     }
     state.calls.push(`${method} ${p}`);
@@ -81,6 +102,7 @@ async function fixture({ pulseState = 'missing', friendError = false, member = f
       if (method === 'GET' && p === '/api/moments/today') return send({ localDate: date, legacy: false, scheduleVersion: 3, sessions: [] });
       if (method === 'GET' && p === '/api/moments') return send({ today: date, minMonth: '2020-01', days: [], streak: { current: 0, best: 0 } });
       if (method === 'GET' && p === '/api/events') return send({ upcoming: [], past: [] });
+      if (method === 'GET' && p === '/api/notifications/unread') return send({ notifications: 0, notificationsSaturated: false });
       if (method === 'GET' && p === '/api/friends/unread') return send({ friendRequests: 0, notifications: 0, notificationsSaturated: false });
       if (method === 'GET' && p === '/api/friends') return send({ friends: [], incoming: [], outgoing: [] });
       if (method === 'GET' && p === '/api/friends/stories') return send({ items: [], nextCursor: null });
@@ -178,8 +200,57 @@ try {
       assert.equal(state.deletes, 0); await shot(page, scenario.member ? 'member-no-delete' : 'void-history-no-delete');
     });
   }
+  const candidatePattern = /\/(?:QuestsPage|StoriesPage|FriendsPeoplePage|FriendEventsPage)-[^/]+\.js$/;
+  const forbiddenPattern = /\/(?:FinanceAssistantPage|FinanceGuidePage|NotificationSettingsPage|MoodHistoryPage|AdminApp|StoryDetailPage|SavingsDetailPage)-[^/]+\.js$/;
+  for (const options of [
+    { label: 'couple-visible', space: 'couple', desktop: true },
+    { label: 'friends-visible', space: 'friends' },
+    { label: 'data-saver', space: 'couple', saveData: true },
+    { label: 'slow-network', space: 'couple', effectiveType: '3g' },
+    { label: 'hidden', space: 'couple', hidden: true },
+    { label: 'offline', space: 'couple', offline: true },
+  ]) {
+    await check(`Bounded prefetch ${options.label}`, async () => {
+      const { page, state } = await fixture({ space: options.space, desktop: options.desktop, prefetch: options });
+      await page.goto(UI.origin + (options.space === 'friends' ? '/friends' : '/'));
+      await page.getByRole('navigation', { name: options.space === 'friends' ? 'Điều hướng Hội bạn bè' : 'Khám phá cùng nhau' }).waitFor();
+      await page.waitForTimeout(300);
+      const blocked = options.saveData || options.effectiveType === '3g' || options.hidden || options.offline;
+      if (options.hidden || options.offline) {
+        // Startup verification intentionally requires foreground connectivity.
+        // Constrain after the shell mounts but before any speculative callback runs.
+        assert.equal(await page.evaluate(() => window.__prefetchFixture.queued()), 1);
+        await page.evaluate(() => { window.__prefetchFixture.constrain(); window.__prefetchFixture.run(); });
+        assert.equal(await page.evaluate(() => window.__prefetchFixture.queued()), 0);
+      } else if (blocked) {
+        assert.equal(await page.evaluate(() => window.__prefetchFixture.queued()), 0);
+      } else {
+        for (let i = 0; i < 4; i++) {
+          await page.evaluate(() => window.__prefetchFixture.run());
+          await page.waitForTimeout(250);
+        }
+        const warmed = [...new Set(state.assets.filter(p => candidatePattern.test(p)))];
+        const expected = options.space === 'friends' ? ['FriendsPeoplePage', 'FriendEventsPage'] : ['QuestsPage', 'StoriesPage'];
+        assert.equal(warmed.length, 2, 'Only the two selected route entry chunks should be warmed');
+        for (const name of expected) assert(warmed.some(p => p.includes(`/${name}-`)), `${name} was not prefetched`);
+      }
+      assert.equal(state.assets.some(p => forbiddenPattern.test(p)), false, 'Secondary routes should not be speculatively warmed');
+      if (blocked) assert.equal(state.assets.some(p => candidatePattern.test(p)), false);
+      prefetchResults.push({ label: options.label, viewport: page.viewportSize(), routeEntryChunks: [...new Set(state.assets.filter(p => candidatePattern.test(p)))].map(p => p.split('/').at(-1)), apiCalls: [...state.calls] });
+      await shot(page, `prefetch-${options.label}`);
+      if (options.saveData) {
+        // A disabled speculative pass must not disable ordinary lazy navigation.
+        await page.goto(UI.origin + '/finance/guide');
+        await page.getByRole('heading', { name: 'Hướng dẫn liên kết', exact: true }).waitFor();
+        assert(state.assets.some(p => /\/FinanceGuidePage-[^/]+\.js$/.test(p)));
+        assert.equal(await page.evaluate(() => window.__prefetchFixture.queued()), 0);
+        await shot(page, 'direct-route-with-prefetch-disabled');
+      }
+      await page.close();
+    });
+  }
   assert.deepEqual(errors, []);
-  await writeFile(path.join(evidence, 'result.json'), JSON.stringify({ ok: true, checks, errors, limits, viewport: { width: 360, height: 780 } }, null, 2));
+  await writeFile(path.join(evidence, 'result.json'), JSON.stringify({ ok: true, checks, errors, limits, prefetchResults, viewport: { width: 360, height: 780 } }, null, 2));
   console.log(`PASS ${checks.length} checks; evidence ${evidence}`);
 } catch (error) {
   const message = diagnostic(error); console.error(`FAIL ${currentStep}: ${message}\nEvidence: ${evidence}`);

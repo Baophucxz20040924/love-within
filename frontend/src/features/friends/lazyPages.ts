@@ -19,6 +19,7 @@ const loaders = {
   event: () => import('../../pages/FriendEventPage'),
   outings: () => import('../../pages/FriendOutingsPage'),
   outing: () => import('../../pages/FriendOutingPage'),
+  scam: () => import('../scam/ScamGamePage'),
 };
 
 function page<K extends string, M extends Record<K, ComponentType>>(load: () => Promise<M>, name: K) {
@@ -39,10 +40,12 @@ export const FriendEventsPage = page(loaders.events, 'FriendEventsPage');
 export const FriendEventPage = page(loaders.event, 'FriendEventPage');
 export const FriendOutingsPage = page(loaders.outings, 'FriendOutingsPage');
 export const FriendOutingPage = page(loaders.outing, 'FriendOutingPage');
+export const ScamGamePage = page(loaders.scam, 'ScamGamePage');
 /** Public landing of /j/<code>: loaded on its own (not prefetched with the space). */
 export const InviteLandingPage = page(() => import('../../pages/InviteLandingPage'), 'InviteLandingPage');
 
-/** Fetch the other friends pages in the background once the space is open. */
-export function prefetchFriendsPages(): void {
-  for (const load of Object.values(loaders)) void load().catch(() => undefined);
-}
+/** The entire speculative budget for one friends shell activation. */
+export const friendsPrefetchCandidates = [
+  { path: '/friends/people', load: loaders.people },
+  { path: '/friends/events', load: loaders.events },
+] as const;

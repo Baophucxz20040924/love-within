@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto';
+import { decodeHistoryCursor } from '../utils/historyCursor.js';
+import { commentPage } from '../utils/commentPage.js';
 import { Types } from 'mongoose';
 import { env } from '../config/env.js';
 import type { FriendStoryDoc } from '../models/FriendStory.js';
@@ -639,10 +641,37 @@ export const friendStoryService = {
     return { option: optionId, count: all.length, items: shown.map((v) => profileOf(profiles, v)) };
   },
 
-  /**
-   * Root comments oldest first, each with its replies (one level), at most 500 comments in all. Without people blocked
-   * either way and without comments hidden after reports (except my own). A reply whose root I cannot see is left out too.
-   */
+  /** One bounded newest-first root or reply page, with live resource and parent visibility. */
+  async listCommentsPage(me: UserDoc, storyId: string, input: { limit: number; cursor?: string }, rootId?: string) {
+    const story = await requireVisible(me, storyId);
+    const blocked = await friendBlockRepository.blockedIdsFor(me._id);
+    if (rootId) {
+      const root = await friendStoryCommentRepository.findById(story._id, rootId);
+      if (!root || root.parentId || !commentVisibleTo(me, root, blocked)) throw Errors.notFound(COMMENT_NOT_FOUND);
+    }
+    const scope = `friend-story-comments:${story._id}:${me._id}:${rootId?.toLowerCase() ?? 'roots'}`;
+    const page = commentPage(await friendStoryCommentRepository.listPage(story._id, rootId ? new Types.ObjectId(rootId) : null,
+      me._id, toObjectIds(blocked), input.limit, decodeHistoryCursor(input.cursor, scope)), input.limit, scope);
+    const profiles = await profileService.load(page.items.map(c => c.authorId));
+    return { ...page, items: page.items.map(c => toCommentView(c, me._id.toString(), story.authorId.toString(), profiles, blocked)) };
+  },
+
+  async commentContext(me: UserDoc, storyId: string, commentId: string) {
+    const story = await requireVisible(me, storyId);
+    const blocked = await friendBlockRepository.blockedIdsFor(me._id);
+    const target = await friendStoryCommentRepository.findById(story._id, commentId);
+    if (!target || !commentVisibleTo(me, target, blocked)) throw Errors.notFound(COMMENT_NOT_FOUND);
+    const root = target.parentId ? await friendStoryCommentRepository.findById(story._id, target.parentId) : target;
+    if (!root || root.parentId || !commentVisibleTo(me, root, blocked)) throw Errors.notFound(COMMENT_NOT_FOUND);
+    const scope = `friend-story-comments:${story._id}:${me._id}:${root._id}`;
+    const page = commentPage(await friendStoryCommentRepository.listPage(story._id, root._id, me._id, toObjectIds(blocked), 20,
+      target.parentId ? { createdAt: target.createdAt, id: target._id.toString() } : undefined, true), 20, scope);
+    const profiles = await profileService.load([root.authorId, ...page.items.map(c => c.authorId)]);
+    const view = (c: FriendStoryCommentDoc) => toCommentView(c, me._id.toString(), story.authorId.toString(), profiles, blocked);
+    return { root: view(root), replies: { ...page, items: page.items.map(view) } };
+  },
+
+  /** Legacy oldest-first threads, at most 500 comments including replies. */
   async listComments(me: UserDoc, storyId: string): Promise<FriendCommentThreadView[]> {
     const story = await requireVisible(me, storyId);
     const blocked = await friendBlockRepository.blockedIdsFor(me._id);

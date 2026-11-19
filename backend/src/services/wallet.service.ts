@@ -14,6 +14,21 @@ import type { OperationPayload, OperationResult, WalletOperationDoc, RewardProve
 import { dailyRewardService } from './dailyReward.service.js';
 import { walletRepository, splitCoin, walletReview } from '../repositories/wallet.repository.js';
 import { Errors } from '../utils/errors.js';
+import { observeRecovery, recoveryNow } from '../utils/monitor.js';
+import { decodeHistoryCursor, encodeHistoryCursor } from '../utils/historyCursor.js';
+
+type RecoveryStage = 'whole' | 'checkin' | 'quest' | 'bucket' | 'daily';
+type RecoveryCounts = { examined: number; terminal: number; deferred: number; errors: number; saturated: number };
+const emptyRecoveryCounts = (): RecoveryCounts => ({ examined: 0, terminal: 0, deferred: 0, errors: 0, saturated: 0 });
+// Telemetry is best effort, including the clock, and must never interfere with recovery.
+function recoveryStart(): number { try { return recoveryNow(); } catch { return NaN; } }
+function recoveryObserve(stage: RecoveryStage, outcome: 'ok' | 'empty' | 'partial' | 'error', start: number, counts: RecoveryCounts): void {
+  try { observeRecovery(stage, outcome, recoveryNow() - start, counts); } catch { /* best effort */ }
+}
+function addRecoveryCounts(total: RecoveryCounts, counts: RecoveryCounts): void {
+  total.examined += counts.examined; total.terminal += counts.terminal; total.deferred += counts.deferred;
+  total.errors += counts.errors; total.saturated += counts.saturated;
+}
 
 export interface ApplyInput {
   coupleId: Types.ObjectId;
@@ -178,34 +193,74 @@ async function ownWallet(coupleId: Types.ObjectId, userId: string): Promise<Wall
 export const walletService = {
   /** Bounded online recovery also covers a crash before the first wallet write, including older days. */
   async recoverRewards(coupleId: Types.ObjectId): Promise<void> {
-    const filter = { coupleId, rewardIntent: { $ne: null }, rewardCompletedAt: null };
-    const sources = [
-      { rows: () => Checkin.find(filter).sort({ _id: 1 }).limit(20).exec(), complete: (id: Types.ObjectId) => Checkin.updateOne({ _id: id, rewardCompletedAt: null }, { $set: { rewardCompletedAt: new Date() } }).exec(), reason: 'checkin' as const },
-      { rows: () => QuestProgress.find(filter).sort({ _id: 1 }).limit(20).exec(), complete: (id: Types.ObjectId) => QuestProgress.updateOne({ _id: id, rewardCompletedAt: null }, { $set: { rewardCompletedAt: new Date() } }).exec(), reason: 'quest' as const },
-      { rows: () => BucketItem.find({ ...filter, rewardDenied: { $ne: true } }).sort({ _id: 1 }).limit(20).exec(), complete: (id: Types.ObjectId) => BucketItem.updateOne({ _id: id, rewardCompletedAt: null }, { $set: { rewardCompletedAt: new Date() } }).exec(), reason: 'bucket_list' as const },
-    ];
-    for (const source of sources) {
-      const { reason } = source;
-      const rows = await source.rows();
-      for (const row of rows) {
-        const intent = row.rewardIntent;
-        if (!intent) continue;
-        if (reason === 'bucket_list') {
-          const couple = await Couple.findById(coupleId).exec();
-          if (!couple) throw walletReview();
-          try { if (!(await finishBucketCompletion(couple, row as import('../models/BucketItem.js').BucketItemDoc))) continue; }
-          catch { continue; } // An unavailable story cannot block unrelated personal-wallet reads.
+    const started = recoveryStart();
+    const total = emptyRecoveryCounts();
+    let wholeFailed = false;
+    try {
+      const filter = { coupleId, rewardIntent: { $ne: null }, rewardCompletedAt: null };
+      const sources = [
+        { rows: () => Checkin.find(filter).sort({ _id: 1 }).limit(20).exec(), complete: (id: Types.ObjectId) => Checkin.updateOne({ _id: id, rewardCompletedAt: null }, { $set: { rewardCompletedAt: new Date() } }).exec(), reason: 'checkin' as const },
+        { rows: () => QuestProgress.find(filter).sort({ _id: 1 }).limit(20).exec(), complete: (id: Types.ObjectId) => QuestProgress.updateOne({ _id: id, rewardCompletedAt: null }, { $set: { rewardCompletedAt: new Date() } }).exec(), reason: 'quest' as const },
+        { rows: () => BucketItem.find({ ...filter, rewardDenied: { $ne: true } }).sort({ _id: 1 }).limit(20).exec(), complete: (id: Types.ObjectId) => BucketItem.updateOne({ _id: id, rewardCompletedAt: null }, { $set: { rewardCompletedAt: new Date() } }).exec(), reason: 'bucket_list' as const },
+      ];
+      for (const source of sources) {
+        const { reason } = source;
+        const stage = reason === 'bucket_list' ? 'bucket' : reason;
+        const stageStarted = recoveryStart();
+        const counts = emptyRecoveryCounts();
+        let failed = false;
+        try {
+          const rows = await source.rows();
+          if (rows.length === 20) counts.saturated++;
+          for (const row of rows) {
+            counts.examined++;
+            const intent = row.rewardIntent;
+            if (!intent) { counts.deferred++; continue; }
+            if (reason === 'bucket_list') {
+              const couple = await Couple.findById(coupleId).exec();
+              if (!couple) throw walletReview();
+              try { if (!(await finishBucketCompletion(couple, row as import('../models/BucketItem.js').BucketItemDoc))) { counts.deferred++; continue; } }
+              catch { counts.errors++; counts.deferred++; continue; } // An unavailable story cannot block unrelated personal-wallet reads.
+            }
+            if (reason === 'bucket_list' && !(await bucketRewardDayRepository.take(coupleId, intent.localDate!, ECONOMY.bucket.maxRewardsPerDay, intent.operationId))) {
+              const denied = await BucketItem.updateOne({ _id: row._id, rewardCompletedAt: null }, { $set: { rewardDenied: true } }).exec();
+              if (denied?.modifiedCount > 0) counts.terminal++;
+              continue;
+            }
+            await walletService.reward({ ...intent, coupleId, reason, refId: row._id });
+            const completed = await source.complete(row._id);
+            if (completed?.modifiedCount > 0) counts.terminal++;
+          }
+        } catch (error) {
+          failed = true;
+          counts.errors++;
+          throw error;
+        } finally {
+          addRecoveryCounts(total, counts);
+          recoveryObserve(stage, failed ? 'error' : counts.errors || counts.deferred ? 'partial' : counts.examined ? 'ok' : 'empty', stageStarted, counts);
         }
-        if (reason === 'bucket_list' && !(await bucketRewardDayRepository.take(coupleId, intent.localDate!, ECONOMY.bucket.maxRewardsPerDay, intent.operationId))) {
-          await BucketItem.updateOne({ _id: row._id, rewardCompletedAt: null }, { $set: { rewardDenied: true } }).exec();
-          continue;
-        }
-        await walletService.reward({ ...intent, coupleId, reason, refId: row._id });
-        await source.complete(row._id);
       }
+      const stageStarted = recoveryStart();
+      const counts = emptyRecoveryCounts();
+      let failed = false;
+      let invoked = false;
+      try {
+        const couple = await Couple.findById(coupleId).exec();
+        if (couple) { invoked = true; await dailyRewardService.recoverCouple(couple); }
+      } catch (error) {
+        failed = true;
+        counts.errors++;
+        throw error;
+      } finally {
+        addRecoveryCounts(total, counts);
+        recoveryObserve('daily', failed ? 'error' : invoked ? 'ok' : 'empty', stageStarted, counts);
+      }
+    } catch (error) {
+      wholeFailed = true;
+      throw error;
+    } finally {
+      recoveryObserve('whole', wholeFailed ? 'error' : total.errors || total.deferred ? 'partial' : 'ok', started, total);
     }
-    const couple = await Couple.findById(coupleId).exec();
-    if (couple) await dailyRewardService.recoverCouple(couple);
   },
   async applyCoin(input: ApplyInput): Promise<{ balance: number }> {
     if (!Number.isSafeInteger(input.delta) || input.delta === 0) throw Errors.badRequest('Delta phải là số nguyên khác 0');
@@ -227,15 +282,32 @@ export const walletService = {
     await realtimeAudience.couple(input.coupleId, ['wallet', 'couple']);
     return { coin: result.balances[input.actorUserId], exp: result.exp, level: result.level, leveledUp: result.leveledUp };
   },
-  async getView(coupleId: Types.ObjectId, userId: string): Promise<WalletView> {
+  async reconcileView(coupleId: Types.ObjectId, userId: string): Promise<void> {
     await ownWallet(coupleId, userId);
     await walletService.recoverRewards(coupleId);
-    const wallet = await ownWallet(coupleId, userId);
-    const couple = await Couple.findById(coupleId).exec();
-    const exp = couple?.exp ?? 0;
+  },
+  async getSettledView(coupleId: Types.ObjectId, userId: string) {
+    await walletService.reconcileView(coupleId, userId);
+    const { wallet, couple } = await walletRepository.readSettled(coupleId, userId);
+    const exp = couple.exp;
     const level = levelFromExp(exp);
-    return { coinBalance: wallet.balances[userId], ownerUserId: userId, exp, level,
+    const view: WalletView = { coinBalance: wallet.balances[userId], ownerUserId: userId, exp, level,
       levelBaseExp: ECONOMY.levels[level - 1] ?? 0, nextLevelExp: level < ECONOMY.levels.length ? ECONOMY.levels[level] : null };
+    return { wallet: view, couple };
+  },
+  async getView(coupleId: Types.ObjectId, userId: string): Promise<WalletView> {
+    return (await walletService.getSettledView(coupleId, userId)).wallet;
+  },
+  async listLedgerPage(coupleId: Types.ObjectId, userId: string, input: { type?: LedgerType; limit: number; cursor?: string }) {
+    const scope = `ledger:${coupleId}:${userId}:${input.type ?? 'all'}`;
+    const before = decodeHistoryCursor(input.cursor, scope);
+    await ownWallet(coupleId, userId);
+    await walletService.recoverRewards(coupleId);
+    const rows = await walletRepository.listLedgerPage(coupleId, userId, input.type, input.limit, before);
+    const page = rows.slice(0, input.limit);
+    const last = page[page.length - 1];
+    return { items: page.map(toLedgerView), nextCursor: rows.length > input.limit && last
+      ? encodeHistoryCursor(scope, { createdAt: last.createdAt, id: last._id.toString() }) : null };
   },
   async listLedger(coupleId: Types.ObjectId, userId: string, type?: LedgerType): Promise<LedgerView[]> {
     await ownWallet(coupleId, userId);

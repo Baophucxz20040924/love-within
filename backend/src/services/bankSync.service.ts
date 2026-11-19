@@ -88,27 +88,44 @@ export const bankSyncService = {
 // ── Background poll ──────────────────────────────────────────────
 
 let timer: NodeJS.Timeout | null = null;
-let running = false;
+let firstTimer: NodeJS.Timeout | null = null;
+let jitterTimer: NodeJS.Timeout | null = null;
+let releaseJitter: (() => void) | null = null;
+let activeCycle: Promise<void> | null = null;
+let generation = 0;
+let started = false;
 
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
-async function runCycle(): Promise<void> {
-  if (running) return; // never overlap cycles
-  running = true;
+const admitted = (epoch: number) => started && epoch === generation;
+function jitter(): Promise<void> {
+  return new Promise(resolve => {
+    releaseJitter = () => {
+      if (jitterTimer) clearTimeout(jitterTimer);
+      jitterTimer = null; releaseJitter = null; resolve();
+    };
+    jitterTimer = setTimeout(() => releaseJitter?.(), Math.floor(Math.random() * 3000));
+  });
+}
+async function runCycle(epoch: number): Promise<void> {
   try {
     const conns = await bankConnectionRepository.listActive();
     const freshMs = (env.bank.pollIntervalSec * 1000) / 2;
     for (const conn of conns) {
+      if (!admitted(epoch)) return;
       // Skip connections an on-demand sync refreshed very recently.
       if (conn.lastPolledAt && Date.now() - conn.lastPolledAt.getTime() < freshMs) continue;
       await bankSyncService.syncConnection(conn);
-      await sleep(Math.floor(Math.random() * 3000)); // spread requests to thueapibank
+      if (!admitted(epoch)) return;
+      await jitter();
     }
   } catch (err) {
     logger.error('Bank poll cycle failed', { message: (err as Error).message });
-  } finally {
-    running = false;
   }
+}
+function beginCycle(epoch: number): void {
+  if (!admitted(epoch) || activeCycle) return;
+  const cycle = runCycle(epoch);
+  activeCycle = cycle;
+  void cycle.finally(() => { if (activeCycle === cycle) activeCycle = null; });
 }
 
 /** Start polling. Only PM2 instance 0 (or a non-cluster process) polls; the unique index guards duplicates anyway. */
@@ -120,14 +137,32 @@ export function startBankSync(): void {
     logger.info('Bank poll disabled on this instance', { instance });
     return;
   }
-  if (timer) return;
+  if (started) return;
+  started = true;
+  const epoch = ++generation;
   const intervalMs = Math.max(30, env.bank.pollIntervalSec) * 1000;
-  timer = setInterval(() => void runCycle(), intervalMs);
-  setTimeout(() => void runCycle(), 10_000).unref();
+  timer = setInterval(() => beginCycle(epoch), intervalMs);
+  firstTimer = setTimeout(() => {
+    if (!admitted(epoch)) return;
+    firstTimer = null;
+    beginCycle(epoch);
+  }, 10_000);
+  firstTimer.unref();
   logger.info('Bank poll started', { intervalSec: intervalMs / 1000, provider: env.bank.provider });
 }
 
-export function stopBankSync(): void {
+/** A bounded join does not cancel an already-started provider/persistence operation. */
+export async function stopBankSync(): Promise<void> {
+  started = false;
+  ++generation;
   if (timer) clearInterval(timer);
-  timer = null;
+  if (firstTimer) clearTimeout(firstTimer);
+  timer = firstTimer = null;
+  releaseJitter?.();
+  const cycle = activeCycle;
+  if (!cycle) return;
+  let deadline: NodeJS.Timeout | undefined;
+  try {
+    await Promise.race([cycle, new Promise<void>(resolve => { deadline = setTimeout(resolve, 10_000); })]);
+  } finally { if (deadline) clearTimeout(deadline); }
 }

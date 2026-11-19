@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto';
+import { decodeHistoryCursor } from '../utils/historyCursor.js';
+import { commentPage } from '../utils/commentPage.js';
 import { Types } from 'mongoose';
 import { env } from '../config/env.js';
 import {
@@ -557,7 +559,39 @@ export const friendEventService = {
     logger.warn('Friend event deleted (soft)', { userId: me._id.toString(), eventId: id });
   },
 
-  /** Discussion: roots oldest first with their replies, at most 500, without people blocked either way. */
+  /** One bounded newest-first root or reply page, with live resource and parent visibility. */
+  async listCommentsPage(me: UserDoc, id: string, input: { limit: number; cursor?: string }, rootId?: string) {
+    const ev = await requireVisible(me, id);
+    const blocked = await friendBlockRepository.blockedIdsFor(me._id);
+    if (rootId) {
+      const root = await friendEventCommentRepository.findById(ev._id, rootId);
+      if (!root || root.parentId || !commentVisibleTo(me, root, blocked)) throw Errors.notFound(COMMENT_NOT_FOUND);
+    }
+    const scope = `friend-event-comments:${ev._id}:${me._id}:${rootId?.toLowerCase() ?? 'roots'}`;
+    const page = commentPage(await friendEventCommentRepository.listPage(ev._id, rootId ? new Types.ObjectId(rootId) : null,
+      me._id, toObjectIds(blocked), input.limit, decodeHistoryCursor(input.cursor, scope)), input.limit, scope);
+    const audience = await mentionAudience(ev, blocked);
+    const profiles = await profileService.load(page.items.flatMap(c => [c.authorId, ...(c.mentions ?? []).map(m => m.userId)]), { skipMissing: true });
+    return { ...page, items: page.items.map(c => toCommentView(c, me._id.toString(), ev.creatorId.toString(), profiles, audience)) };
+  },
+
+  async commentContext(me: UserDoc, id: string, commentId: string) {
+    const ev = await requireVisible(me, id);
+    const blocked = await friendBlockRepository.blockedIdsFor(me._id);
+    const target = await friendEventCommentRepository.findById(ev._id, commentId);
+    if (!target || !commentVisibleTo(me, target, blocked)) throw Errors.notFound(COMMENT_NOT_FOUND);
+    const root = target.parentId ? await friendEventCommentRepository.findById(ev._id, target.parentId) : target;
+    if (!root || root.parentId || !commentVisibleTo(me, root, blocked)) throw Errors.notFound(COMMENT_NOT_FOUND);
+    const scope = `friend-event-comments:${ev._id}:${me._id}:${root._id}`;
+    const page = commentPage(await friendEventCommentRepository.listPage(ev._id, root._id, me._id, toObjectIds(blocked), 20,
+      target.parentId ? { createdAt: target.createdAt, id: target._id.toString() } : undefined, true), 20, scope);
+    const audience = await mentionAudience(ev, blocked);
+    const profiles = await profileService.load([root, ...page.items].flatMap(c => [c.authorId, ...(c.mentions ?? []).map(m => m.userId)]), { skipMissing: true });
+    const view = (c: FriendEventCommentDoc) => toCommentView(c, me._id.toString(), ev.creatorId.toString(), profiles, audience);
+    return { root: view(root), replies: { ...page, items: page.items.map(view) } };
+  },
+
+  /** Legacy oldest-first threads, at most 500 comments including replies. */
   async listComments(me: UserDoc, id: string): Promise<FriendCommentThreadView[]> {
     const ev = await requireVisible(me, id);
     const blocked = await friendBlockRepository.blockedIdsFor(me._id);

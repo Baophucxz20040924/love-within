@@ -4,6 +4,7 @@ import { Couple } from '../models/Couple.js';
 import { LedgerEntry, type LedgerType } from '../models/LedgerEntry.js';
 import { WalletOperation, type OperationPayload, type OperationResult } from '../models/WalletOperation.js';
 import { AppError, Errors } from '../utils/errors.js';
+import type { HistoryPosition } from '../utils/historyCursor.js';
 
 export const walletReview = () => new AppError(503, 'WALLET_REVIEW_REQUIRED', 'Ví đang chờ đối soát. Vui lòng thử lại sau.');
 export const duplicateKey = (error: unknown) => typeof error === 'object' && error !== null && (error as { code?: number }).code === 11000;
@@ -18,7 +19,25 @@ export function splitCoin(total: number, ids: readonly (string | Types.ObjectId)
   return { [first]: Math.ceil(total / 2), [second]: Math.floor(total / 2) };
 }
 
+function validateWallet(wallet: WalletDoc | null, members: string[]): WalletDoc {
+  if (!wallet || wallet.version !== 2 || JSON.stringify(wallet.memberIds) !== JSON.stringify(members)
+    || !Number.isSafeInteger(wallet.revision) || wallet.revision < 0
+    || Object.keys(wallet.balances ?? {}).length !== 2
+    || members.some(id => !Number.isSafeInteger(wallet.balances[id]) || wallet.balances[id] < 0)) throw walletReview();
+  return wallet;
+}
+
 export const walletRepository = {
+  /** No creation, migration or receipt completion on this seam. */
+  async readSettled(coupleId: Types.ObjectId, userId: string) {
+    const couple = await Couple.findById(coupleId).exec();
+    if (!couple) throw Errors.notFound('Couple không tồn tại');
+    const members = sortedMembers(couple.memberIds);
+    if (!members.includes(userId)) throw Errors.forbidden();
+    const wallet = validateWallet(await Wallet.findOne({ coupleId }).exec(), members);
+    if (wallet.pending) throw walletReview();
+    return { wallet, couple };
+  },
   async getOrCreate(coupleId: Types.ObjectId): Promise<WalletDoc> {
     const couple = await Couple.findById(coupleId).exec();
     if (!couple) throw Errors.notFound('Couple không tồn tại');
@@ -52,11 +71,7 @@ export const walletRepository = {
       } }]).exec();
       wallet = await Wallet.findOne({ coupleId }).exec();
     }
-    if (!wallet || wallet.version !== 2 || JSON.stringify(wallet.memberIds) !== JSON.stringify(members)
-      || !Number.isSafeInteger(wallet.revision) || wallet.revision < 0
-      || Object.keys(wallet.balances ?? {}).length !== 2
-      || members.some((id) => !Number.isSafeInteger(wallet!.balances[id]) || wallet!.balances[id] < 0)) throw walletReview();
-    return wallet;
+    return validateWallet(wallet, members);
   },
 
   findOperation(id: string) { return WalletOperation.findById(id).exec(); },
@@ -90,6 +105,15 @@ export const walletRepository = {
     try {
       await LedgerEntry.updateOne({ operationKey: input.operationKey }, { $setOnInsert: input }, { upsert: true }).exec();
     } catch (error) { if (!duplicateKey(error)) throw error; }
+  },
+  listLedgerPage(coupleId: Types.ObjectId, ownerUserId: string, type: LedgerType | undefined, limit: number, before?: HistoryPosition) {
+    return LedgerEntry.find({ coupleId, ...(type ? { type } : {}), $and: [
+      { $or: [{ type: 'exp' }, { ownerUserId: new Types.ObjectId(ownerUserId) }, { type: 'coin', ownerUserId: null }] },
+      ...(before ? [{ $or: [
+        { createdAt: { $lt: before.createdAt } },
+        { createdAt: before.createdAt, _id: { $lt: new Types.ObjectId(before.id) } },
+      ] }] : []),
+    ] }).sort({ createdAt: -1, _id: -1 }).limit(limit + 1).exec();
   },
   listLedger(coupleId: Types.ObjectId, ownerUserId: string, type?: LedgerType, limit = 50) {
     return LedgerEntry.find({ coupleId, ...(type ? { type } : {}), $or: [

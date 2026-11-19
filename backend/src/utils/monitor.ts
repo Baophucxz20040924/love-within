@@ -1,4 +1,4 @@
-import { monitorEventLoopDelay, type IntervalHistogram } from 'node:perf_hooks';
+import { monitorEventLoopDelay, performance, type IntervalHistogram } from 'node:perf_hooks';
 import mongoose from 'mongoose';
 import { env } from '../config/env.js';
 import { logger } from './logger.js';
@@ -18,16 +18,25 @@ type PulseSection = typeof PULSE_SECTIONS[number];
 type PulseOutcome = 'ok' | 'empty' | 'error';
 type SavingsStage = 'acquire' | 'held';
 type SavingsOutcome = 'ok' | 'busy' | 'not_found' | 'rejected' | 'recovery_required';
+type RecoveryStage = 'whole' | 'checkin' | 'quest' | 'bucket' | 'daily';
+type RecoveryOutcome = 'ok' | 'empty' | 'partial' | 'error';
+type RecoveryCounts = { examined: number; terminal: number; deferred: number; errors: number; saturated: number };
+const RECOVERY_STAGES: readonly RecoveryStage[] = ['whole', 'checkin', 'quest', 'bucket', 'daily'];
+const RECOVERY_OUTCOMES: readonly RecoveryOutcome[] = ['ok', 'empty', 'partial', 'error'];
+const RECOVERY_COUNTS: readonly (keyof RecoveryCounts)[] = ['examined', 'terminal', 'deferred', 'errors', 'saturated'];
+const recoveryCounts = new Map<RecoveryStage, RecoveryCounts>();
 interface Timing { count: number; totalMs: number; maxMs: number; buckets: number[] }
 const timings = new Map<string, Timing>();
 // Fixed allowlist bounds cardinality even if a future caller supplies untrusted strings at runtime.
 const timingKeys = new Set([
   ...PULSE_SECTIONS.flatMap((section) => ['ok', 'empty', 'error'].map((outcome) => `pulse.${section}.${outcome}`)),
   ...['acquire', 'held'].flatMap((stage) => ['ok', 'busy', 'not_found', 'rejected', 'recovery_required'].map((outcome) => `savings.${stage}.${outcome}`)),
+  ...RECOVERY_STAGES.flatMap((stage) => RECOVERY_OUTCOMES.map((outcome) => `recovery.${stage}.${outcome}`)),
 ]);
 function recordTiming(key: string, ms: number): void {
   if (!timingKeys.has(key) || !Number.isFinite(ms) || ms < 0) return;
   let sample = timings.get(key);
+  if (sample && (!Number.isSafeInteger(sample.count + 1) || !Number.isFinite(sample.totalMs + ms))) return;
   if (!sample) {
     sample = { count: 0, totalMs: 0, maxMs: 0, buckets: TIMING_BUCKETS_MS.map(() => 0) };
     timings.set(key, sample);
@@ -43,11 +52,27 @@ export function observePulseSection(section: PulseSection, outcome: PulseOutcome
 export function observeSavingsWrite(stage: SavingsStage, outcome: SavingsOutcome, ms: number): void {
   recordTiming(`savings.${stage}.${outcome}`, ms);
 }
+export function recoveryNow(): number { return performance.now(); }
+
+/** Only fixed stages and aggregate counts are accepted; daily success is not a payout count. */
+export function observeRecovery(stage: RecoveryStage, outcome: RecoveryOutcome, ms: number, counts: RecoveryCounts): void {
+  if (!RECOVERY_STAGES.includes(stage) || !RECOVERY_OUTCOMES.includes(outcome)
+    || !Number.isFinite(ms) || ms < 0 || !counts
+    || RECOVERY_COUNTS.some((key) => !Number.isSafeInteger(counts[key]) || counts[key] < 0)) return;
+  const previous = recoveryCounts.get(stage);
+  if (previous && RECOVERY_COUNTS.some((key) => !Number.isSafeInteger(previous[key] + counts[key]))) return;
+  recordTiming(`recovery.${stage}.${outcome}`, ms);
+  const next = previous ?? { examined: 0, terminal: 0, deferred: 0, errors: 0, saturated: 0 };
+  for (const key of RECOVERY_COUNTS) next[key] += counts[key];
+  recoveryCounts.set(stage, next);
+}
 export function operationMetricsSnapshot() {
   return {
     bucketUpperBoundsMs: [...TIMING_BUCKETS_MS],
     maxSeries: timingKeys.size,
     savingsHeldMeasurement: 'observed ownership until release or failure; retained recovery tokens continue holding beyond this sample',
+    recoveryCountMeaning: 'saturated counts queries reaching their limit, not backlog; daily success does not count payouts',
+    recoveryCounts: Object.fromEntries([...recoveryCounts].map(([stage, counts]) => [stage, { ...counts }])),
     timings: Object.fromEntries([...timings].map(([key, value]) => [key, { ...value, buckets: [...value.buckets] }])),
   };
 }

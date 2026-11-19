@@ -8,6 +8,7 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
+    "test:offline": "npm run build && node tests/offline.cjs",
     "test:outings": "node tests/outings/operation.cjs",
     "test:discovery": "node --test tests/discovery/navigation.cjs",
     "test:discovery:browser": "node tests/discovery/browser.mjs --local-mock-runtime",

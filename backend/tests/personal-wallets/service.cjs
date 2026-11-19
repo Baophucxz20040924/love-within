@@ -28,6 +28,7 @@ const Couple = {
 };
 const repo = {
   getOrCreate: async () => { walletReads++; return copy(wallet); },
+  readSettled: async () => { assert.equal(wallet.pending, null); return { wallet: copy(wallet), couple: { ...couple } }; },
   findOperation: async id => ops.has(id) ? copy(ops.get(id)) : null,
   ensureOperation: async (id, cid, payload, fingerprint) => {
     if (!ops.has(id)) ops.set(id, { _id: id, coupleId: String(cid), payload: copy(payload), fingerprint, status: 'pending', result: null });

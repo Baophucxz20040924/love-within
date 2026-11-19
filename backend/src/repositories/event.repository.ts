@@ -63,6 +63,12 @@ export const eventRepository = {
    * Job couple-events.remind (N2): the reminder-on events of a page of couples that can occur between `fromDay` and
    * `toDay` (yearly events always can). Uses the { coupleId, deletedAt } index; capped by `limit`.
    */
+  listRemindablePage(coupleId: Types.ObjectId, fromDay: string, toDay: string, limit: number, after?: Types.ObjectId): Promise<RemindableEvent[]> {
+    return CoupleEvent.find({ coupleId, ...alive, remind: true, ...(after ? { _id: { $gt: after } } : {}),
+      $or: [{ repeat: 'yearly' }, { date: { $gte: fromDay, $lte: toDay } }],
+    }).sort({ _id: 1 }).select('coupleId title emoji date time repeat').limit(limit + 1).lean<RemindableEvent[]>().exec();
+  },
+
   listRemindable(coupleIds: Types.ObjectId[], fromDay: string, toDay: string, limit: number): Promise<RemindableEvent[]> {
     return CoupleEvent.find({
       coupleId: { $in: coupleIds },

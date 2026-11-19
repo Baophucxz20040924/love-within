@@ -9,6 +9,7 @@
     "build": "tsc -p tsconfig.json",
     "start": "node dist/server.js",
     "typecheck": "tsc --noEmit",
+    "test:offline": "npm run build && node tests/offline.cjs",
     "test:outings": "node --test tests/outings/*.test.cjs",
     "test:realtime": "node tests/realtime/run.cjs",
     "test:privacy-lock": "npm run build && node tests/privacy-lock/service.cjs",

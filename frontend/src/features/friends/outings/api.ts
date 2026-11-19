@@ -6,9 +6,9 @@ const post = <T extends MutationMeta>(id: string, action: string, body: T) => ap
 export const OUTINGS_KEY = ['friends', 'outings'] as const;
 export const outingKey = (id: string) => ['friends', 'outing', id] as const;
 export const outingsApi = {
-  list: (cursor?: string) => apiRequest<{ items: OutingSummary[]; nextCursor: string | null }>(`${root}?limit=20${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`),
-  forEvent: (eventId: string) => apiRequest<{ items: OutingSummary[]; nextCursor: string | null }>(`${root}?eventId=${encodeURIComponent(eventId)}&limit=20`),
-  get: (id: string) => apiRequest<OutingView>(path(id)),
+  list: (cursor?: string, signal?: AbortSignal) => apiRequest<{ items: OutingSummary[]; nextCursor: string | null }>(`${root}?limit=20${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`, { signal }),
+  forEvent: (eventId: string, signal?: AbortSignal) => apiRequest<{ items: OutingSummary[]; nextCursor: string | null }>(`${root}?eventId=${encodeURIComponent(eventId)}&limit=20`, { signal }),
+  get: (id: string, signal?: AbortSignal) => apiRequest<OutingView>(path(id), { signal }),
   create: (body: CreateOuting & MutationMeta) => apiRequest<OutingResult>(root, { method: 'POST', body }),
   delete: (id: string, meta: MutationMeta) => apiRequest<OutingDeleteResult>(path(id), { method: 'DELETE', body: meta }),
   membership: (id: string, action: 'accept' | 'decline', meta: MutationMeta) => post(id, `members/${action}`, meta),

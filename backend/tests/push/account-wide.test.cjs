@@ -127,7 +127,7 @@ test('findOwn and deleteOwn always qualify endpoint with authenticated owner', a
   for (const call of h.calls) assert.deepEqual(plain(call.args[0]), { userId: String(userId), endpoint });
 });
 
-function serviceHarness() {
+function serviceHarness(globals = {}) {
   const defaults = {
     couple: { approvals: true, stories: true, reminders: true, nudges: true, moments: true, preview: true },
     friends: { social: true, events: true, messages: true, preview: false },
@@ -193,7 +193,7 @@ function serviceHarness() {
         const error = new Error('revoked'); error.status = 401; throw error;
       }
     } } },
-  }, { Date: Clock });
+  }, { Date: Clock, setTimeout, clearTimeout, ...globals });
   const service = exports.pushService;
   const job = space => ({
     userId, space, group: space === 'couple' ? 'stories' : 'social', type: 'private-event',
@@ -357,6 +357,37 @@ test('a reset during the first device batch blocks all later batches', async () 
   await h.drain();
   assert.equal(h.calls.send.length, 5, 'only the already-authorized parallel batch can finish');
   await assert.rejects(() => h.service.test(String(h.userId), h.state.devices[0].endpoint), e => e.code === 'PUSH_STALE');
+});
+
+test('push drain closes admission, joins active and queued work and is idempotent', async () => {
+  const h = serviceHarness();
+  let release;
+  const gate = new Promise(resolve => release = resolve);
+  h.repo.listFor = async () => { await gate; return []; };
+  for (let i = 0; i < 30; i++) h.service.enqueue(h.job('couple'));
+  assert.equal(h.service.pendingCount(), 30);
+  const first = h.drainPush();
+  assert.equal(h.drainPush(), first);
+  h.service.enqueue(h.job('friends'));
+  assert.equal(h.service.pendingCount(), 30);
+  let finished = false; void first.then(() => finished = true);
+  await tick(); assert.equal(finished, false);
+  release(); await first;
+  assert.equal(h.service.pendingCount(), 0);
+  h.service.enqueue(h.job('couple')); assert.equal(h.service.pendingCount(), 0);
+  await serviceHarness().drainPush();
+});
+
+test('push drain timeout does not clear real pending work or reopen admission', async () => {
+  let timeout;
+  const h = serviceHarness({ setTimeout(fn, ms) { assert.equal(ms, 10000); timeout = fn; return 1; }, clearTimeout() {} });
+  let release; const gate = new Promise(resolve => release = resolve);
+  h.repo.listFor = async () => { await gate; return []; };
+  h.service.enqueue(h.job('couple'));
+  const joined = h.drainPush(); timeout(); await joined;
+  assert.equal(h.service.pendingCount(), 1);
+  h.service.enqueue(h.job('friends')); assert.equal(h.service.pendingCount(), 1);
+  release(); await h.drain(); assert.equal(h.service.pendingCount(), 0);
 });
 
 test('subscription route accepts no space and both legacy spaces; settings still require valid space', () => {

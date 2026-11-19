@@ -35,6 +35,13 @@ const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
 const ALLOWED = ['image/jpeg', 'image/png', 'image/webp'];
 // Ids and codes come from page URLs (/friends/posts/:id, /j/:code): encode before building API paths.
 const enc = encodeURIComponent;
+export interface FriendCommentPage { items: FriendComment[]; nextCursor: string | null }
+export interface FriendCommentContext { root: FriendComment; replies: FriendCommentPage }
+const commentPages = (base: string) => ({
+  commentsPage: (id: string, cursor?: string, signal?: AbortSignal) => apiRequest<FriendCommentPage>(`${base}/${enc(id)}/comments/page?limit=20${cursor ? `&cursor=${enc(cursor)}` : ''}`, { signal }),
+  repliesPage: (id: string, rootId: string, cursor?: string, signal?: AbortSignal) => apiRequest<FriendCommentPage>(`${base}/${enc(id)}/comments/${enc(rootId)}/replies/page?limit=20${cursor ? `&cursor=${enc(cursor)}` : ''}`, { signal }),
+  commentContext: (id: string, commentId: string, signal?: AbortSignal) => apiRequest<FriendCommentContext>(`${base}/${enc(id)}/comments/${enc(commentId)}/context`, { signal }),
+});
 
 export const friendsApi = {
   overview: () => apiRequest<FriendsOverview>('/friends'),
@@ -86,8 +93,9 @@ export const friendsApi = {
 };
 
 export const friendStoriesApi = {
-  feed: (cursor?: string) => apiRequest<FriendStoryPage>(`/friends/stories?limit=10${cursor ? `&cursor=${enc(cursor)}` : ''}`),
-  get: (id: string) => apiRequest<FriendStory>(`/friends/stories/${enc(id)}`),
+  ...commentPages('/friends/stories'),
+  feed: (cursor?: string, signal?: AbortSignal) => apiRequest<FriendStoryPage>(`/friends/stories?limit=10${cursor ? `&cursor=${enc(cursor)}` : ''}`, { signal }),
+  get: (id: string, signal?: AbortSignal) => apiRequest<FriendStory>(`/friends/stories/${enc(id)}`, { signal }),
   create: (input: FriendStoryInput) => apiRequest<FriendStory>('/friends/stories', { method: 'POST', body: input }),
   update: (id: string, input: FriendStoryInput) => apiRequest<FriendStory>(`/friends/stories/${enc(id)}`, { method: 'PATCH', body: input }),
   remove: (id: string) => apiRequest<{ ok: true }>(`/friends/stories/${enc(id)}`, { method: 'DELETE' }),
@@ -121,6 +129,7 @@ export const friendStoriesApi = {
 
 /** "Lên kèo" (BB5). */
 export const friendEventsApi = {
+  ...commentPages('/friends/events'),
   list: (scope: 'upcoming' | 'past', limit = 50) => apiRequest<{ items: FriendEvent[] }>(`/friends/events?scope=${scope}&limit=${limit}`),
   get: (id: string) => apiRequest<FriendEventDetail>(`/friends/events/${enc(id)}`),
   create: (input: FriendEventInput & { inviteeIds: string[] }) =>

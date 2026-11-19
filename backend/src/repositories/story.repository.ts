@@ -1,4 +1,5 @@
 import { Types } from 'mongoose';
+import type { HistoryPosition } from '../utils/historyCursor.js';
 import { createHash } from 'node:crypto';
 
 export function storyCreationFingerprint(input: StoryContent & { coupleId: Types.ObjectId; authorId: Types.ObjectId }): string {
@@ -101,6 +102,13 @@ export const storyRepository = {
 export const storyCommentRepository = {
   create(input: { coupleId: Types.ObjectId; storyId: Types.ObjectId; authorId: Types.ObjectId; body: string }): Promise<StoryCommentDoc> {
     return StoryComment.create(input);
+  },
+
+  listPage(coupleId: Types.ObjectId, storyId: Types.ObjectId, limit: number, before?: HistoryPosition): Promise<StoryCommentDoc[]> {
+    return StoryComment.find({ coupleId, storyId, ...alive, ...(before ? { $or: [
+      { createdAt: { $lt: before.createdAt } },
+      { createdAt: before.createdAt, _id: { $lt: new Types.ObjectId(before.id) } },
+    ] } : {}) }).sort({ createdAt: -1, _id: -1 }).limit(limit + 1).exec();
   },
 
   list(coupleId: Types.ObjectId, storyId: Types.ObjectId): Promise<StoryCommentDoc[]> {

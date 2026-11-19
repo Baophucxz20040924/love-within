@@ -27,7 +27,7 @@ export function FriendOutingPage() {
   const qc = useQueryClient();
   const { me } = useAuth();
   const myId = me?.user.id ?? '';
-  const query = useQuery({ queryKey: outingKey(id), queryFn: () => outingsApi.get(id), enabled: !!id, refetchOnMount: 'always', refetchOnWindowFocus: true, retry: (count, err) => !(err instanceof ApiRequestError && [403, 404].includes(err.status)) && count < 1 });
+  const query = useQuery({ queryKey: outingKey(id), queryFn: ({ signal }) => outingsApi.get(id, signal), enabled: !!id, refetchOnMount: 'always', refetchOnWindowFocus: true, retry: (count, err) => !(err instanceof ApiRequestError && [403, 404].includes(err.status)) && count < 1 });
   const accessDenied = query.error instanceof ApiRequestError && [403, 404].includes(query.error.status);
   // Never trust a cached ledger until a successful read on this mount. Retain a
   // validated ledger on transient errors so mounted forms keep their retry keys.

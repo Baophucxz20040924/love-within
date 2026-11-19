@@ -10,8 +10,10 @@ import type { SchedulerJob } from '../scheduler.service.js';
 
 // Every minute: persist missing daily schedules, then claim only prompts still within their reward window.
 const COUPLES_PER_PAGE = 200;
-/** Safety bound: 100 pages = 20 000 couples per run; more are created by the next runs. */
+/** Safety bound: 100 pages = 20 000 couples per run. Continue from the last completed page. */
 const MAX_PAGES = 100;
+// Process-local progress only: a restart begins a new traversal; day creation remains idempotent.
+let after: Types.ObjectId | null = null;
 /** Prompts announced per run; more wait for the next minute. */
 const NOTIFY_BATCH = 200;
 
@@ -19,12 +21,13 @@ const NOTIFY_BATCH = 200;
 export const PROMPT_BODY = 'Khoảnh khắc hôm nay đã mở. Cùng chụp trước hạn để nhận thưởng đủ đôi!';
 
 async function createMissingDays(now: Date): Promise<number> {
-  let after: Types.ObjectId | null = null;
   let created = 0;
   for (let page = 0; page < MAX_PAGES; page++) {
     const couples = await coupleRepository.listActivePage(after, COUPLES_PER_PAGE);
-    if (couples.length === 0) break;
-    after = couples[couples.length - 1]._id;
+    if (couples.length === 0) {
+      after = null;
+      break;
+    }
     const pairs = couples.map((c) => {
       const timezone = c.dailyRewardPolicy?.timezone ?? c.timezone;
       return { coupleId: c._id, timezone, localDate: getLocalDate(now, timezone) };
@@ -34,7 +37,12 @@ async function createMissingDays(now: Date): Promise<number> {
       .filter((p) => !existing.has(`${p.coupleId.toString()}|${p.localDate}`))
       .map((p) => newMomentDay(p.coupleId, p.localDate, p.timezone, now));
     created += await momentRepository.createDays(missing);
-    if (couples.length < COUPLES_PER_PAGE) break;
+    // A failed page must retry from its previous checkpoint, not skip unfinished schedules.
+    after = couples[couples.length - 1]._id;
+    if (couples.length < COUPLES_PER_PAGE) {
+      after = null;
+      break;
+    }
     if (page === MAX_PAGES - 1) logger.warn('Duo moments: couple pages cut at the limit', { pages: MAX_PAGES });
   }
   return created;

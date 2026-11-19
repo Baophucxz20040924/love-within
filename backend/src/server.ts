@@ -5,6 +5,7 @@ import { questService } from './services/quest.service.js';
 import { startResourceMonitor, stopResourceMonitor } from './utils/monitor.js';
 import { startBankSync, stopBankSync } from './services/bankSync.service.js';
 import { startScheduler, stopScheduler } from './services/scheduler.service.js';
+import { drainPush } from './services/push.service.js';
 import { logger } from './utils/logger.js';
 import { realtimeService, assertSingleRealtimeProcess } from './services/realtime.service.js';
 
@@ -29,18 +30,22 @@ async function bootstrap(): Promise<void> {
   startBankSync();
   startScheduler();
 
-  const shutdown = async (signal: string): Promise<void> => {
-    logger.info(`Received ${signal}, shutting down`);
-    stopResourceMonitor();
-    stopBankSync();
-    // Stops the loop now; resolves when a running tick has finished (at most 10 s).
-    const schedulerStopped = stopScheduler();
-    realtimeService.drain();
-    server.close(async () => {
-      await schedulerStopped;
+  let shutdownPromise: Promise<void> | null = null;
+  const shutdown = (signal: string): Promise<void> => {
+    if (shutdownPromise) return shutdownPromise;
+    shutdownPromise = (async () => {
+      logger.info(`Received ${signal}, shutting down`);
+      stopResourceMonitor();
+      const bankStopped = stopBankSync();
+      const schedulerStopped = stopScheduler();
+      realtimeService.drain();
+      const closed = new Promise<void>(resolve => server.close(() => resolve()));
+      await Promise.all([closed, bankStopped, schedulerStopped]);
+      await drainPush();
       await disconnectDb();
       process.exit(0);
-    });
+    })();
+    return shutdownPromise;
   };
 
   process.on('SIGINT', () => void shutdown('SIGINT'));
