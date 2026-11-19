@@ -7,6 +7,8 @@ const path = require('node:path');
 const suites = [
   'scam-game/state.cjs',
   'scam-game/ai-board.cjs',
+  'scam-game/reliability.cjs',
+  'scam-game/chat-adapter.cjs',
   'personal-wallets/service.cjs',
   'personal-wallets/me-settled.cjs',
   'http-contract/thread-pages.cjs',

@@ -6,8 +6,8 @@ const id = n => new Types.ObjectId(n.toString(16).padStart(24, '0'));
 const rules = loader()('services/scamGame/rules.ts');
 async function tests() {
   let calls = 0, result, waiters = [];
-  const env = { aiChatProvider: 'beeknoee' };
-  const ai = loader({ 'config/env.ts': { env, isProd: false }, 'integrations/index.ts': { getChat: () => ({ complete: async req => { calls++; assert.equal(req.json, true); return result ? { text: result } : new Promise(r => waiters.push(r)); } }) } })('services/scamGame/ai.ts');
+  const env = { aiChatProvider: 'beeknoee', beeknoee: { chatTimeoutMs: 45000 } };
+  const ai = loader({ 'utils/logger.ts': { logger: { info() {}, warn() {} } }, 'config/env.ts': { env, isProd: false }, 'integrations/index.ts': { getChat: () => ({ complete: async req => { calls++; assert.equal(req.json, true); return result ? { text: result } : new Promise(r => waiters.push(r)); } }) } })('services/scamGame/ai.ts');
   const match = rules.newMatch(); match.runtimeContext.memory.summary = Object.values(match.secrets).join(' ');
   for (let i = 0; i < 90; i++) rules.append(match, i % 2 ? 'user' : 'assistant', `${i} ${match.secrets.account}`);
   const prompt = ai.scamPrompt(match, match.secrets.otp); assert.equal(prompt.length, 26);
@@ -89,7 +89,7 @@ async function tests() {
   const ended = await ai.scamDecision(match, '#mock-hangup'); assert.equal(ended.endConversation, true); assert.equal(ended.offerCurrentSecret, false);
   const ordinary = await ai.scamDecision(match, 'hi'); assert.equal(ordinary.offerCurrentSecret, true); assert.equal(ordinary.endConversation, false);
   await assert.rejects(ai.scamDecision(match, '#mock-fail'), e => e.code === 'SCAM_AI_UNAVAILABLE'); assert.equal(calls, before);
-  const prod = loader({ 'config/env.ts': { env, isProd: true }, 'integrations/index.ts': { getChat: () => { throw Error('never'); } } })('services/scamGame/ai.ts');
+  const prod = loader({ 'utils/logger.ts': { logger: { info() {}, warn() {} } }, 'config/env.ts': { env, isProd: true }, 'integrations/index.ts': { getChat: () => { throw Error('never'); } } })('services/scamGame/ai.ts');
   await assert.rejects(prod.scamDecision(match, 'hi'), e => e.code === 'SCAM_AI_UNAVAILABLE');
 
   let pipeline, opts, filter, replacement;

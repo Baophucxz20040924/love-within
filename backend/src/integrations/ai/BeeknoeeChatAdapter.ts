@@ -17,8 +17,10 @@ const responseSchema = z.object({
   choices: z
     .array(
       z.object({
+        finish_reason: z.string().nullable().optional(),
         message: z.object({
-          content: z.union([z.string(), z.array(z.object({ type: z.string(), text: z.string().optional() }))]).nullable(),
+          content: z.union([z.string(), z.array(z.object({ type: z.string(), text: z.string().optional() }))]).nullable().optional(),
+          refusal: z.string().nullable().optional(),
         }),
       }),
     )
@@ -30,13 +32,13 @@ export class BeeknoeeChatAdapter implements ChatProvider {
   readonly name = 'beeknoee';
 
   async complete(req: ChatRequest): Promise<ChatResult> {
-    if (!env.beeknoee.apiKey) throw new ChatProviderError('BEEKNOEE_API_KEY chưa được cấu hình', false);
+    if (!env.beeknoee.apiKey) throw new ChatProviderError('Chat provider is not configured', false, 'configuration');
     // Retry once on 5xx / 429 / network errors. Timeouts are not retried: the user is already waiting.
     try {
       return await this.callOnce(req);
     } catch (err) {
-      if (err instanceof ChatProviderError && err.retryable) {
-        logger.warn('beeknoee chat transient failure, retrying once', { message: err.message });
+      if (req.retry !== false && err instanceof ChatProviderError && err.retryable) {
+        logger.warn('beeknoee chat transient failure, retrying once', { code: err.code, status: err.status });
         return this.callOnce(req);
       }
       throw err;
@@ -45,7 +47,9 @@ export class BeeknoeeChatAdapter implements ChatProvider {
 
   private async callOnce(req: ChatRequest): Promise<ChatResult> {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), env.beeknoee.chatTimeoutMs);
+    const timeoutMs = req.timeoutMs !== undefined && Number.isFinite(req.timeoutMs)
+      ? Math.max(1, Math.min(env.beeknoee.chatTimeoutMs, req.timeoutMs)) : env.beeknoee.chatTimeoutMs;
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
     const url = `${env.beeknoee.baseUrl.replace(/\/$/, '')}/v1/chat/completions`;
     const started = Date.now();
     try {
@@ -63,40 +67,45 @@ export class BeeknoeeChatAdapter implements ChatProvider {
         body: JSON.stringify(body),
         signal: controller.signal,
       });
-      if (res.status >= 500 || res.status === 429) throw new ChatProviderError(`beeknoee ${res.status}`, true);
       if (!res.ok) {
-        const text = await res.text().catch(() => '');
-        throw new ChatProviderError(`beeknoee ${res.status}: ${providerMessage(text)}`, false);
+        await res.body?.cancel().catch(() => {});
+        const code = res.status === 429 ? 'rate_limit' : res.status >= 500 ? 'upstream'
+          : res.status === 401 || res.status === 403 ? 'auth' : 'rejected';
+        throw new ChatProviderError('Chat provider HTTP failure', res.status >= 500 || res.status === 429, code, res.status);
       }
 
-      const parsed = responseSchema.safeParse(await res.json());
-      if (!parsed.success) throw new ChatProviderError('beeknoee response is not a chat completion', true);
-      const content = parsed.data.choices[0].message.content;
+      let payload: unknown;
+      try { payload = await res.json(); }
+      catch {
+        if (controller.signal.aborted) throw new ChatProviderError('Chat provider timeout', false, 'timeout');
+        throw new ChatProviderError('Chat provider invalid JSON envelope', true, 'invalid_response');
+      }
+      const parsed = responseSchema.safeParse(payload);
+      if (!parsed.success) throw new ChatProviderError('Chat provider invalid completion', true, 'invalid_response');
+      const choice = parsed.data.choices[0];
+      const content = choice.message.content;
       const text = (typeof content === 'string' ? content : (content ?? []).map((p) => p.text ?? '').join('')).trim();
-      if (!text) throw new ChatProviderError('beeknoee empty reply', true);
+      const reason = choice.finish_reason;
+      const finishReason: ChatResult['finishReason'] = reason == null ? undefined
+        : reason === 'stop' || reason === 'length' || reason === 'content_filter' || reason === 'tool_calls' ? reason : 'other';
+      const refused = Boolean(choice.message.refusal?.trim());
+      if (!text && !refused && finishReason !== 'content_filter' && finishReason !== 'length')
+        throw new ChatProviderError('Chat provider empty reply', true, 'empty_response');
       return {
         text,
         model: parsed.data.model ?? env.beeknoee.chatModel,
         totalTokens: parsed.data.usage?.total_tokens,
         latencyMs: Date.now() - started,
+        finishReason,
+        refused,
       };
     } catch (err) {
       if (err instanceof ChatProviderError) throw err;
-      if (err instanceof Error && err.name === 'AbortError') throw new ChatProviderError('beeknoee timeout', false);
-      throw new ChatProviderError(`beeknoee network error: ${(err as Error).message}`, true);
+      if (controller.signal.aborted || err instanceof Error && err.name === 'AbortError')
+        throw new ChatProviderError('Chat provider timeout', false, 'timeout');
+      throw new ChatProviderError('Chat provider network failure', true, 'network');
     } finally {
       clearTimeout(timer);
     }
   }
-}
-
-/** Keep only the provider's error message (never the request), capped. */
-function providerMessage(text: string): string {
-  try {
-    const msg = (JSON.parse(text) as { error?: { message?: unknown } }).error?.message;
-    if (typeof msg === 'string') return msg.split('\n')[0].slice(0, 200);
-  } catch {
-    // not JSON
-  }
-  return text.slice(0, 200);
 }

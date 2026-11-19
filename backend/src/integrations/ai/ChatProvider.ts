@@ -13,6 +13,10 @@ export interface ChatRequest {
   temperature: number;
   /** Ask the model for a single JSON object (OpenAI `response_format: json_object`). */
   json?: boolean;
+  /** Optional shorter timeout; never extends the configured provider timeout. */
+  timeoutMs?: number;
+  /** Disable adapter retry when the caller owns a shared attempt budget. */
+  retry?: boolean;
 }
 
 export interface ChatResult {
@@ -20,6 +24,8 @@ export interface ChatResult {
   model: string;
   totalTokens?: number;
   latencyMs: number;
+  finishReason?: 'stop' | 'length' | 'content_filter' | 'tool_calls' | 'other';
+  refused?: boolean;
 }
 
 export interface ChatProvider {
@@ -27,12 +33,11 @@ export interface ChatProvider {
   complete(req: ChatRequest): Promise<ChatResult>;
 }
 
-export class ChatProviderError extends Error {
-  readonly retryable: boolean;
+export type ChatFailureCode = 'timeout' | 'network' | 'rate_limit' | 'upstream' | 'configuration' | 'auth' | 'invalid_response' | 'empty_response' | 'rejected' | 'unknown';
 
-  constructor(message: string, retryable: boolean) {
+export class ChatProviderError extends Error {
+  constructor(message: string, readonly retryable: boolean, readonly code: ChatFailureCode = 'unknown', readonly status?: number) {
     super(message);
     this.name = 'ChatProviderError';
-    this.retryable = retryable;
   }
 }

@@ -5,8 +5,8 @@ const path = require('node:path');
 const vm = require('node:vm');
 const ts = require('typescript');
 const root = path.resolve(__dirname, '../../src');
-const allowed = new Set(['services/scamGame/rules.ts', 'services/scamGame/characters.ts', 'services/scamGame/ai.ts', 'services/scamGame.service.ts', 'repositories/scamGame.repository.ts', 'routes/scamGame.routes.ts', 'utils/errors.ts']);
-function loader(overrides = {}) {
+const allowed = new Set(['services/scamGame/rules.ts', 'services/scamGame/characters.ts', 'services/scamGame/ai.ts', 'services/scamGame.service.ts', 'repositories/scamGame.repository.ts', 'routes/scamGame.routes.ts', 'utils/errors.ts', 'integrations/ai/ChatProvider.ts', 'integrations/ai/BeeknoeeChatAdapter.ts']);
+function loader(overrides = {}, globals = {}) {
   const cache = new Map();
   return function load(relative) {
     assert(allowed.has(relative), `Unsafe source ${relative}`);
@@ -19,7 +19,7 @@ function loader(overrides = {}) {
       if (['node:crypto', 'zod', 'mongoose', 'express'].includes(name)) return require(name);
       assert(allowed.has(key), `Unmocked unsafe import ${key}`); return load(key);
     };
-    vm.runInNewContext(code, { module: mod, exports: mod.exports, require: safeRequire, Date, Buffer, structuredClone, console, setTimeout, clearTimeout }, { filename });
+    vm.runInNewContext(code, { module: mod, exports: mod.exports, require: safeRequire, Date, Buffer, structuredClone, console, setTimeout, clearTimeout, ...globals }, { filename });
     return mod.exports;
   };
 }

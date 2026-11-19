@@ -93,9 +93,12 @@ async function tests() {
   api.message = async op => { sends++; state.revision += 2; state.recentOperations.push(op.operationId); throw Error('lost acknowledgement'); };
   input().props.onChange({ target: { value: 'đã lưu nhưng timeout' } }); tree = render(room, roomProps); form().props.onSubmit({ preventDefault() {} }); await new Promise(r => setImmediate(r)); tree = render(room, roomProps); assert.equal(input().props.value, ''); assert.equal(sends, 2); assert.equal(reads, 2);
   // Explicit failure retains the sent snapshot, and newer drafts remain untouched.
-  api.message = async () => { throw new ApiRequestError(503, 'SCAM_AI_UNAVAILABLE', 'provider fail'); };
+  const aiFailure = 'AI trả lời chưa đúng định dạng của ván chơi. Tin nhắn vẫn được giữ, hãy thử lại.';
+  let failedSends = 0;
+  api.message = async () => { failedSends++; throw new ApiRequestError(503, 'SCAM_AI_UNAVAILABLE', aiFailure); };
   input().props.onChange({ target: { value: 'giữ lại' } }); tree = render(room, roomProps); form().props.onSubmit({ preventDefault() {} }); await new Promise(r => setImmediate(r)); tree = render(room, roomProps);
   assert.equal(input().props.value, ''); assert(nodes(tree).some(n => n.props?.['data-status'] === 'failed' && text(n).includes('giữ lại')));
+  assert(text(tree).includes(aiFailure)); assert.equal(failedSends, 1, 'classified rejection does not auto-resend');
   nodes(tree).find(n => n.type === 'button' && text(n) === 'Sửa tin nhắn').props.onClick(); tree = render(room, roomProps); assert.equal(input().props.value, 'giữ lại');
   // Late access response cannot apply; the next valid GET settles by operation ID.
   let heldOp;
