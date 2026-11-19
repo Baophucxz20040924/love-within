@@ -29,7 +29,7 @@ async function tests() {
   let previous;
   for (let i = 0; i < 50; i++) {
     const m = rules.newMatch(previous); assert.notEqual(m.character.id, previous); previous = m.character.id;
-    assert.match(m.secrets.account, /^SIM-[A-F0-9]{12}$/); assert.match(m.secrets.password, /^PROP-/); assert.match(m.secrets.otp, /^\d{6}$/);
+    assert.match(m.secrets.account, /^SIM-[A-F0-9]{4}$/); assert.match(m.secrets.password, /^P-[A-HJ-NP-Z2-9]{6}$/); assert.equal(m.secrets.account.length, 8); assert.equal(m.secrets.password.length, 8); assert.match(m.secrets.otp, /^\d{6}$/);
   }
   const roster = loader()('services/scamGame/characters.ts').SCAM_CHARACTERS;
   assert.equal(roster.length, 40); assert.equal(new Set(roster.map(c => c.id)).size, 40);
@@ -45,6 +45,9 @@ async function tests() {
     assert(c.scene.includes('Người chơi chủ động gọi đến'));
   }
   assert.equal(roster.find(c => c.sourceId === 35).id, 'luffy');
+  const rhythms = roster.map(c => c.persona.match(/Nhịp tin tưởng trong vai: (Cởi mở|Điềm tĩnh|Bộc trực|Kín đáo):/)?.[1]);
+  assert(rhythms.every(Boolean)); assert.equal(new Set(rhythms).size, 4);
+  assert.equal(new Set(roster.map(c => c.persona.split('Nhịp tin tưởng trong vai: ')[1])).size, 40);
   const m = rules.newMatch(); assert.equal(m.trust, 30);
   const other = rules.newMatch(), original = JSON.stringify(roster);
   assert.notEqual(m.runtimeContext, other.runtimeContext); assert.notEqual(m.runtimeContext.memory, other.runtimeContext.memory);
@@ -63,11 +66,24 @@ async function tests() {
   rules.ensureContext(legacy); assert.equal(legacy.runtimeContext.profile.persona, 'Vai cũ'); assert.equal(legacy.runtimeContext.memory.summary, 'Chuyện cũ'); assert(!legacy.memory);
   assert(legacy.runtimeContext.scene.includes('không đổi địa điểm'));
   const activeSnapshot = rules.newMatch(); activeSnapshot.runtimeContext.profile.persona = 'Hồ sơ đã clone từ bản trước';
+  activeSnapshot.secrets = { account: 'SIM-012345ABCDEF', password: 'PROP-legacy-long-value', otp: '001234' };
+  const savedSecrets = JSON.stringify(activeSnapshot.secrets);
   const savedContext = JSON.stringify(activeSnapshot.runtimeContext);
   rules.ensureContext(activeSnapshot);
   assert.equal(JSON.stringify(activeSnapshot.runtimeContext), savedContext, 'active profile snapshot is not replaced by expanded roster');
-  rules.applyDecision(m, 'xin chào', offer(m)); assert.equal(m.trust, 45); assert.equal(m.revealed[0], 'account');
-  rules.applyDecision(m, 'xin chào', offer(m)); assert.equal(m.trust, 60);
+  rules.applyDecision(activeSnapshot, 'legacy', offer(activeSnapshot));
+  assert.equal(JSON.stringify(activeSnapshot.secrets), savedSecrets, 'active values are never regenerated');
+  assert(activeSnapshot.messages.at(-1).text.includes('SIM-012345ABCDEF'));
+  assert.equal(rules.nextTrust({ trust: 99 }, 100), 100);
+  assert.equal(rules.nextTrust({ trust: 1 }, -100), 0);
+  for (const [stage, gate] of Object.entries(rules.SCAM_BALANCE.gates)) {
+    const boundary = rules.newMatch(); boundary.stage = stage; boundary.trust = gate - 21;
+    assert.throws(() => rules.validateDisclosure(boundary, offer(boundary)), 'gate uses clamped delta, not raw100');
+    boundary.trust++;
+    rules.applyDecision(boundary, 'boundary', offer(boundary)); assert.equal(boundary.trust, gate);
+  }
+  rules.applyDecision(m, 'xin chào', offer(m)); assert.equal(m.trust, 50); assert.equal(m.revealed[0], 'account');
+  rules.applyDecision(m, 'xin chào', offer(m)); assert.equal(m.trust, 70);
   for (const [stage, gate] of Object.entries(rules.SCAM_BALANCE.gates)) {
     const below = rules.newMatch(); below.stage = stage; below.trust = gate - 1;
     assert.throws(() => rules.applyDecision(below, 'chưa đủ', { ...offer(below), trustDelta: 0 })); assert.equal(below.revealed.length, 0);
@@ -76,7 +92,7 @@ async function tests() {
     rules.applyDecision(noOffer, 'chưa đồng ý', { ...positive, offerCurrentSecret: false }); assert.equal(noOffer.revealed.length, 0);
   }
   const penalty = rules.newMatch(); rules.applyDecision(penalty, 'x', { ...positive, trustDelta: -100 });
-  assert.equal(penalty.trust, 24); assert.equal(penalty.status, 'active');
+  assert.equal(penalty.trust, 18); assert.equal(penalty.status, 'active');
   assert(!('suspicion' in penalty)); assert(!('warned' in penalty));
   for (const trust of [0, 100]) {
     const ended = rules.newMatch(); ended.trust = trust;

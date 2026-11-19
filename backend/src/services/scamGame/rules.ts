@@ -7,9 +7,10 @@ export const STAGE_POINTS = { account: 100, password: 200, otp: 300 };
 export const SCAM_BALANCE = {
   initialTrust: 30,
   gates: { account: 35, password: 50, otp: 65 },
-  trustDelta: { min: -6, max: 15 },
+  trustDelta: { min: -12, max: 20 },
 } as const;
 const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n));
+const PASSWORD_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 export interface ScamDecision { reply: string; trustDelta: number; offerCurrentSecret: boolean; endConversation: boolean; contextUpdate: ScamMemory }
 export const nextTrust = (match: ScamMatch, delta: number) => clamp(match.trust + clamp(delta, SCAM_BALANCE.trustDelta.min, SCAM_BALANCE.trustDelta.max), 0, 100);
 
@@ -19,7 +20,7 @@ export function newMatch(previous?: string): ScamMatch {
   const { id, name, emoji, description, persona, scene, opening } = profile;
   return { id: randomUUID(), character: { id, name, emoji, description }, status: 'active', stage: 'account', score: 0,
     trust: SCAM_BALANCE.initialTrust, turns: 0,
-    secrets: { account: `SIM-${randomBytes(6).toString('hex').toUpperCase()}`, password: `PROP-${randomBytes(8).toString('base64url')}`, otp: String(randomInt(1_000_000)).padStart(6, '0') },
+    secrets: { account: `SIM-${randomBytes(2).toString('hex').toUpperCase()}`, password: `P-${Array.from({ length: 6 }, () => PASSWORD_ALPHABET[randomInt(PASSWORD_ALPHABET.length)]).join('')}`, otp: String(randomInt(1_000_000)).padStart(6, '0') },
     runtimeContext: { version: 1, profile: { id, name, persona }, scene, memory: { summary: '', facts: [], openThreads: [] } },
     revealed: [], messages: [{ id: randomUUID(), role: 'assistant', text: opening }], startedAt: new Date().toISOString(), endedAt: null };
 }

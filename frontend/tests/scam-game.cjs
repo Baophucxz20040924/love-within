@@ -49,10 +49,11 @@ async function tests() {
   const otp = () => nodes(tree).find(n => n.type === 'input' && n.props.inputMode === 'numeric');
   assert.equal(otp().props.type, 'text'); otp().props.onChange({ target: { value: '001234' } }); tree = render(SecretDrawer, props);
   await nodes(tree).filter(n => n.type === 'form')[2].props.onSubmit({ preventDefault() {} }); tree = render(SecretDrawer, props); assert.equal(otp().props.value, '001234'); assert.equal(verified[1], '001234');
-  let captures = 0; const target = { setPointerCapture() { captures++; }, hasPointerCapture: () => true, releasePointerCapture() { captures--; } };
-  handle().props.onPointerDown({ button: 0, clientY: 100, pointerId: 1, currentTarget: target }); handle().props.onPointerMove({ clientY: 150 }); handle().props.onPointerUp({ pointerId: 1, currentTarget: target }); handle().props.onClick(); tree = render(SecretDrawer, props);
-  assert.equal(handle().props['aria-expanded'], false); assert.equal(captures, 0); assert.equal(otp().props.value, '001234');
-  handle().props.onPointerDown({ button: 0, clientY: 100, pointerId: 1, currentTarget: target }); handle().props.onPointerCancel(); handle().props.onClick(); tree = render(SecretDrawer, props); assert.equal(handle().props['aria-expanded'], true);
+  assert.equal(handle().props.type, 'button');
+  assert(!Object.keys(handle().props).some(key => key.startsWith('onPointer')), 'native button does not capture scrolling/selection gestures');
+  handle().props.onClick(); tree = render(SecretDrawer, props);
+  assert.equal(handle().props['aria-expanded'], false); assert.equal(otp().props.value, '001234');
+  handle().props.onClick(); tree = render(SecretDrawer, props); assert.equal(handle().props['aria-expanded'], true);
   reset();
   const unlocked = { ...props, match: { ...match, stage: 'account', revealed: [] }, busy: true };
   tree = render(SecretDrawer, unlocked);
@@ -78,6 +79,10 @@ async function tests() {
   }, { window: { confirm: () => true, matchMedia: () => ({ matches: true }) } });
   const boundary = page.ScamGamePage(); const room = boundary.type, roomProps = boundary.props;
   tree = render(room, roomProps); await new Promise(r => setImmediate(r)); tree = render(room, roomProps); assert.equal(reads, 1);
+  const boardButton = () => nodes(tree).find(n => n.type === 'button' && text(n) === 'Bảng xếp hạng');
+  assert(!boardButton()); assert(!nodes(tree).some(n => n.type === 'Board'));
+  assert(text(tree).includes('Time to scam')); assert(!text(tree).includes('Chỉ lưu 80'));
+  assert(nodes(tree).findIndex(n => n.props?.className === 'scam-composer') < nodes(tree).findIndex(n => n.type === 'Drawer'), 'composer precedes expandable confirmation panel');
   const meters = nodes(tree).filter(n => n.props?.label === 'Tin tưởng' || n.props?.label === 'Cảnh giác');
   assert.equal(meters.length, 1); assert.equal(meters[0].props.label, 'Tin tưởng');
   assert(!nodes(tree).some(n => n.props?.className === 'scam-warning'));
@@ -131,8 +136,12 @@ async function tests() {
   state.revision++; state.match.status = 'stopped';
   nodes(tree).find(n => n.type === 'button' && text(n) === 'Đồng bộ ván').props.onClick(); await new Promise(r => setImmediate(r)); tree = render(room, roomProps);
   assert(!nodes(tree).some(n => n.props?.['data-status']));
+  assert(boardButton()); boardButton().props.onClick(); tree = render(room, roomProps);
+  assert(nodes(tree).some(n => n.type === 'Board'));
   state.revision++; state.match.status = 'active';
-  nodes(tree).find(n => n.type === 'button' && text(n) === 'Đồng bộ ván').props.onClick(); await new Promise(r => setImmediate(r)); tree = render(room, roomProps);
+  epoch++; roomProps.access = epoch; tree = render(room, roomProps);
+  await new Promise(r => setTimeout(r, 5)); tree = render(room, roomProps);
+  assert(!boardButton()); assert(!nodes(tree).some(n => n.type === 'Board')); assert(input(), 'active sync leaves stale board tab');
   const turn = { operation: { operationId: 'missing', expectedRevision: state.revision, matchId: state.match.id }, text: 'same', status: 'uncertain' };
   assert.equal(outgoingHelpers.reconcileOutgoing(turn, state).status, 'uncertain');
   assert.equal(outgoingHelpers.reconcileOutgoing({ ...turn, rejected: true }, state).status, 'failed');
@@ -157,6 +166,7 @@ async function tests() {
   for (const status of ['won', 'lost', 'stopped']) {
     state.revision++; state.match.status = status; state.match.score = status === 'won' ? 600 : 100; await refresh();
     assert(nodes(tree).some(n => n.props?.className === `scam-result scam-result--${status}`));
+    assert(boardButton(), `board available after ${status}`);
     assert(!nodes(tree).some(n => n.type === 'textarea'), 'terminal chat is read-only');
     steps = nodes(progress()).filter(n => n.type === 'li');
     assert.equal(steps.filter(n => n.props.className === 'is-done').length, status === 'won' ? 3 : 1);
@@ -164,8 +174,10 @@ async function tests() {
   }
   reset(); state = { ...state, revision: 0, match: null }; let starts = 0;
   api.start = async () => { starts++; return structuredClone(state); };
-  tree = render(room, roomProps); await new Promise(r => setImmediate(r)); tree = render(room, roomProps);
-  const startButton = () => nodes(tree).find(n => n.type === 'button' && text(n) === 'Bắt đầu trò chuyện');
+  tree = render(room, roomProps); assert(!boardButton()); assert(!nodes(tree).some(n => n.type === 'Board'));
+  await new Promise(r => setImmediate(r)); tree = render(room, roomProps);
+  assert(!boardButton()); assert(!nodes(tree).some(n => n.type === 'Board'));
+  const startButton = () => nodes(tree).find(n => n.type === 'button' && text(n) === 'Bắt đầu scam');
   assert.equal(starts, 0, 'opening the route never starts a game'); assert.equal(startButton().props.disabled, true);
   nodes(tree).find(n => n.type === 'input' && n.props.type === 'checkbox').props.onChange({ target: { checked: true } });
   tree = render(room, roomProps); assert.equal(startButton().props.disabled, false); assert.equal(starts, 0, 'consent alone does not start a game');
@@ -175,6 +187,6 @@ async function tests() {
   const boardUI = load('features/scam/ScamLeaderboard.tsx', { 'react/jsx-runtime': { jsx, jsxs: jsx }, '@tanstack/react-query': { useInfiniteQuery: o => { query = o; return boardResult; } }, '../../components/Avatar': { Avatar: 'Avatar' }, './api': { scamApi: { board() {} }, scamKey: wrappers.scamKey } });
   tree = boardUI.ScamLeaderboard({ userId: 'u' }); assert.equal(query.queryKey.join('/'), 'friends/scam/u/board'); assert(text(tree).includes('600')); assert(text(tree).includes('2 ván thắng'));
   boardResult = { ...boardResult, isError: true, isSuccess: false }; tree = boardUI.ScamLeaderboard({ userId: 'u' }); assert(!text(tree).includes('Người chơi'), 'hide cached private board on failed revalidation');
-  console.log('PASS scam UI: entry route, consent/no auto-start, confirmed-stage progress/results, wrappers, scoped keys, drawer click/drag/cancel, OTP zeros, draft retention, duplicate guard, uncertain-write GET reconciliation and late access/session fences');
+  console.log('PASS scam UI: entry route, consent/no auto-start, confirmed-stage progress/results, wrappers, scoped keys, native accordion/no pointer capture, terminal-only board, OTP zeros, draft retention, duplicate guard, uncertain-write GET reconciliation and late access/session fences');
 }
 tests().catch(e => { reset(); console.error(e); process.exitCode = 1; });

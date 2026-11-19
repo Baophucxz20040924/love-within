@@ -17,6 +17,10 @@ async function tests() {
   assert(prompt[0].content.includes(match.runtimeContext.profile.persona));
   assert(prompt[0].content.includes('Người chơi chủ động gọi đến'));
   assert(prompt[0].content.includes('TOÀN BỘ snapshot'));
+  assert(prompt[0].content.includes(`clamp delta(${rules.SCAM_BALANCE.trustDelta.min}..${rules.SCAM_BALANCE.trustDelta.max})`));
+  assert(prompt[0].content.includes('không cộng đều theo số tin'));
+  assert(prompt[0].content.includes('Nếu hồ sơ ván cũ chưa có nhịp'));
+  assert(prompt[0].content.includes('nhắc lại cùng ý chỉ0..2'));
   assert(prompt[0].content.includes('endConversation (boolean bắt buộc)'));
   assert(prompt[0].content.includes('Có thể ngắt ở tin tưởng cao hoặc tiếp tục ở0'));
   assert(!prompt[0].content.includes('suspicionDelta'));

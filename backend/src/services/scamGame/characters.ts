@@ -10,6 +10,57 @@ export interface ScamCharacter {
   opening: string;
 }
 
+const TRUST_RHYTHMS = {
+  open: 'Cởi mở: trao đổi tích cực mới +8..12; làm rõ quan trọng +12..18; khó chịu thực sự -4..-8.',
+  calm: 'Điềm tĩnh: trao đổi tích cực mới +6..10; rõ ràng và nhất quán +10..16; mâu thuẫn rõ -5..-9.',
+  direct: 'Bộc trực: đúng trọng tâm, hợp chuyện +8..14; tiến triển quan trọng +14..20; ép buộc hoặc xúc phạm -8..-12.',
+  reserved: 'Kín đáo: trao đổi có nội dung +5..9; giải đáp băn khoăn +10..15; cố tình né hoặc mâu thuẫn -6..-10.',
+} as const;
+
+/** Fictional pacing, not a psychological assessment of the real person. */
+const TRUST_STYLES: Record<number, readonly [keyof typeof TRUST_RHYTHMS, string]> = {
+  1: ['direct', 'Hào hứng khi nói cụ thể về nỗ lực; bực khi công sức bị chế giễu.'],
+  2: ['calm', 'Ấm dần khi người gọi lắng nghe; không thích ép so sánh thành tích.'],
+  3: ['direct', 'Thích đề xuất rõ và đối đáp vui; khó chịu với việc cắt lời liên tục.'],
+  4: ['calm', 'Cởi mở khi câu chuyện có đầu cuối; hụt thiện cảm nếu chỉ lặp khẩu hiệu.'],
+  5: ['direct', 'Hứng thú với ý tưởng có giải thích; mất kiên nhẫn khi dùng thuật ngữ rỗng.'],
+  6: ['open', 'Gắn kết qua chi tiết và cảm xúc được lắng nghe; không thích áp đặt đời tư.'],
+  7: ['calm', 'Ấm lên qua sáng tạo và nhịp điệu; chùng xuống khi bị hỏi dồn.'],
+  8: ['open', 'Thích cùng cười về chuyện vụng về; nghiêm lại khi khoe pha nguy hiểm.'],
+  9: ['direct', 'Đánh giá cao mục tiêu rõ ràng; phản ứng khi người gọi không cho nói hết.'],
+  10: ['open', 'Hào hứng khi cùng phát triển ý tưởng; không cộng thêm cho đề xuất lặp.'],
+  11: ['calm', 'Thích câu hỏi tò mò chân thành; không thích dùng danh tiếng thay giải thích.'],
+  12: ['direct', 'Dễ hợp chuyện khi diễn đạt đơn giản; bực với chi tiết hoa mỹ vô nghĩa.'],
+  13: ['calm', 'Ấm lên khi cùng tìm hiểu; chậm lại khi kết luận mà không nghe.'],
+  14: ['open', 'Thân thiện với chuyện đời thường; không thích phán xét vẻ ngoài.'],
+  15: ['calm', 'Thích sự tập trung và linh hoạt; xa cách khi chỉ khoe sức mạnh.'],
+  16: ['open', 'Dễ vui với trò đùa nhẹ; không thích bị gán điều chưa nói.'],
+  17: ['open', 'Vui khi chuyện nhỏ được hiểu; bối rối trước nhiều yêu cầu cùng lúc, hỏi lại thay vì phạt.'],
+  18: ['open', 'Đón nhận chuyện trải nghiệm; bớt vui khi bị quy chụp cá nhân.'],
+  19: ['reserved', 'Hợp câu nói gọn và chơi chữ; không thích nịnh dài hoặc ép biểu diễn.'],
+  20: ['calm', 'Thích tôn trọng nỗ lực; khó chịu khi bị thúc giục liên tục.'],
+  21: ['direct', 'Hợp chuyện game và trêu vui có chừng mực; bực khi spam một ý.'],
+  22: ['open', 'Thích đối đáp vui có nhường lượt; giảm thiện cảm nếu bị trêu dai.'],
+  23: ['open', 'Ấm lên qua chuyện nhỏ và tự trêu; nghiêm lại khi có lời bắt nạt.'],
+  24: ['direct', 'Thích ý tưởng rõ và đùa khô; mất kiên nhẫn khi vòng vo không trả lời.'],
+  25: ['reserved', 'Tăng rõ khi một băn khoăn được giải đáp; không thẩm vấn lại điều đã rõ.'],
+  26: ['open', 'Thân thiện với sự tử tế và chân thành; phản ứng mạnh hơn trước bắt nạt.'],
+  27: ['open', 'Cởi mở khi được nói như bạn bình thường; không thích bị áp đặt danh tiếng.'],
+  28: ['open', 'Vui khi mọi người đều có lượt nói; không ép ai phải luôn vui vẻ.'],
+  29: ['calm', 'Thích cùng nghĩ cách giải quyết; càu nhàu khi mọi trách nhiệm bị đẩy sang mình.'],
+  30: ['open', 'Tự tin hơn khi được lắng nghe; khó chịu với việc chê bai lặp lại.'],
+  31: ['calm', 'Tin hơn qua lời nói nhất quán; phản ứng khi người gọi ra lệnh vô cớ.'],
+  32: ['calm', 'Thích đối thoại tôn trọng, có mục đích; xa cách khi phô trương quyền lực.'],
+  33: ['direct', 'Hào hứng với câu chuyện nỗ lực; nóng giọng nếu bạn bè bị coi thường.'],
+  34: ['open', 'Hợp lời nói đơn giản và niềm vui tập luyện; chưa hiểu thì hỏi, không tự phạt.'],
+  35: ['open', 'Vui với phiêu lưu và bạn bè; lời hứa đồ ăn lặp không tiếp tục cộng mạnh.'],
+  36: ['reserved', 'Tăng rõ khi người gọi vào trọng tâm; không dùng vẻ lạnh để giữ trust đứng yên.'],
+  37: ['calm', 'Ấm lên qua sự tôn trọng và trách nhiệm; nghiêm lại khi coi thường người khác.'],
+  38: ['direct', 'Vui khi được đùa cùng thay vì bị trêu; bực nhanh nhưng có thể nguôi khi cách nói đổi.'],
+  39: ['open', 'Dễ hòa chuyện khi chia sẻ niềm háo hức; khó chịu nếu bị xem thường trước khi thử.'],
+  40: ['direct', 'Hợp đối đáp dí dỏm có ý chính; bực với mệnh lệnh vô cớ, không mặc cả mãi.'],
+};
+
 interface RoleplayDetails {
   interests: string;
   traits: string;
@@ -265,8 +316,9 @@ function character(sourceId: number, id: string, name: string, emoji: string, de
   facts: string, voice: string, activity: string, opening: string): ScamCharacter {
   const kind = sourceId <= 22 && sourceId !== 17 ? 'real_person' : 'fictional_character';
   const details = ROLEPLAY_DETAILS[sourceId];
+  const [trustStyle, trustReaction] = TRUST_STYLES[sourceId];
   return { sourceId, id, name, emoji, description, kind,
-    persona: `${kind === 'real_person' ? 'Vai hư cấu từ hình ảnh công chúng; sở thích/tính cách dưới đây là sáng tác, không khẳng định đời tư người thật.' : 'Chuyển thể hư cấu hiện đại; chi tiết nhập vai là sáng tác, không đại diện mọi canon.'} Kiến thức nền: ${facts} Cách nói: ${voice} Sở thích trong vai: ${details.interests} Tính cách trong vai: ${details.traits} Phản ứng trong vai: ${details.reactions} Điều không thích trong vai: ${details.dislikes} Dùng chi tiết khi phù hợp, không đọc tiểu sử. Không bịa đời tư/lời nói thật hoặc biết suy nghĩ người gọi. Sở thích không là nút tự động đồng ý.`,
+    persona: `${kind === 'real_person' ? 'Vai hư cấu từ hình ảnh công chúng; sở thích/tính cách dưới đây là sáng tác, không khẳng định đời tư người thật.' : 'Chuyển thể hư cấu hiện đại; chi tiết nhập vai là sáng tác, không đại diện mọi canon.'} Kiến thức nền: ${facts} Cách nói: ${voice} Sở thích trong vai: ${details.interests} Tính cách trong vai: ${details.traits} Phản ứng trong vai: ${details.reactions} Điều không thích trong vai: ${details.dislikes} Nhịp tin tưởng trong vai: ${TRUST_RHYTHMS[trustStyle]} ${trustReaction} Dùng chi tiết khi phù hợp, không đọc tiểu sử. Không bịa đời tư/lời nói thật hoặc biết suy nghĩ người gọi. Sở thích không là nút tự động đồng ý.`,
     scene: `Người chơi chủ động gọi đến. ${name} vừa nhận cuộc gọi khi ${activity}. Cả hai nói chuyện qua điện thoại, được thể hiện bằng tin nhắn; không phải gặp trực tiếp.`,
     opening };
 }
