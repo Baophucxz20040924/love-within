@@ -46,7 +46,18 @@ async function tests() {
     assert(content.length < 8500, `bounded selected profile: ${c.name}`);
     for (const other of roster.filter(x => x.id !== c.id)) assert(!content.includes(other.persona));
   }
-  const decision = { reply: 'Tôi muốn nghe thêm.', trustDelta: 12, offerCurrentSecret: false, endConversation: false, contextUpdate: { summary: 'ngắn', facts: [], openThreads: [] } };
+  const decision = { emotion: 'curious', reply: 'Tôi muốn nghe thêm.', trustDelta: 12, offerCurrentSecret: false, endConversation: false, contextUpdate: { summary: 'ngắn', facts: [], openThreads: [] } };
+  assert(prompt[0].content.includes('Cảm xúc độc lập với trust'));
+  assert(prompt[0].content.includes('"emotion":"neutral"'));
+  for (const emotion of loader()('services/scamGame/emotions.ts').SCAM_EMOTIONS) {
+    result = JSON.stringify({ ...decision, emotion });
+    assert.equal((await ai.scamDecision(match, 'hi')).emotion, emotion);
+  }
+  for (const emotion of [undefined, null, 'rage', 0, {}, '']) {
+    result = JSON.stringify({ ...decision, emotion }); const before = calls;
+    await assert.rejects(ai.scamDecision(match, 'hi'), e => e.code === 'SCAM_AI_UNAVAILABLE');
+    assert.equal(calls - before, 2, 'invalid emotion uses existing bounded repair');
+  }
   result = JSON.stringify(decision); assert.equal((await ai.scamDecision(match, 'hi')).reply, decision.reply);
   result = JSON.stringify({ ...decision, endConversation: true }); assert.equal((await ai.scamDecision(match, 'bye')).endConversation, true);
   const { endConversation, ...missingEnd } = decision;

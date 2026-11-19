@@ -1,3 +1,5 @@
+import type { ScamEmotion } from './emotions';
+
 export type ScamStage = 'account' | 'password' | 'otp';
 export interface ScamOperation { operationId: string; expectedRevision: number; matchId?: string }
 export interface ScamState {
@@ -14,6 +16,7 @@ export interface ScamState {
     stage: ScamStage;
     score: number;
     trust: number;
+    emotion?: ScamEmotion;
     turns: number;
     revealed: ScamStage[];
     messages: { id: string; role: 'user' | 'assistant' | 'system'; text: string; operationId?: string }[];

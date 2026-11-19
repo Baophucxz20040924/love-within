@@ -11,6 +11,7 @@ import type { ScamOperation, ScamState } from './types';
 import { SecretDrawer, stageLabels } from './SecretDrawer';
 import { ScamLeaderboard } from './ScamLeaderboard';
 import { reconcileOutgoing, type OutgoingTurn } from './outgoing';
+import { emotionLabel } from './emotions';
 import './scam.css';
 
 const subscribeAccess = (notify: () => void) => {
@@ -197,6 +198,7 @@ function ScamRoom({ userId, access }: { userId: string; access: number }) {
   }
   const match = state?.match;
   const active = match?.status === 'active';
+  const [emotionIcon, emotionText] = emotionLabel(match?.emotion);
   const boardAvailable = Boolean(match && ['won', 'lost', 'stopped'].includes(match.status));
   const busy = sending || stopping || syncing || Boolean(state?.pending) || needsSync || Boolean(outgoing && outgoing.status !== 'failed');
   const currentStage = ['account', 'password', 'otp'].indexOf(match?.stage ?? 'account');
@@ -234,7 +236,7 @@ function ScamRoom({ userId, access }: { userId: string; access: number }) {
         <button className="btn btn-primary scam-start__button" disabled={!consent || busy || syncing} onClick={() => void run(scamApi.start)}>{match ? 'Chơi lại · Nhân vật mới' : 'Bắt đầu scam'}</button>
       </section>}
       {match && <section className="scam-room" aria-label="Cuộc trò chuyện">
-        <header className="scam-character"><span className="scam-character__avatar" aria-hidden="true">{match.character.emoji}</span><div className="scam-character__body"><span className="scam-eyebrow">{active ? 'Cuộc trò chuyện đang diễn ra' : 'Cuộc trò chuyện đã kết thúc'}</span><h2><span className="visually-hidden">Đang trò chuyện với </span>{match.character.name}</h2><p>{match.character.description}</p></div><span className="scam-character__badge">AI nhập vai</span></header>
+        <header className="scam-character"><span className="scam-character__avatar" aria-hidden="true">{match.character.emoji}</span><div className="scam-character__body"><span className="scam-eyebrow">{active ? 'Cuộc trò chuyện đang diễn ra' : 'Cuộc trò chuyện đã kết thúc'}</span><h2><span className="visually-hidden">Đang trò chuyện với </span>{match.character.name}</h2><p>{match.character.description}</p><div className="scam-emotion" role="status" aria-live="polite" aria-atomic="true"><span className="scam-emotion__label">{active ? 'Cảm xúc:' : 'Cảm xúc cuối:'}</span><span aria-hidden="true">{emotionIcon}</span><span>{emotionText}</span></div></div><span className="scam-character__badge">AI nhập vai</span></header>
         <div className="scam-meters"><Meter label="Tin tưởng" value={match.trust} /></div>
         <div className="scam-stage"><strong>{match.score}/600 điểm</strong><span>{active ? `Đang xác nhận: ${stageLabels[match.stage]}` : 'Ván đã kết thúc'} · {match.turns} lượt</span></div>
         <ol className="scam-progress" aria-label="Tiến độ xác nhận">

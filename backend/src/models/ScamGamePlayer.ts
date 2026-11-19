@@ -1,5 +1,6 @@
 import { Schema, model, type Types } from 'mongoose';
 import type { ScamCharacter } from '../services/scamGame/characters.js';
+import type { ScamEmotion } from '../services/scamGame/emotions.js';
 
 export const SCAM_RULE_VERSION = 1;
 export type ScamStage = 'account' | 'password' | 'otp';
@@ -19,6 +20,7 @@ export interface ScamMatch {
   stage: ScamStage;
   score: number;
   trust: number;
+  emotion?: ScamEmotion; // Older matches have no emotion until an accepted AI turn.
   turns: number;
   secrets: Record<ScamStage, string>;
   revealed: ScamStage[];

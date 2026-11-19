@@ -37,6 +37,11 @@ themeHook.useFriendsTheme(true); assert.equal(theme, true);
 theme = false; themeListeners.forEach(fn => fn()); assert.equal(theme, true, 'bootstrap presentation reset reapplies requested Friends palette');
 cleanupTheme(); assert.equal(theme, false); assert.equal(themeListeners.size, 0);
 const outgoingHelpers = load('features/scam/outgoing.ts', {});
+const emotions = load('features/scam/emotions.ts', {});
+const emotionValues = ['neutral', 'happy', 'excited', 'amused', 'confident', 'grateful', 'curious', 'thoughtful', 'confused', 'embarrassed', 'worried', 'skeptical', 'annoyed', 'angry', 'disappointed', 'sad'];
+assert.deepEqual(Object.keys(emotions.emotionLabels).sort(), [...emotionValues].sort());
+for (const value of emotionValues) assert(emotions.emotionLabel(value).every(Boolean));
+for (const value of [undefined, null, 'unknown', 'toString', {}]) assert.equal(emotions.emotionLabel(value)[1], 'Bình thản');
 class ApiRequestError extends Error { constructor(status, code, message) { super(message); this.status = status; this.code = code; } }
 const { SecretDrawer } = load('features/scam/SecretDrawer.tsx', { react, 'react/jsx-runtime': { jsx, jsxs: jsx } });
 async function tests() {
@@ -70,12 +75,12 @@ async function tests() {
   let postResolve, sends = 0, epoch = 0, generation = 'session', reads = 0;
   const api = {
     state: async () => { reads++; return structuredClone(state); },
-    message: (op, draft) => { sends++; return new Promise(resolve => { postResolve = () => { state.revision += 2; state.recentOperations.push(op.operationId); resolve(structuredClone(state)); }; }); },
+    message: (op, draft) => { sends++; return new Promise(resolve => { postResolve = () => { state.match.emotion = 'excited'; state.revision += 2; state.recentOperations.push(op.operationId); resolve(structuredClone(state)); }; }); },
   };
   const page = load('features/scam/ScamGamePage.tsx', { '../realtime/verification': { subscribeVerification: () => () => {} }, '../appLock/store': { subscribeAppLock: () => () => {} }, react, 'react/jsx-runtime': { jsx, jsxs: jsx }, 'react-router-dom': { Link: 'Link' },
     '@tanstack/react-query': { useQueryClient: () => ({ invalidateQueries: async () => {} }) }, '../auth/AuthContext': { useAuth: () => ({ me: { user: { id: 'u' } } }) },
     '../../lib/apiClient': { ApiRequestError, currentAccessEpoch: () => epoch }, '../../lib/tokenStore': { tokenStore: { generation: () => generation } },
-    './outgoing': outgoingHelpers, './api': { scamApi: api, scamKey: wrappers.scamKey }, './SecretDrawer': { SecretDrawer: 'Drawer', stageLabels: { account: 'Tài khoản', password: 'Password', otp: 'OTP' } }, './ScamLeaderboard': { ScamLeaderboard: 'Board' }, './scam.css': {},
+    './emotions': emotions, './outgoing': outgoingHelpers, './api': { scamApi: api, scamKey: wrappers.scamKey }, './SecretDrawer': { SecretDrawer: 'Drawer', stageLabels: { account: 'Tài khoản', password: 'Password', otp: 'OTP' } }, './ScamLeaderboard': { ScamLeaderboard: 'Board' }, './scam.css': {},
   }, { window: { confirm: () => true, matchMedia: () => ({ matches: true }) } });
   const boundary = page.ScamGamePage(); const room = boundary.type, roomProps = boundary.props;
   tree = render(room, roomProps); await new Promise(r => setImmediate(r)); tree = render(room, roomProps); assert.equal(reads, 1);
@@ -83,6 +88,8 @@ async function tests() {
   assert(!boardButton()); assert(!nodes(tree).some(n => n.type === 'Board'));
   assert(text(tree).includes('Time to scam')); assert(!text(tree).includes('Chỉ lưu 80'));
   assert(nodes(tree).findIndex(n => n.props?.className === 'scam-composer') < nodes(tree).findIndex(n => n.type === 'Drawer'), 'composer precedes expandable confirmation panel');
+  const emotionText = () => text(nodes(tree).find(n => n.props?.className === 'scam-emotion'));
+  assert(emotionText().includes('Bình thản'), 'legacy fallback');
   const meters = nodes(tree).filter(n => n.props?.label === 'Tin tưởng' || n.props?.label === 'Cảnh giác');
   assert.equal(meters.length, 1); assert.equal(meters[0].props.label, 'Tin tưởng');
   assert(!nodes(tree).some(n => n.props?.className === 'scam-warning'));
@@ -90,10 +97,12 @@ async function tests() {
   input().props.onChange({ target: { value: 'bản nháp' } }); tree = render(room, roomProps);
   form().props.onSubmit({ preventDefault() {} }); form().props.onSubmit({ preventDefault() {} }); assert.equal(sends, 1);
   tree = render(room, roomProps); assert.equal(input().props.value, '');
+  assert(emotionText().includes('Bình thản'), 'no optimistic emotion');
   assert(nodes(tree).some(n => n.props?.['data-status'] === 'sending' && text(n).includes('bản nháp')), 'bubble appears before POST resolves');
   input().props.onChange({ target: { value: 'nháp mới' } }); tree = render(room, roomProps);
   postResolve(); await new Promise(r => setImmediate(r)); tree = render(room, roomProps); assert.equal(input().props.value, 'nháp mới');
   assert(!nodes(tree).some(n => n.props?.['data-status']), 'receipt removes transient bubble');
+  assert(emotionText().includes('Hào hứng'), 'accepted response updates emotion');
   // An uncertain acknowledgement is reconciled before retry, without resending.
   api.message = async op => { sends++; state.revision += 2; state.recentOperations.push(op.operationId); throw Error('lost acknowledgement'); };
   input().props.onChange({ target: { value: 'đã lưu nhưng timeout' } }); tree = render(room, roomProps); form().props.onSubmit({ preventDefault() {} }); await new Promise(r => setImmediate(r)); tree = render(room, roomProps); assert.equal(input().props.value, ''); assert.equal(sends, 2); assert.equal(reads, 2);
@@ -103,15 +112,17 @@ async function tests() {
   api.message = async () => { failedSends++; throw new ApiRequestError(503, 'SCAM_AI_UNAVAILABLE', aiFailure); };
   input().props.onChange({ target: { value: 'giữ lại' } }); tree = render(room, roomProps); form().props.onSubmit({ preventDefault() {} }); await new Promise(r => setImmediate(r)); tree = render(room, roomProps);
   assert.equal(input().props.value, ''); assert(nodes(tree).some(n => n.props?.['data-status'] === 'failed' && text(n).includes('giữ lại')));
+  assert(emotionText().includes('Hào hứng'), 'failure keeps last accepted emotion');
   assert(text(tree).includes(aiFailure)); assert.equal(failedSends, 1, 'classified rejection does not auto-resend');
   nodes(tree).find(n => n.type === 'button' && text(n) === 'Sửa tin nhắn').props.onClick(); tree = render(room, roomProps); assert.equal(input().props.value, 'giữ lại');
   // Late access response cannot apply; the next valid GET settles by operation ID.
   let heldOp;
-  api.message = op => new Promise(resolve => { heldOp = op; postResolve = () => resolve({ ...state, revision: 99, recentOperations: [op.operationId] }); });
+  api.message = op => new Promise(resolve => { heldOp = op; postResolve = () => resolve({ ...state, match: { ...state.match, emotion: 'angry' }, revision: 99, recentOperations: [op.operationId] }); });
   form().props.onSubmit({ preventDefault() {} }); tree = render(room, roomProps);
   input().props.onChange({ target: { value: 'nháp sau đổi quyền' } });
   epoch++; roomProps.access = epoch; tree = render(room, roomProps);
   postResolve(); await new Promise(r => setTimeout(r, 5)); tree = render(room, roomProps);
+  assert(emotionText().includes('Hào hứng'), 'late access response cannot overwrite emotion');
   assert.equal(input().props.value, 'nháp sau đổi quyền'); assert(nodes(tree).some(n => n.props?.['data-status'] === 'uncertain'));
   state.revision += 2; state.recentOperations.push(heldOp.operationId);
   nodes(tree).find(n => n.type === 'button' && text(n) === 'Đồng bộ ván').props.onClick(); await new Promise(r => setImmediate(r)); tree = render(room, roomProps);
@@ -167,6 +178,7 @@ async function tests() {
     state.revision++; state.match.status = status; state.match.score = status === 'won' ? 600 : 100; await refresh();
     assert(nodes(tree).some(n => n.props?.className === `scam-result scam-result--${status}`));
     assert(boardButton(), `board available after ${status}`);
+    assert(emotionText().includes('Cảm xúc cuối:')); assert(emotionText().includes('Hào hứng'));
     assert(!nodes(tree).some(n => n.type === 'textarea'), 'terminal chat is read-only');
     steps = nodes(progress()).filter(n => n.type === 'li');
     assert.equal(steps.filter(n => n.props.className === 'is-done').length, status === 'won' ? 3 : 1);

@@ -61,6 +61,50 @@ const TRUST_STYLES: Record<number, readonly [keyof typeof TRUST_RHYTHMS, string]
   40: ['direct', 'Hợp đối đáp dí dỏm có ý chính; bực với mệnh lệnh vô cớ, không mặc cả mãi.'],
 };
 
+/** Emotional expression for each fictional role, not exclusive emotion lists. */
+const EMOTIONAL_STYLES: Record<number, string> = {
+  1: 'Tự tin, hào hứng thì nói chắc gọn; bị coi nhẹ thì bực; nguôi khi được nghe hết.',
+  2: 'Bình thản, vui kín đáo; thất vọng thì ít lời; ấm lại qua sự lắng nghe.',
+  3: 'Tự tin, thích thú đối đáp; bị cắt lời thì bực; dịu khi được nhường lượt.',
+  4: 'Trầm tư rồi tò mò hỏi rõ; thất vọng vẫn lịch thiệp; vui lại khi hiểu nhau.',
+  5: 'Tò mò, hào hứng ý tưởng; khó chịu thì nói cụt; hứng lại khi có chi tiết mới.',
+  6: 'Thích thú, cảm kích thì kể chi tiết; buồn thì nhẹ giọng; ấm lại khi được thấu hiểu.',
+  7: 'Ngượng nhẹ rồi vui với sáng tạo; lo thì ngập ngừng; an tâm khi không bị hỏi dồn.',
+  8: 'Vui, thích thú tự trêu; lo trước chuyện nguy hiểm; dịu khi hiểu chỉ là chuyện đùa.',
+  9: 'Tự tin, hào hứng mục tiêu; thất vọng thì nghiêm; vui lại khi cùng tập trung.',
+  10: 'Hào hứng, tò mò hỏi tiếp; bối rối thì chậm lại; thích thú khi ý tưởng rõ hơn.',
+  11: 'Tò mò, trầm tư với câu hỏi; ngượng khi đùa hụt; vui khi cùng tìm ra cách hiểu.',
+  12: 'Tự tin, trầm tư trước chi tiết; khó chịu thì sắc gọn; nguôi khi ý chính sáng rõ.',
+  13: 'Bình thản, tò mò lắng nghe; bối rối hỏi từng ý; cảm kích lời giải thích dễ hiểu.',
+  14: 'Bình thản, vui thân thiện; ngượng trước khen quá lời; thoải mái lại qua chuyện thường.',
+  15: 'Trầm tư, tự tin nói chậm; thất vọng trước khoe khoang; dịu khi người gọi chịu nghe.',
+  16: 'Vui, thích thú trêu nhẹ; buồn thì bớt đùa; hồi phục khi có sự chân thành.',
+  17: 'Tò mò, bối rối diễn đạt ngập ngừng; ngượng vì hiểu nhầm; thích thú khi được giải thích.',
+  18: 'Vui, hào hứng kể chuyện; thất vọng thì nghiêm giọng; dịu khi được nói hết.',
+  19: 'Trầm tư, hoài nghi nói gọn; thích thú chơi chữ; bớt lạnh khi đối đáp chân thành.',
+  20: 'Bình thản, tự tin về nỗ lực; lo thì cân nhắc; cảm kích sự kiên nhẫn.',
+  21: 'Thích thú, hào hứng chuyện game; bực thì nói thẳng; nguôi khi thôi spam.',
+  22: 'Vui, thích thú trêu có lượt; ngượng khi đùa hụt; dịu khi hai bên đổi đề tài.',
+  23: 'Tò mò, vui pha tự trêu; lo thì nói nhanh; nhẹ lòng khi điều mơ hồ được giải đáp.',
+  24: 'Tự tin, thích thú đùa khô; khó chịu thì châm nhẹ; nguôi khi câu trả lời vào trọng tâm.',
+  25: 'Trầm tư, hoài nghi ít lời; cảm kích kín đáo khi được giúp; dịu khi băn khoăn đã rõ.',
+  26: 'Bình thản, cảm kích sự tử tế; buồn trước lời lạnh lùng; ấm lại khi có thiện chí.',
+  27: 'Tò mò, lo hoặc ngượng khi bị chú ý; vui khi được trò chuyện như bạn bình thường.',
+  28: 'Vui, hào hứng rủ chuyện; thất vọng vẫn nhẹ nhàng; ấm lại khi mọi người có lượt nói.',
+  29: 'Trầm tư, lo khi nghe khó khăn; khó chịu thì càu nhàu; cảm kích khi cùng chia trách nhiệm.',
+  30: 'Bối rối, lo, ngượng nói ngập ngừng; hào hứng khi được khích lệ cụ thể; buồn nếu bị chê dai.',
+  31: 'Bình thản, tự tin nói rõ; thất vọng trước thất hứa; dịu khi thấy lời nói nhất quán.',
+  32: 'Trầm tư, tự tin có chừng mực; hoài nghi hỏi ngắn; cảm kích lời giải thích tôn trọng.',
+  33: 'Hào hứng, tự tin nói sôi nổi; giận khi bạn bè bị coi thường; nguôi qua lời xin lỗi thật.',
+  34: 'Tò mò, hào hứng nói đơn giản; bối rối hỏi thẳng; vui khi cùng hiểu một điều mới.',
+  35: 'Hào hứng, thích thú chuyện phiêu lưu; bực thì nói ngay; vui lại khi câu chuyện đổi tốt hơn.',
+  36: 'Trầm tư, hoài nghi nói ít; khó chịu thì lạnh giọng; cảm kích kín đáo khi được hiểu.',
+  37: 'Bình thản, tự tin trấn an; thất vọng thì trang nghiêm; ấm lại khi thấy trách nhiệm.',
+  38: 'Tự tin, thích thú khoe vui; ngượng chuyển bực khi bị trêu dai; nguôi khi cùng được cười.',
+  39: 'Hào hứng, vui nói lan man nhẹ; ngượng khi vụng về; cảm kích người kiên nhẫn nghe.',
+  40: 'Thích thú, tự tin ví von; hoài nghi hỏi vòng ngắn; nguôi khi được đối đáp thay vì ra lệnh.',
+};
+
 interface RoleplayDetails {
   interests: string;
   traits: string;
@@ -318,7 +362,7 @@ function character(sourceId: number, id: string, name: string, emoji: string, de
   const details = ROLEPLAY_DETAILS[sourceId];
   const [trustStyle, trustReaction] = TRUST_STYLES[sourceId];
   return { sourceId, id, name, emoji, description, kind,
-    persona: `${kind === 'real_person' ? 'Vai hư cấu từ hình ảnh công chúng; sở thích/tính cách dưới đây là sáng tác, không khẳng định đời tư người thật.' : 'Chuyển thể hư cấu hiện đại; chi tiết nhập vai là sáng tác, không đại diện mọi canon.'} Kiến thức nền: ${facts} Cách nói: ${voice} Sở thích trong vai: ${details.interests} Tính cách trong vai: ${details.traits} Phản ứng trong vai: ${details.reactions} Điều không thích trong vai: ${details.dislikes} Nhịp tin tưởng trong vai: ${TRUST_RHYTHMS[trustStyle]} ${trustReaction} Dùng chi tiết khi phù hợp, không đọc tiểu sử. Không bịa đời tư/lời nói thật hoặc biết suy nghĩ người gọi. Sở thích không là nút tự động đồng ý.`,
+    persona: `${kind === 'real_person' ? 'Vai hư cấu từ hình ảnh công chúng; sở thích/tính cách dưới đây là sáng tác, không khẳng định đời tư người thật.' : 'Chuyển thể hư cấu hiện đại; chi tiết nhập vai là sáng tác, không đại diện mọi canon.'} Kiến thức nền: ${facts} Cách nói: ${voice} Sở thích trong vai: ${details.interests} Tính cách trong vai: ${details.traits} Phản ứng trong vai: ${details.reactions} Điều không thích trong vai: ${details.dislikes} Nhịp tin tưởng trong vai: ${TRUST_RHYTHMS[trustStyle]} ${trustReaction} Sắc thái cảm xúc: ${EMOTIONAL_STYLES[sourceId]} Dùng chi tiết khi phù hợp, không đọc tiểu sử. Không bịa đời tư/lời nói thật hoặc biết suy nghĩ người gọi. Sở thích không là nút tự động đồng ý.`,
     scene: `Người chơi chủ động gọi đến. ${name} vừa nhận cuộc gọi khi ${activity}. Cả hai nói chuyện qua điện thoại, được thể hiện bằng tin nhắn; không phải gặp trực tiếp.`,
     opening };
 }

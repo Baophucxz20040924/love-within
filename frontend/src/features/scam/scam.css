@@ -43,6 +43,8 @@
 .scam-character__body { flex: 1; min-width: 0; }
 .scam-character h2 { font-size: 17px; margin: 3px 0 4px; overflow-wrap: anywhere; }
 .scam-character p { font-size: 12px; margin: 0; color: var(--text-muted); }
+.scam-emotion { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 5px; margin-top: 8px; padding: 5px 8px; border-radius: 9px; background: var(--surface-2); color: var(--text); font-size: 12px; }
+.scam-emotion__label { color: var(--text-muted); font-size: 11px; }
 .scam-character__badge { flex-shrink: 0; align-self: flex-start; font-size: 10px; padding: 4px 7px; background: var(--surface-2); border-radius: 8px; color: var(--text-muted); }
 .scam-meters { display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px; padding: 0 20px 12px; }
 .scam-meter span { display: flex; justify-content: space-between; gap: 8px; font-size: 11px; color: var(--text-muted); }
