@@ -17,6 +17,10 @@ async function tests() {
   assert(prompt[0].content.includes(match.runtimeContext.profile.persona));
   assert(prompt[0].content.includes('Người chơi chủ động gọi đến'));
   assert(prompt[0].content.includes('TOÀN BỘ snapshot'));
+  assert(prompt[0].content.includes(`clamp delta(${rules.SCAM_BALANCE.trustDelta.min}..${rules.SCAM_BALANCE.trustDelta.max})`));
+  assert(prompt[0].content.includes('không cộng đều theo số tin'));
+  assert(prompt[0].content.includes('Nếu hồ sơ ván cũ chưa có nhịp'));
+  assert(prompt[0].content.includes('nhắc lại cùng ý chỉ0..2'));
   assert(prompt[0].content.includes('endConversation (boolean bắt buộc)'));
   assert(prompt[0].content.includes('Có thể ngắt ở tin tưởng cao hoặc tiếp tục ở0'));
   assert(!prompt[0].content.includes('suspicionDelta'));
@@ -42,7 +46,18 @@ async function tests() {
     assert(content.length < 8500, `bounded selected profile: ${c.name}`);
     for (const other of roster.filter(x => x.id !== c.id)) assert(!content.includes(other.persona));
   }
-  const decision = { reply: 'Tôi muốn nghe thêm.', trustDelta: 12, offerCurrentSecret: false, endConversation: false, contextUpdate: { summary: 'ngắn', facts: [], openThreads: [] } };
+  const decision = { emotion: 'curious', reply: 'Tôi muốn nghe thêm.', trustDelta: 12, offerCurrentSecret: false, endConversation: false, contextUpdate: { summary: 'ngắn', facts: [], openThreads: [] } };
+  assert(prompt[0].content.includes('Cảm xúc độc lập với trust'));
+  assert(prompt[0].content.includes('"emotion":"neutral"'));
+  for (const emotion of loader()('services/scamGame/emotions.ts').SCAM_EMOTIONS) {
+    result = JSON.stringify({ ...decision, emotion });
+    assert.equal((await ai.scamDecision(match, 'hi')).emotion, emotion);
+  }
+  for (const emotion of [undefined, null, 'rage', 0, {}, '']) {
+    result = JSON.stringify({ ...decision, emotion }); const before = calls;
+    await assert.rejects(ai.scamDecision(match, 'hi'), e => e.code === 'SCAM_AI_UNAVAILABLE');
+    assert.equal(calls - before, 2, 'invalid emotion uses existing bounded repair');
+  }
   result = JSON.stringify(decision); assert.equal((await ai.scamDecision(match, 'hi')).reply, decision.reply);
   result = JSON.stringify({ ...decision, endConversation: true }); assert.equal((await ai.scamDecision(match, 'bye')).endConversation, true);
   const { endConversation, ...missingEnd } = decision;

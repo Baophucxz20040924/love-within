@@ -3,9 +3,9 @@ const assert = require('node:assert/strict');
 const { randomUUID } = require('node:crypto');
 const { loader } = require('./harness.cjs');
 const rules = loader()('services/scamGame/rules.ts');
-const positive = { reply: 'Được, tôi đang nghe.', trustDelta: 100, offerCurrentSecret: false, endConversation: false, contextUpdate: { summary: 'Nhớ ngắn', facts: [], openThreads: [] } };
+const positive = { emotion: 'happy', reply: 'Được, tôi đang nghe.', trustDelta: 100, offerCurrentSecret: false, endConversation: false, contextUpdate: { summary: 'Nhớ ngắn', facts: [], openThreads: [] } };
 const offer = m => ({ ...positive, offerCurrentSecret: true, reply: `Thông tin của tôi là ${m.secrets[m.stage]}.` });
-const hangup = { ...positive, reply: 'Tôi không muốn nói tiếp. Tạm biệt.', endConversation: true };
+const hangup = { ...positive, emotion: 'neutral', reply: 'Tôi không muốn nói tiếp. Tạm biệt.', endConversation: true };
 function player() { return { _id: '000000000000000000000001', revision: 0, ruleVersion: 1, bestScore: 0, wins: 0, completed: 0, match: null, pending: null, receipts: [] }; }
 const clone = structuredClone;
 function fixture() {
@@ -29,7 +29,23 @@ async function tests() {
   let previous;
   for (let i = 0; i < 50; i++) {
     const m = rules.newMatch(previous); assert.notEqual(m.character.id, previous); previous = m.character.id;
-    assert.match(m.secrets.account, /^SIM-[A-F0-9]{12}$/); assert.match(m.secrets.password, /^PROP-/); assert.match(m.secrets.otp, /^\d{6}$/);
+    assert.match(m.secrets.account, /^SIM-[A-F0-9]{4}$/); assert.match(m.secrets.password, /^P-[A-HJ-NP-Z2-9]{6}$/); assert.equal(m.secrets.account.length, 8); assert.equal(m.secrets.password.length, 8); assert.match(m.secrets.otp, /^\d{6}$/);
+  }
+  const { SCAM_EMOTIONS } = loader()('services/scamGame/emotions.ts');
+  assert.equal(SCAM_EMOTIONS.length, 16);
+  for (const emotion of SCAM_EMOTIONS) {
+    const emotional = rules.newMatch(); assert.equal(emotional.emotion, 'neutral'); emotional.trust = 90;
+    rules.applyDecision(emotional, 'state', { ...positive, emotion, trustDelta: 0 });
+    assert.equal(emotional.emotion, emotion); assert.equal(emotional.status, 'active'); assert.equal(emotional.trust, 90);
+    assert.equal(rules.playerView({ ...player(), match: emotional }, true).match.emotion, emotion);
+  }
+  for (const emotion of [undefined, null, 'rage', 'toString', 1, {}]) {
+    const old = rules.newMatch(); old.emotion = emotion;
+    const saved = JSON.stringify(old);
+    assert.equal(rules.playerView({ ...player(), match: old }, true).match.emotion, 'neutral');
+    assert.equal(JSON.stringify(old), saved, 'legacy view never mutates');
+    assert.throws(() => rules.applyDecision(old, 'invalid', { ...positive, emotion }));
+    assert.equal(JSON.stringify(old), saved, 'invalid emotion never mutates');
   }
   const roster = loader()('services/scamGame/characters.ts').SCAM_CHARACTERS;
   assert.equal(roster.length, 40); assert.equal(new Set(roster.map(c => c.id)).size, 40);
@@ -38,13 +54,17 @@ async function tests() {
     assert.equal(c.name, c.sourceId === 31 ? 'Captain America' : source[c.sourceId - 1].name);
     assert.equal(c.kind, c.sourceId === 17 ? 'fictional_character' : source[c.sourceId - 1].type);
     assert(c.persona.length <= 1600, `profile bound: ${c.name} (${c.persona.length})`);
-    for (const section of ['Kiến thức nền:', 'Cách nói:', 'Sở thích trong vai:', 'Tính cách trong vai:', 'Phản ứng trong vai:', 'Điều không thích trong vai:', 'Mới gọi:', 'thoải mái:', 'bối rối:', 'hơi bực:']) {
+    for (const section of ['Kiến thức nền:', 'Cách nói:', 'Sở thích trong vai:', 'Tính cách trong vai:', 'Phản ứng trong vai:', 'Điều không thích trong vai:', 'Sắc thái cảm xúc:', 'Mới gọi:', 'thoải mái:', 'bối rối:', 'hơi bực:']) {
       assert(c.persona.includes(section), `${c.name}: ${section}`);
     }
     assert(c.persona.includes('là sáng tác')); assert(c.persona.includes('Sở thích không là nút tự động đồng ý'));
     assert(c.scene.includes('Người chơi chủ động gọi đến'));
   }
+  assert.equal(new Set(roster.map(c => c.persona.split('Sắc thái cảm xúc: ')[1])).size, 40);
   assert.equal(roster.find(c => c.sourceId === 35).id, 'luffy');
+  const rhythms = roster.map(c => c.persona.match(/Nhịp tin tưởng trong vai: (Cởi mở|Điềm tĩnh|Bộc trực|Kín đáo):/)?.[1]);
+  assert(rhythms.every(Boolean)); assert.equal(new Set(rhythms).size, 4);
+  assert.equal(new Set(roster.map(c => c.persona.split('Nhịp tin tưởng trong vai: ')[1])).size, 40);
   const m = rules.newMatch(); assert.equal(m.trust, 30);
   const other = rules.newMatch(), original = JSON.stringify(roster);
   assert.notEqual(m.runtimeContext, other.runtimeContext); assert.notEqual(m.runtimeContext.memory, other.runtimeContext.memory);
@@ -63,11 +83,24 @@ async function tests() {
   rules.ensureContext(legacy); assert.equal(legacy.runtimeContext.profile.persona, 'Vai cũ'); assert.equal(legacy.runtimeContext.memory.summary, 'Chuyện cũ'); assert(!legacy.memory);
   assert(legacy.runtimeContext.scene.includes('không đổi địa điểm'));
   const activeSnapshot = rules.newMatch(); activeSnapshot.runtimeContext.profile.persona = 'Hồ sơ đã clone từ bản trước';
+  activeSnapshot.secrets = { account: 'SIM-012345ABCDEF', password: 'PROP-legacy-long-value', otp: '001234' };
+  const savedSecrets = JSON.stringify(activeSnapshot.secrets);
   const savedContext = JSON.stringify(activeSnapshot.runtimeContext);
   rules.ensureContext(activeSnapshot);
   assert.equal(JSON.stringify(activeSnapshot.runtimeContext), savedContext, 'active profile snapshot is not replaced by expanded roster');
-  rules.applyDecision(m, 'xin chào', offer(m)); assert.equal(m.trust, 45); assert.equal(m.revealed[0], 'account');
-  rules.applyDecision(m, 'xin chào', offer(m)); assert.equal(m.trust, 60);
+  rules.applyDecision(activeSnapshot, 'legacy', offer(activeSnapshot));
+  assert.equal(JSON.stringify(activeSnapshot.secrets), savedSecrets, 'active values are never regenerated');
+  assert(activeSnapshot.messages.at(-1).text.includes('SIM-012345ABCDEF'));
+  assert.equal(rules.nextTrust({ trust: 99 }, 100), 100);
+  assert.equal(rules.nextTrust({ trust: 1 }, -100), 0);
+  for (const [stage, gate] of Object.entries(rules.SCAM_BALANCE.gates)) {
+    const boundary = rules.newMatch(); boundary.stage = stage; boundary.trust = gate - 21;
+    assert.throws(() => rules.validateDisclosure(boundary, offer(boundary)), 'gate uses clamped delta, not raw100');
+    boundary.trust++;
+    rules.applyDecision(boundary, 'boundary', offer(boundary)); assert.equal(boundary.trust, gate);
+  }
+  rules.applyDecision(m, 'xin chào', offer(m)); assert.equal(m.trust, 50); assert.equal(m.revealed[0], 'account');
+  rules.applyDecision(m, 'xin chào', offer(m)); assert.equal(m.trust, 70);
   for (const [stage, gate] of Object.entries(rules.SCAM_BALANCE.gates)) {
     const below = rules.newMatch(); below.stage = stage; below.trust = gate - 1;
     assert.throws(() => rules.applyDecision(below, 'chưa đủ', { ...offer(below), trustDelta: 0 })); assert.equal(below.revealed.length, 0);
@@ -76,12 +109,12 @@ async function tests() {
     rules.applyDecision(noOffer, 'chưa đồng ý', { ...positive, offerCurrentSecret: false }); assert.equal(noOffer.revealed.length, 0);
   }
   const penalty = rules.newMatch(); rules.applyDecision(penalty, 'x', { ...positive, trustDelta: -100 });
-  assert.equal(penalty.trust, 24); assert.equal(penalty.status, 'active');
+  assert.equal(penalty.trust, 18); assert.equal(penalty.status, 'active');
   assert(!('suspicion' in penalty)); assert(!('warned' in penalty));
   for (const trust of [0, 100]) {
     const ended = rules.newMatch(); ended.trust = trust;
     rules.applyDecision(ended, 'x', { ...hangup, offerCurrentSecret: true, trustDelta: 0 });
-    assert(!ended.runtimeContext); assert.equal(ended.status, 'lost'); assert(ended.endedAt); assert.equal(ended.turns, 1);
+    assert(!ended.runtimeContext); assert.equal(ended.emotion, 'neutral'); assert.equal(ended.status, 'lost'); assert(ended.endedAt); assert.equal(ended.turns, 1);
     assert.equal(ended.revealed.length, 0, 'hang-up overrides simultaneous offer even at trust100');
     assert(!ended.messages.some(b => b.text.includes(ended.secrets.account)));
     assert.equal(ended.messages.at(-2).text, hangup.reply); assert.equal(ended.messages.at(-1).role, 'system');
@@ -116,7 +149,7 @@ async function tests() {
     await assert.rejects(s.verify('u', f.op(), stage, 'sai'), e => e.status === 422);
     const operation = f.op(), value = f.get().match.secrets[stage];
     await s.verify('u', operation, stage, value); await s.verify('u', operation, stage, value);
-    assert.equal(f.get().match.score, stageScores[i++]);
+    assert.equal(f.get().match.score, stageScores[i++]); assert.equal(f.get().match.emotion, 'happy', 'verification retains emotion');
   }
   assert(!f.get().match.runtimeContext); assert(!f.get().match.memory);
   assert.equal(f.get().match.status, 'won'); assert.equal(f.get().wins, 1); assert.equal(f.get().completed, 1); assert.equal(f.get().bestScore, 600);
@@ -130,7 +163,7 @@ async function tests() {
   await assert.rejects(s.message('u', turnOp, 'khác'), e => e.status === 409);
   await assert.rejects(s.verify('u', f.op(), 'account', 'x'), e => e.code === 'SCAM_TURN_PENDING');
   const stop = f.op(); await s.stop('u', stop); await s.stop('u', stop); assert.equal(f.get().completed, 2); assert(!f.get().match.runtimeContext);
-  await s.start('u', f.op()); const fresh = f.get().match.id; resolve(hangup); await assert.rejects(turn, e => e.code === 'SCAM_STATE_CHANGED'); assert.equal(f.get().completed, 2); assert.equal(f.get().match.id, fresh); assert.equal(f.get().match.turns, 0);
+  await s.start('u', f.op()); const fresh = f.get().match.id; resolve(hangup); await assert.rejects(turn, e => e.code === 'SCAM_STATE_CHANGED'); assert.equal(f.get().completed, 2); assert.equal(f.get().match.id, fresh); assert.equal(f.get().match.turns, 0); assert.equal(f.get().match.emotion, 'neutral', 'new match fenced from old emotion');
 
   const pending = []; f.decide(() => new Promise(r => pending.push(r))); const leaseOp = f.op(); const oldTurn = s.message('u', leaseOp, 'lease'); await new Promise(r => setImmediate(r));
   f.get().pending.expiresAt = 0; const retry = s.message('u', leaseOp, 'lease'); await new Promise(r => setImmediate(r));

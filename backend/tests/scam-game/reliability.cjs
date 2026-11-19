@@ -2,7 +2,7 @@
 const assert = require('node:assert/strict');
 const { loader } = require('./harness.cjs');
 const canary = 'PRIVATE-CONTENT-MUST-NOT-BE-LOGGED';
-const decision = { reply: 'Tôi vẫn đang nghe.', trustDelta: 2, offerCurrentSecret: false, endConversation: false,
+const decision = { emotion: 'thoughtful', reply: 'Tôi vẫn đang nghe.', trustDelta: 2, offerCurrentSecret: false, endConversation: false,
   contextUpdate: { summary: 'Đang trò chuyện.', facts: [], openThreads: [] } };
 function fixture() {
   let now = 0;
@@ -30,6 +30,7 @@ async function tests() {
   await f.ai.scamDecision(match, 'hi'); assert.equal(f.requests.length, 2);
   for (const first of [
     { text: canary }, response({ ...decision, contextUpdate: null }),
+    response({ ...decision, emotion: undefined }), response({ ...decision, emotion: 'rage' }),
     response({ ...decision, offerCurrentSecret: true }), response(decision, { finishReason: 'length' }),
     { text: 'prefix ' + JSON.stringify(decision) }, { text: JSON.stringify(decision) + JSON.stringify(decision) },
   ]) {
@@ -86,6 +87,7 @@ async function tests() {
   g.actions.push(() => ({ text: 'invalid' }), () => response());
   await service.message('u', op, 'hi');
   assert.equal(stored.match.messages.length, bubbles + 2); assert.equal(stored.match.turns, 1);
+  assert.equal(stored.match.emotion, 'thoughtful');
   assert.equal(stored.match.trust, 32); assert.equal(stored.pending, null); assert.equal(stored.receipts.length, 1);
   await service.message('u', op, 'hi'); assert.equal(g.requests.length, 2);
   const beforeFailure = JSON.stringify(stored.match);
@@ -97,7 +99,8 @@ async function tests() {
   const held = service.message('u', { ...op, operationId: 'held-op', expectedRevision: stored.revision }, 'held');
   await new Promise(resolve => setImmediate(resolve)); assert(finishRepair);
   await service.stop('u', { ...op, operationId: 'stop-op', expectedRevision: stored.revision });
-  finishRepair(response()); await assert.rejects(held, e => e.code === 'SCAM_STATE_CHANGED');
+  finishRepair(response({ ...decision, emotion: 'angry' })); await assert.rejects(held, e => e.code === 'SCAM_STATE_CHANGED');
+  assert.equal(stored.match.emotion, 'thoughtful', 'late repair does not overwrite stopped emotion');
   assert.equal(stored.match.status, 'stopped'); assert.equal(stored.match.turns, 1);
 
   const h = fixture(), hm = h.rules.newMatch(), resolvers = [];

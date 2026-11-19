@@ -1,16 +1,18 @@
 import { randomBytes, randomInt, randomUUID } from 'node:crypto';
 import type { ScamMatch, ScamMemory, ScamPlayer, ScamRuntimeContext, ScamStage } from '../../models/ScamGamePlayer.js';
 import { SCAM_CHARACTERS } from './characters.js';
+import { emotionFor, isScamEmotion, type ScamEmotion } from './emotions.js';
 
 export const STAGES: readonly ScamStage[] = ['account', 'password', 'otp'];
 export const STAGE_POINTS = { account: 100, password: 200, otp: 300 };
 export const SCAM_BALANCE = {
   initialTrust: 30,
   gates: { account: 35, password: 50, otp: 65 },
-  trustDelta: { min: -6, max: 15 },
+  trustDelta: { min: -12, max: 20 },
 } as const;
 const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n));
-export interface ScamDecision { reply: string; trustDelta: number; offerCurrentSecret: boolean; endConversation: boolean; contextUpdate: ScamMemory }
+const PASSWORD_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+export interface ScamDecision { reply: string; emotion: ScamEmotion; trustDelta: number; offerCurrentSecret: boolean; endConversation: boolean; contextUpdate: ScamMemory }
 export const nextTrust = (match: ScamMatch, delta: number) => clamp(match.trust + clamp(delta, SCAM_BALANCE.trustDelta.min, SCAM_BALANCE.trustDelta.max), 0, 100);
 
 export function newMatch(previous?: string): ScamMatch {
@@ -18,8 +20,8 @@ export function newMatch(previous?: string): ScamMatch {
   const profile = structuredClone(choices[randomInt(choices.length)]);
   const { id, name, emoji, description, persona, scene, opening } = profile;
   return { id: randomUUID(), character: { id, name, emoji, description }, status: 'active', stage: 'account', score: 0,
-    trust: SCAM_BALANCE.initialTrust, turns: 0,
-    secrets: { account: `SIM-${randomBytes(6).toString('hex').toUpperCase()}`, password: `PROP-${randomBytes(8).toString('base64url')}`, otp: String(randomInt(1_000_000)).padStart(6, '0') },
+    trust: SCAM_BALANCE.initialTrust, emotion: 'neutral', turns: 0,
+    secrets: { account: `SIM-${randomBytes(2).toString('hex').toUpperCase()}`, password: `P-${Array.from({ length: 6 }, () => PASSWORD_ALPHABET[randomInt(PASSWORD_ALPHABET.length)]).join('')}`, otp: String(randomInt(1_000_000)).padStart(6, '0') },
     runtimeContext: { version: 1, profile: { id, name, persona }, scene, memory: { summary: '', facts: [], openThreads: [] } },
     revealed: [], messages: [{ id: randomUUID(), role: 'assistant', text: opening }], startedAt: new Date().toISOString(), endedAt: null };
 }
@@ -74,8 +76,10 @@ export function append(match: ScamMatch, role: 'user' | 'assistant' | 'system', 
 }
 
 export function applyDecision(match: ScamMatch, text: string, decision: ScamDecision, operationId?: string): void {
+  if (!isScamEmotion(decision.emotion)) throw new Error('invalid emotion');
   validateDisclosure(match, decision);
   ensureContext(match);
+  match.emotion = decision.emotion;
   match.trust = nextTrust(match, decision.trustDelta);
   append(match, 'user', text, operationId);
   append(match, 'assistant', decision.endConversation ? redactSecrets(decision.reply, match) : decision.reply);
@@ -106,6 +110,6 @@ export function playerView(player: ScamPlayer, mock: boolean) {
     pending: player.pending ? { operationId: player.pending.operationId, expectedRevision: player.pending.expectedRevision, expiresAt: player.pending.expiresAt, text: player.pending.text } : null,
     recentOperations: player.receipts.map(r => r.operationId),
     match: m ? { id: m.id, character: { id: m.character.id, name: m.character.name, emoji: m.character.emoji, description: m.character.description },
-      status: m.status, stage: m.stage, score: m.score, trust: m.trust,
+      status: m.status, stage: m.stage, score: m.score, trust: m.trust, emotion: emotionFor(m),
       turns: m.turns, revealed: m.revealed, messages: m.messages.map(({ id, role, text, operationId }) => ({ id, role, text, ...(role === 'user' && operationId ? { operationId } : {}) })), startedAt: m.startedAt, endedAt: m.endedAt } : null };
 }

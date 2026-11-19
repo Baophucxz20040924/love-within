@@ -4,11 +4,11 @@ import os from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { fixtures, fixedTime } from './daily-rewards-water.mjs';
-const props = { account: 'SIM-SYNTHETIC', password: 'PROP-SyntheticOnly', otp: '001234' };
+const props = { account: 'SIM-AB12', password: 'P-ABC234', otp: '001234' };
 const stages = ['account', 'password', 'otp'];
 function initial() { return { revision: 0, bestScore: 0, wins: 0, mock: true, recentOperations: [], pending: null, match: null }; }
 if (process.argv.includes('--validate')) {
-  assert.equal(props.otp.length, 6); assert(props.account.startsWith('SIM-')); assert.equal(initial().match, null);
+  assert.equal(props.otp.length, 6); assert.match(props.account, /^SIM-[A-F0-9]{4}$/); assert.match(props.password, /^P-[A-HJ-NP-Z2-9]{6}$/); assert.equal(initial().match, null);
   console.log('PASS scam synthetic fixture; no browser/network imported');
 } else {
   process.env.LW_EVIDENCE_DIR ||= path.join(os.tmpdir(), 'lw_scam_browser', `${Date.now()}`);
@@ -46,7 +46,11 @@ if (process.argv.includes('--validate')) {
             // access revalidation and interrupts unrelated form actions at arbitrary times.
             if (p === '/api/realtime') return;
             if (p === '/api/friends/scam/state') { operations.push({ device, action: 'state', revision: s.revision }); return json(route, s); }
-            if (p === '/api/friends/scam/leaderboard') return json(route, { items: [{ player: f.users[0], bestScore: s.bestScore, wins: s.wins, rank: 1 }], nextCursor: null });
+            if (p === '/api/friends/scam/leaderboard') {
+              assert(s.match && s.match.status !== 'active', 'no board fetch before terminal match');
+              operations.push({ device, action: 'board', status: s.match.status });
+              return json(route, { items: [{ player: f.users[0], bestScore: s.bestScore, wins: s.wins, rank: 1 }], nextCursor: null });
+            }
           }
           if (method === 'POST' && p.startsWith('/api/friends/scam/')) {
             const input = req.postDataJSON();
@@ -54,7 +58,7 @@ if (process.argv.includes('--validate')) {
             const action = p.split('/').at(-1); operations.push({ device, action, revision: input.expectedRevision });
             if (action === 'start') {
               assert.equal(input.consent, true); games++;
-              s.match = { id: randomUUID(), character: { id: games % 2 ? 'alice' : 'holmes', name: games % 2 ? 'Alice' : 'Sherlock Holmes', emoji: games % 2 ? '🐇' : '🔎', description: 'Nhân vật hư cấu tò mò, biết hỏi lại.' }, status: 'active', stage: 'account', score: 0, trust: 30, turns: 0, revealed: [], messages: [bubble('assistant', 'Bạn tìm tôi vì chuyện gì?')], startedAt: fixedTime, endedAt: null };
+              s.match = { id: randomUUID(), character: { id: games % 2 ? 'alice' : 'holmes', name: games % 2 ? 'Alice' : 'Sherlock Holmes', emoji: games % 2 ? '🐇' : '🔎', description: 'Nhân vật hư cấu tò mò, biết hỏi lại.' }, status: 'active', stage: 'account', score: 0, trust: 30, emotion: 'neutral', turns: 0, revealed: [], messages: [bubble('assistant', 'Bạn tìm tôi vì chuyện gì?')], startedAt: fixedTime, endedAt: null };
             } else {
               assert.equal(input.matchId, s.match.id);
               if (action === 'message') {
@@ -65,6 +69,7 @@ if (process.argv.includes('--validate')) {
                 }
                 assert.equal(s.match.status, 'active');
                 const endConversation = input.text === '#hangup';
+                s.match.emotion = endConversation || input.text === '#angry' ? 'angry' : input.text === '#annoyed' ? 'annoyed' : 'happy';
                 s.match.turns++; s.match.messages.push({ ...bubble('user', input.text), operationId: input.operationId }, bubble('assistant', endConversation ? 'Tôi không muốn nói tiếp. Tạm biệt.' : 'Bạn cần thông tin này để làm gì?'));
                 if (endConversation) {
                   s.match.status = 'lost'; s.match.endedAt = fixedTime; s.bestScore = Math.max(s.bestScore, s.match.score);
@@ -108,11 +113,13 @@ if (process.argv.includes('--validate')) {
       assert(entryBox.y + entryBox.height <= eventBox.y, 'game discovery precedes events');
       assert.equal(operations.filter(o => o.device === device && o.action !== 'state').length, 0, 'feed never starts or messages a game');
       await shot(`${device}-feed-entry`); await entry.click();
-      const start = page.getByRole('button', { name: 'Bắt đầu trò chuyện', exact: true }); await start.waitFor(); assert(await start.isDisabled());
+      const start = page.getByRole('button', { name: 'Bắt đầu scam', exact: true }); await start.waitFor(); assert(await start.isDisabled());
       await page.getByRole('link', { name: 'Tôi', exact: true }).click();
       await page.getByRole('link', { name: /Scam with Famous People/ }).click(); await start.waitFor();
       await page.goto(`${h.baseURL}/friends/scam`); await start.waitFor(); await page.reload(); await start.waitFor();
       assert.equal(s.match, null, 'navigation and reload do not create a match');
+      assert.equal(await page.getByRole('button', { name: 'Bảng xếp hạng', exact: true }).count(), 0);
+      assert.equal(operations.filter(o => o.device === device && o.action === 'board').length, 0);
       await until(() => page.locator('html').getAttribute('data-theme').then(v => v === 'friends'), 'Friends palette survives authenticated bootstrap');
       await shot(`${device}-lobby`); checks.push(stage);
       stage = `${device}:start-consent-persona`;
@@ -121,6 +128,8 @@ if (process.argv.includes('--validate')) {
       assert(startBox.y >= 0 && startBox.y + startBox.height <= startNav.y, 'consent CTA is scroll-reachable above navigation');
       await shot(`${device}-consent`);
       await page.getByRole('checkbox').check(); await start.click(); await page.getByRole('heading', { name: 'Đang trò chuyện với Alice', exact: true }).waitFor();
+      const emotion = page.locator('.scam-emotion');
+      assert.match(await emotion.innerText(), /Cảm xúc:.*Bình thản/s);
       assert.equal(await page.locator('.scam-meter').count(), 1); assert.equal(await page.getByRole('progressbar', { name: 'Tin tưởng' }).count(), 1);
       assert.equal(await page.locator('.scam-warning').count(), 0); assert(!await page.locator('.scam-page').innerText().then(t => t.includes('Cảnh giác')));
       await page.locator('.scam-character').scrollIntoViewIfNeeded(); await shot(`${device}-chat-header`); checks.push(stage);
@@ -129,18 +138,42 @@ if (process.argv.includes('--validate')) {
       stage = `${device}:provider-error-draft-uncertain-reconcile`;
       fail = true; await composer.fill('giữ bản nháp'); await page.getByRole('button', { name: 'Gửi', exact: true }).click(); await page.locator('.scam-outgoing[data-status="failed"]').waitFor(); assert.equal(await composer.inputValue(), '');
       assert.match(await page.locator('.scam-outgoing').innerText(), /giữ bản nháp/);
+      assert.match(await emotion.innerText(), /Bình thản/, 'failed turn keeps emotion');
       await page.locator('.scam-send-feedback').scrollIntoViewIfNeeded(); await shot(`${device}-send-error`);
       uncertain = true; await page.getByRole('button', { name: 'Thử lại tin nhắn', exact: true }).click(); await until(async () => !await page.locator('.scam-outgoing').count(), 'uncertain committed result reconciles');
       assert.equal(await page.locator('.scam-bubble--user').count(), 1, 'no duplicate after receipt reconciliation'); checks.push(stage);
-      stage = `${device}:drawer-drag-keyboard-and-wrong-secret`;
-      let handle = page.getByRole('button', { name: /Mở xác nhận thông tin/ });
+      stage = `${device}:emotion-transitions-reload`;
+      assert.match(await emotion.innerText(), /Vui vẻ/);
+      await send('#annoyed'); assert.match(await emotion.innerText(), /Khó chịu/);
+      await send('#angry'); assert.match(await emotion.innerText(), /Tức giận/);
+      assert.equal(s.match.status, 'active', 'anger alone never loses');
+      await page.locator('.scam-character').scrollIntoViewIfNeeded(); await shot(`${device}-emotion-angry`);
+      await page.reload(); await composer.waitFor(); assert.match(await emotion.innerText(), /Tức giận/, 'reload retains canonical emotion');
+      await send('Mình xin lỗi, mình sẽ nghe bạn nói hết.'); assert.match(await emotion.innerText(), /Vui vẻ/);
+      await page.locator('.scam-character').scrollIntoViewIfNeeded(); await shot(`${device}-emotion-recovered`); checks.push(stage);
+      stage = `${device}:accordion-scroll-keyboard-and-wrong-secret`;
+      const handle = page.locator('.scam-drawer__handle');
       await handle.scrollIntoViewIfNeeded();
       const box = await handle.boundingBox(); await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2); await page.mouse.down(); await page.mouse.move(box.x + box.width / 2, box.y - 55, { steps: 8 }); await page.mouse.up();
-      handle = page.locator('.scam-drawer__handle'); assert.equal(await handle.getAttribute('aria-expanded'), 'true');
-      const account = page.getByLabel('Tài khoản', { exact: true }); await account.fill('sai'); await page.getByRole('button', { name: 'Xác nhận Tài khoản', exact: true }).click(); await page.locator('.scam-send-feedback').waitFor(); assert.equal(await account.inputValue(), 'sai');
+      assert.equal(await handle.getAttribute('aria-expanded'), 'false', 'drag does not open confirmation');
+      await handle.click(); assert.equal(await handle.getAttribute('aria-expanded'), 'true');
+      const panelStyle = await page.locator('.scam-drawer__body').evaluate(el => ({ overflow: getComputedStyle(el).overflowY, maxHeight: getComputedStyle(el).maxHeight }));
+      assert.equal(panelStyle.overflow, 'visible'); assert.equal(panelStyle.maxHeight, 'none');
+      const composerTop = await composer.evaluate(el => el.getBoundingClientRect().top + scrollY);
+      assert(composerTop < await handle.evaluate(el => el.getBoundingClientRect().top + scrollY), 'panel expands below composer');
+      await page.locator('.scam-bubble--assistant').last().evaluate(el => { const range = document.createRange(); range.selectNodeContents(el); getSelection().removeAllRanges(); getSelection().addRange(range); });
+      assert.equal(await handle.getAttribute('aria-expanded'), 'true', 'selecting chat text does not toggle panel');
+      await page.mouse.wheel(0, 240); assert.equal(await handle.getAttribute('aria-expanded'), 'true', 'scrolling does not toggle panel');
+      const account = page.getByLabel('Tài khoản', { exact: true });
+      await account.focus(); await page.keyboard.insertText(props.account);
+      assert.equal(await account.inputValue(), props.account); assert.equal(await handle.getAttribute('aria-expanded'), 'true', 'inserted text does not toggle panel');
+      await account.fill('sai'); await page.getByRole('button', { name: 'Xác nhận Tài khoản', exact: true }).click(); await page.locator('.scam-send-feedback').waitFor(); assert.equal(await account.inputValue(), 'sai');
       await until(() => page.getByRole('button', { name: 'Xác nhận Tài khoản', exact: true }).isEnabled(), 'wrong verification reconciles');
       await handle.focus(); await page.keyboard.press('Enter'); assert.equal(await handle.getAttribute('aria-expanded'), 'false'); await handle.press('Space'); assert.equal(await handle.getAttribute('aria-expanded'), 'true'); assert.equal(await account.inputValue(), 'sai');
       await shot(`${device}-drawer-error`); checks.push(stage);
+      assert.equal(operations.filter(o => o.device === device && o.action === 'board').length, 0, 'active play never fetched leaderboard');
+      assert.equal(await page.getByRole('button', { name: 'Bảng xếp hạng', exact: true }).count(), 0);
+      assert.equal(await page.locator('.scam-retention').count(), 0);
       stage = `${device}:three-stages-win600-board`;
       for (const [index, label] of ['Tài khoản', 'Password', 'OTP'].entries()) {
         if (index) await send(`chia sẻ đạo cụ ${label}`);
@@ -151,7 +184,7 @@ if (process.argv.includes('--validate')) {
         await until(() => page.locator('.scam-stage').innerText().then(v => v.startsWith(`${[100, 300, 600][index]}/600`)), 'stage points');
       }
       await page.getByText('Bạn đã thắng!', { exact: true }).waitFor(); await page.getByRole('button', { name: 'Bảng xếp hạng', exact: true }).click(); await page.locator('.scam-board__row').waitFor(); assert.match(await page.locator('.scam-board__row').innerText(), /600.*điểm/s); assert.match(await page.locator('.scam-board__row').innerText(), /1 ván thắng/); await shot(`${device}-leaderboard`); checks.push(stage);
-      await page.getByRole('button', { name: 'Trò chuyện', exact: true }).click(); await page.getByRole('button', { name: 'Chơi lại · Nhân vật mới', exact: true }).click(); await page.getByRole('heading', { name: 'Đang trò chuyện với Sherlock Holmes', exact: true }).waitFor();
+      await page.getByRole('button', { name: 'Time to scam', exact: true }).click(); await page.getByRole('checkbox', { name: /Tôi chỉ dùng nội dung hư cấu/ }).check(); await page.getByRole('button', { name: 'Chơi lại · Nhân vật mới', exact: true }).click(); await page.getByRole('heading', { name: 'Đang trò chuyện với Sherlock Holmes', exact: true }).waitFor();
       stage = `${device}:ai-hangup-partial-score-loss`;
       await send('#continue-low-trust'); assert.equal(s.match.status, 'active'); assert.equal(s.match.trust, 0); assert(await composer.isVisible());
       await send('chia sẻ tài khoản'); await send('kể tiếp'); // Trust60, but no forced loss or auto-win.
@@ -160,6 +193,7 @@ if (process.argv.includes('--validate')) {
       await until(() => page.locator('.scam-stage').innerText().then(v => v.startsWith('100/600')), 'partial stage points');
       await send('#hangup'); await page.getByText('Nhân vật đã ngắt liên lạc.', { exact: true }).waitFor();
       await page.getByText('Nhân vật đã ngắt liên lạc. Ván kết thúc.', { exact: false }).waitFor();
+      assert.match(await emotion.innerText(), /Cảm xúc cuối:.*Tức giận/s);
       assert.equal(await composer.count(), 0); assert.equal(await page.getByRole('button', { name: 'Dừng scam', exact: true }).count(), 0);
       assert.equal(s.match.score, 100); assert.equal(s.bestScore, 600); assert.equal(s.wins, 1); assert.deepEqual(s.match.revealed, ['account']);
       assert(!s.match.messages.some(b => b.text.includes(props.password))); assert.match(await page.locator('.scam-result').innerText(), /100\/600.*1 ván thắng/s);
@@ -168,16 +202,23 @@ if (process.argv.includes('--validate')) {
       await page.locator('.scam-result').scrollIntoViewIfNeeded(); await shot(`${device}-loss`); checks.push(stage);
       stage = `${device}:reload-pending-stop-replay`;
       await page.getByRole('button', { name: 'Chơi lại · Nhân vật mới', exact: true }).click();
+      await composer.waitFor();
+      assert.match(await emotion.innerText(), /Bình thản/, 'replay resets emotion');
+      await send('#annoyed'); assert.match(await emotion.innerText(), /Khó chịu/);
       await composer.fill('#held'); await page.getByRole('button', { name: 'Gửi', exact: true }).click(); await until(() => Boolean(s.pending), 'reserved');
       await page.locator('.scam-outgoing[data-status="sending"]').waitFor();
       assert.equal(await composer.inputValue(), ''); assert.match(await page.locator('.scam-outgoing').innerText(), /#held/);
+      assert.match(await emotion.innerText(), /Khó chịu/, 'pending turn keeps previous emotion');
       await composer.fill('nháp tiếp theo'); await page.locator('.scam-outgoing').scrollIntoViewIfNeeded(); await shot(`${device}-optimistic-pending`);
       await page.locator('.scam-drawer__handle').click();
       for (const label of ['Tài khoản', 'Password', 'OTP']) { const field = page.getByLabel(label, { exact: true }); assert.equal(await field.getAttribute('readonly'), null); await field.fill('prefill'); }
       assert(await page.getByRole('button', { name: 'Xác nhận OTP', exact: true }).isDisabled());
       await page.reload(); await page.getByText('Đang chờ kết quả.', { exact: false }).waitFor();
       assert.equal(await page.locator('.scam-outgoing[data-status="pending"]').count(), 1, 'reload reconstructs pending bubble');
+      assert.match(await emotion.innerText(), /Khó chịu/);
       await page.getByRole('button', { name: 'Dừng scam', exact: true }).click(); await page.getByText('Đã dừng scam.', { exact: true }).waitFor();
+      assert.equal(await page.getByRole('button', { name: 'Bảng xếp hạng', exact: true }).count(), 1);
+      await page.locator('.scam-result').scrollIntoViewIfNeeded(); await shot(`${device}-stopped`);
       if (held) { await held.fulfill({ status: 409, contentType: 'application/json', body: JSON.stringify({ error: { code: 'SCAM_STATE_CHANGED', message: 'Đã dừng' } }) }).catch(() => {}); held = null; }
       await page.getByRole('checkbox', { name: /Tôi chỉ dùng nội dung hư cấu/ }).check();
       await page.getByRole('button', { name: 'Chơi lại · Nhân vật mới', exact: true }).click(); await page.getByRole('heading', { name: 'Đang trò chuyện với Sherlock Holmes', exact: true }).waitFor(); await shot(`${device}-replay`);
@@ -195,7 +236,7 @@ if (process.argv.includes('--validate')) {
     const budgets = new Map(); for (const f of faults) for (const type of ['http', 'console']) { const k = `${f.device}|${type}|${f.path}|${f.status}`; budgets.set(k, (budgets.get(k) ?? 0) + 1); }
     const unexpected = errors.filter(e => { const match = e.type === 'console' && /^Failed to load resource: the server responded with a status of (\d{3}) \([^)]*\)$/.exec(e.message); const k = `${e.device}|${e.type}|${e.path}|${e.status ?? (match ? Number(match[1]) : 0)}`; if ((budgets.get(k) ?? 0) > 0) { budgets.set(k, budgets.get(k) - 1); return false; } return true; });
     assert.deepEqual(unexpected, []); assert.deepEqual([...budgets].filter(([, n]) => n), []);
-    await h.writeResult({ ok: true, mockOnly: true, checks, errors, faults, blocked, inventory, operations, limitations: ['Synthetic intercepted UI only; no Mongo, real provider, native device or AI persona quality.', 'Drawer drag uses mouse pointer at both viewports; not physical touchscreen evidence.'] });
+    await h.writeResult({ ok: true, mockOnly: true, checks, errors, faults, blocked, inventory, operations, limitations: ['Synthetic intercepted UI only; no Mongo, real provider, native device or AI persona quality.', 'Accordion gestures/keyboard use Chromium automation at both viewports; not physical touchscreen or native clipboard evidence.'] });
     console.log(`PASS ${checks.length} scam UI checks; evidence: ${h.evidenceDir}`);
   } catch (e) {
     await h.screenshot(page, 'failure', { fullPage: false }).catch(() => {});
