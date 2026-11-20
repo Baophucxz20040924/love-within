@@ -15,6 +15,7 @@ import { EventOutingEntry } from '../features/friends/outings/EventOutingEntry';
 import { BlockSheet, ReportSheet, type ReportTargetInfo } from '../features/friends/SafetySheets';
 import { useGoBack } from '../features/friends/useGoBack';
 import { ApiRequestError } from '../lib/apiClient';
+import { useCommentDraftDenial } from '../hooks/useCommentDraft';
 import type { FriendEventDetail, FriendEventGuest, RsvpStatus } from '../lib/types';
 
 const errorText = (err: unknown) => (err instanceof ApiRequestError ? err.message : 'Có lỗi xảy ra, thử lại nhé.');
@@ -82,6 +83,7 @@ export function FriendEventPage() {
     refetchOnWindowFocus: true,
     retry: (count, err) => !(err instanceof ApiRequestError && err.status === 404) && count < 1,
   });
+  const discardDraft = useCommentDraftDenial('event', id, event.error);
   const notFound = event.error instanceof ApiRequestError && event.error.status === 404;
   const ev = event.data;
 
@@ -118,6 +120,7 @@ export function FriendEventPage() {
       setConfirm(null);
       qc.removeQueries({ queryKey: key });
       void qc.invalidateQueries({ queryKey: FRIEND_EVENTS_KEY });
+      discardDraft();
       toast.info('Đã xóa kèo');
       navigate('/friends/events', { replace: true });
     },

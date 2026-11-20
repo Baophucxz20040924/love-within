@@ -1,9 +1,10 @@
 import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { SESSION_EXPIRED_EVENT, apiRequest, assertCurrentSession } from '../../lib/apiClient';
+import { SESSION_EXPIRED_EVENT, apiRequest, assertCurrentSession, currentAccessEpoch, waitForAbort } from '../../lib/apiClient';
 import { spaceStore, type Space } from '../../lib/spaceStore';
 import { tokenStore } from '../../lib/tokenStore';
+import { commentDraftStore } from '../../lib/commentDraftStore';
 import type { AuthTokens, JoinResult, Me } from '../../lib/types';
 import { forgetThisDevice } from '../push/device';
 import { advanceAccessEpoch } from '../../lib/apiClient';
@@ -53,7 +54,7 @@ interface AuthState {
   refreshMe: () => Promise<void>;
   /** Discard access-sensitive /me data and invalidate older in-flight /me responses. */
   revokeMe: (maskCouple: boolean) => void;
-  verifyMe: () => Promise<boolean>;
+  verifyMe: (signal?: AbortSignal) => Promise<boolean>;
 }
 
 interface SessionOptions {
@@ -87,6 +88,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
   const meEpoch = useRef(0);
   const meFlight = useRef<{ generation: string; epoch: number; promise: Promise<void> } | null>(null);
+  const verificationFlight = useRef<{ generation: string; epoch: number; access: number; signal?: AbortSignal; promise: Promise<boolean> } | null>(null);
+
+  const confirmedCouple = useRef<{ generation: string; userId: string; coupleId: string } | null>(null);
+  const acceptMe = useCallback((data: Me, generation: string) => {
+    const previous = confirmedCouple.current;
+    if (previous?.generation === generation && previous.userId === data.user.id && previous.coupleId !== data.couple?.id) {
+      commentDraftStore.revokeCouple(generation, previous.userId, previous.coupleId);
+    }
+    confirmedCouple.current = data.couple ? { generation, userId: data.user.id, coupleId: data.couple.id } : null;
+    setMe(data);
+  }, []);
 
   const setSpace = useCallback((s: Space) => {
     spaceStore.set(s);
@@ -98,6 +110,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
    * clearing the cache the next account on this device would briefly see the previous one's data.
    */
   const clearView = useCallback(() => {
+    commentDraftStore.sessionChanged();
     setCompletedAuth(null);
     loginAttempt.current += 1;
     credentialsPending.current = false;
@@ -132,12 +145,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setBootstrapFailed(false);
       return Promise.resolve();
     }
+    const verification = verificationFlight.current;
+    if (verification?.generation === generation && verification.epoch === epoch && verification.access === currentAccessEpoch() && !verification.signal?.aborted) return verification.promise.then(() => undefined);
     if (meFlight.current?.generation === generation && meFlight.current.epoch === epoch) return meFlight.current.promise;
     const promise = (async () => {
       try {
-        const data = await apiRequest<Me>('/me');
+        const data = await apiRequest<Me>('/me', { timeoutMs: 15_000 });
         if (tokenStore.isCurrent(generation) && meEpoch.current === epoch) {
-          setMe(data);
+          acceptMe(data, generation);
           setBootstrapFailed(false);
         }
       } catch {
@@ -146,21 +161,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     })().finally(() => { if (meFlight.current?.promise === promise) meFlight.current = null; });
     meFlight.current = { generation, epoch, promise };
     return promise;
-  }, []);
+  }, [acceptMe]);
 
-  const verifyMe = useCallback(async (): Promise<boolean> => {
+  const verifyMe = useCallback((signal?: AbortSignal): Promise<boolean> => {
     const generation = tokenStore.generation();
-    const epoch = ++meEpoch.current;
-    try {
-      const data = await apiRequest<Me>('/me');
-      if (!tokenStore.isCurrent(generation) || meEpoch.current !== epoch) return false;
-      setMe(data);
-      setBootstrapFailed(false);
-      return true;
-    } catch {
-      return false;
+    const access = currentAccessEpoch();
+    const existing = verificationFlight.current;
+    if (existing?.generation === generation && existing.epoch === meEpoch.current && existing.access === access && !existing.signal?.aborted) {
+      return waitForAbort(existing.promise, signal).catch(() => false);
     }
-  }, []);
+    const epoch = ++meEpoch.current;
+    const promise = (async () => {
+      try {
+        const data = await apiRequest<Me>('/me', { timeoutMs: 15_000, signal });
+        if (signal?.aborted || !tokenStore.isCurrent(generation) || meEpoch.current !== epoch || currentAccessEpoch() !== access) return false;
+        acceptMe(data, generation);
+        setBootstrapFailed(false);
+        return true;
+      } catch {
+        return false;
+      }
+    })().finally(() => { if (verificationFlight.current?.promise === promise) verificationFlight.current = null; });
+    verificationFlight.current = { generation, epoch, access, signal, promise };
+    return promise;
+  }, [acceptMe]);
 
   useLayoutEffect(() => {
     const deactivate = activateAppLock();
@@ -272,6 +296,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       qc.clear();
       setMe(null);
       tokenStore.set(tokens);
+      commentDraftStore.sessionChanged();
       observedGeneration.current = tokenStore.generation();
       setSpace(target);
       bindPasswordLogin(target, expectedEpoch);

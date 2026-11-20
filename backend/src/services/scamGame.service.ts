@@ -6,7 +6,8 @@ import { friendBlockRepository } from '../repositories/friendSafety.repository.j
 import { profileService, profileOf } from './profile.service.js';
 import { AppError, Errors } from '../utils/errors.js';
 import { env } from '../config/env.js';
-import { applyDecision, append, ensureContext, finishStats, newMatch, playerView, STAGES, STAGE_POINTS } from './scamGame/rules.js';
+import { applyDecision, append, ensureContext, finishStats, newMatch, playerView } from './scamGame/rules.js';
+import { normalizeAnswer, scenarioFor } from './scamGame/scenarios.js';
 import { isScamMock, scamDecision } from './scamGame/ai.js';
 
 export interface ScamOperation { operationId: string; expectedRevision: number; matchId?: string }
@@ -86,13 +87,15 @@ export const scamGameService = {
     if (p.pending) throw busy();
     const m = p.match!;
     if (m.stage !== stage) throw Errors.conflict('Hãy xác nhận mục hiện tại trước.');
-    if (m.secrets[stage] !== value) throw new AppError(422, 'SCAM_INCORRECT', 'Thông tin chưa chính xác. Kiểm tra lại tin nhắn nhé.');
+    const scenario = scenarioFor(m), index = scenario.steps.findIndex(step => step.id === stage), step = scenario.steps[index];
+    const normalized = normalizeAnswer(value, step.policy);
+    if (normalized === null || normalized !== normalizeAnswer(m.secrets[stage], step.policy)) throw new AppError(422, 'SCAM_INCORRECT', 'Thông tin chưa chính xác. Kiểm tra lại tin nhắn nhé.');
     const next = copy(p), match = next.match!;
     ensureContext(match);
-    match.score += STAGE_POINTS[stage];
-    append(match, 'system', `Đã xác nhận ${stage === 'account' ? 'tài khoản' : stage === 'password' ? 'password' : 'OTP'}. +${STAGE_POINTS[stage]} điểm.`);
-    if (stage === 'otp') { match.status = 'won'; match.endedAt = new Date().toISOString(); finishStats(next); }
-    else match.stage = STAGES[STAGES.indexOf(stage) + 1];
+    match.score += step.points;
+    append(match, 'system', `Đã xác nhận ${step.label}. +${step.points} điểm.`);
+    if (index === scenario.steps.length - 1) { match.status = 'won'; match.endedAt = new Date().toISOString(); finishStats(next); }
+    else match.stage = scenario.steps[index + 1].id;
     receipt(next, op, hash);
     return commit(p, next);
   },
@@ -108,7 +111,7 @@ export const scamGameService = {
     return commit(p, next);
   },
   async leaderboard(userId: Types.ObjectId, limit: number, cursor?: string) {
-    const scope = `scam:${SCAM_RULE_VERSION}:${userId}`;
+    const scope = `scam:friends-v2:${SCAM_RULE_VERSION}:${userId}`;
     let after: ScamBoardPosition | undefined;
     if (cursor) {
       try {
@@ -120,7 +123,7 @@ export const scamGameService = {
       } catch { throw Errors.badRequest('Cursor không hợp lệ.'); }
     }
     const blocked = await friendBlockRepository.blockedIdsFor(userId);
-    const rows = await scamGameRepository.leaderboard([...blocked], limit, after);
+    const rows = await scamGameRepository.leaderboard(userId, [...blocked], limit, after);
     const page = rows.slice(0, limit), last = page[page.length - 1];
     const profiles = await profileService.load(page.map(r => r._id), { skipMissing: true });
     return { items: page.filter(r => profiles.has(String(r._id))).map(r => ({ player: profileOf(profiles, r._id), bestScore: r.bestScore, wins: r.wins, rank: r.rank })),

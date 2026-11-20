@@ -7,6 +7,7 @@ import { FriendComments, storyCommentApi } from '../features/friends/FriendComme
 import { FriendComposer } from '../features/friends/FriendComposer';
 import { FriendStoryCard } from '../features/friends/FriendStoryCard';
 import { ApiRequestError } from '../lib/apiClient';
+import { useCommentDraftDenial } from '../hooks/useCommentDraft';
 import type { FriendStory, FriendStoryPage } from '../lib/types';
 
 /** /friends/posts/:id — one post with its comments. `?comment=<id>` (from a notification) opens at that comment. */
@@ -31,6 +32,7 @@ export function FriendPostPage() {
         .find((s) => s.id === id),
     retry: (count, err) => !(err instanceof ApiRequestError && err.status === 404) && count < 1,
   });
+  const discardDraft = useCommentDraftDenial('story', id, story.error);
   const notFound = story.error instanceof ApiRequestError && story.error.status === 404;
 
   return (
@@ -48,7 +50,7 @@ export function FriendPostPage() {
             story={story.data}
             clamp={false}
             onEdit={setEditing}
-            onDeleted={() => navigate('/friends', { replace: true })}
+            onDeleted={() => { discardDraft(); navigate('/friends', { replace: true }); }}
             onComment={() => setFocusKey((k) => k + 1)}
           />
           <FriendComments api={commentApi} focusKey={focusKey} focusCommentId={focusCommentId} />

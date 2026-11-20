@@ -19,7 +19,10 @@ let states=[],refs=[],si,ri,mi,tree,queries=[],mutations=[],invalidations=[];
 const root = { id:'root',body:'root text',author:{id:'u',displayName:'U'},mentions:[],parentId:null };
 let rootResult={isSuccess:true,data:{items:[root],nextCursor:'older'}},contextResult={};
 const jsx=(type,props)=>({type,props});
+let draftText = '', draftRoot = null;
+const draftHook = { useCommentDraft: () => ({ ready: true, text: draftText, rootId: draftRoot, setText: (text, root = draftRoot) => { draftText = text; draftRoot = root; }, snapshot: () => ({ text: draftText }), clear: () => { draftText = ''; draftRoot = null; return true; }, discard: () => { draftText = ''; draftRoot = null; } }), useCommentDraftDenial() {} };
 const exportsUI=load('features/friends/FriendComments.tsx', {
+  '../../hooks/useCommentDraft': draftHook,
   react:{useState(v){const i=si++;if(!(i in states))states[i]=typeof v==='function'?v():v;return[states[i],v=>states[i]=typeof v==='function'?v(states[i]):v];},useRef(v){return refs[ri++]??={current:v};},useEffect(){},useId:()=> 'form'},
   'react/jsx-runtime':{jsx,jsxs:jsx},'../stories/form-interactions.css':{}, 'react-router-dom':{Link:'Link'},
   '@tanstack/react-query':{useQuery:o=>{queries.push(o);return {isFetching:false,...(o.queryKey.includes('context')?contextResult:rootResult)};},useQueryClient:()=>({invalidateQueries:async o=>invalidations.push(o),setQueryData:()=>assert.fail('No full-array overlay')}),useMutation:o=>{mutations[mi++]=o;return{...o,isPending:false,isError:false,mutate(){}};}},
@@ -34,7 +37,7 @@ function nodes(n=tree){return !n||typeof n!=='object'?[]:[n,...[n.props?.childre
 render();assert.equal(queries[0].refetchInterval,20000);assert.equal(queries[0].enabled,true);assert.equal(queries[1].enabled,false);
 const nav=nodes().find(n=>typeof n.type==='function'&&n.type.name==='PageNav');nav.props.older();render();assert.equal(queries[0].queryKey.at(-1),'older');
 const input=nodes().find(n=>n.type==='MentionField');input.props.onChange('draft',[]);render();mutations[0].onError();render();assert.equal(nodes().find(n=>n.type==='MentionField').props.text,'draft');
-mutations[0].onSuccess({...root,id:'new'});render();assert.equal(queries[0].queryKey.at(-1),null);assert.equal(nodes().find(n=>n.type==='MentionField').props.text,'');assert.equal(invalidations[0].refetchType,'active');
+nodes().find(n=>n.type==='form').props.onSubmit({preventDefault(){}}); mutations[0].onSuccess({...root,id:'new'});render();assert.equal(queries[0].queryKey.at(-1),null);assert.equal(nodes().find(n=>n.type==='MentionField').props.text,'');assert.equal(invalidations[0].refetchType,'active');
 mutations[0].onSuccess({...root,id:'reply',parentId:'root'});contextResult={isSuccess:true,data:{root,replies:{items:[],nextCursor:null}}};render();assert.equal(queries[0].enabled,false);assert.equal(queries[1].enabled,true);assert.equal(queries[1].queryKey.at(-1),'root');
 const replyComponent=nodes().find(n=>typeof n.type==='function'&&n.type.name==='Replies');
 nodes().find(n=>n.type==='ReportSheet').props.onBlock(root.author);render();nodes().find(n=>n.type==='BlockSheet').props.onBlocked();render();assert.equal(nodes().filter(n=>typeof n.type==='function'&&n.type.name==='CommentItem').length,0,'Successful local block immediately hides cached root before refetch');

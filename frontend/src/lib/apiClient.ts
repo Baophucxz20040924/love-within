@@ -7,11 +7,13 @@ export class ApiRequestError extends Error {
   readonly status: number;
   readonly code: string;
   readonly details?: unknown;
-  constructor(status: number, code: string, message: string, details?: unknown) {
+  readonly requestId?: string;
+  constructor(status: number, code: string, message: string, details?: unknown, requestId?: string) {
     super(message);
     this.status = status;
     this.code = code;
     this.details = details;
+    this.requestId = typeof requestId === 'string' && /^[a-zA-Z0-9_-]{1,100}$/.test(requestId) ? requestId : undefined;
   }
 }
 
@@ -159,6 +161,7 @@ async function requestJson<T>(path: string, options: RequestOptions): Promise<T>
       payload?.error?.code ?? 'ERROR',
       payload?.error?.message || res.statusText || 'Có lỗi xảy ra, thử lại nhé.',
       payload?.error?.details,
+      payload?.error?.requestId ?? res.headers?.get('x-request-id') ?? undefined,
     );
   }
   if (res.status === 204) return undefined as T;

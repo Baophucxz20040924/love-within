@@ -7,6 +7,7 @@ import { STORY_FEED_KEY, storiesApi, storyKey } from '../features/stories/api';
 import { StoryCard } from '../features/stories/StoryCard';
 import { StoryComposer } from '../features/stories/StoryComposer';
 import { ApiRequestError } from '../lib/apiClient';
+import { useCommentDraftDenial } from '../hooks/useCommentDraft';
 import type { Story, StoryPage } from '../lib/types';
 
 /** /stories/:id — one post with its comments. */
@@ -28,6 +29,7 @@ export function StoryDetailPage() {
         .find((s) => s.id === id),
     retry: (count, err) => !(err instanceof ApiRequestError && err.status === 404) && count < 1,
   });
+  const discardDraft = useCommentDraftDenial('story', id, story.error);
   const notFound = story.error instanceof ApiRequestError && story.error.status === 404;
 
   return (
@@ -45,7 +47,7 @@ export function StoryDetailPage() {
             story={story.data}
             clamp={false}
             onEdit={setEditing}
-            onDeleted={() => navigate('/stories', { replace: true })}
+            onDeleted={() => { discardDraft(); navigate('/stories', { replace: true }); }}
             onComment={() => setFocusKey((k) => k + 1)}
           />
           <CommentSection storyId={id} focusKey={focusKey} />

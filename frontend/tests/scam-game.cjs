@@ -43,7 +43,8 @@ assert.deepEqual(Object.keys(emotions.emotionLabels).sort(), [...emotionValues].
 for (const value of emotionValues) assert(emotions.emotionLabel(value).every(Boolean));
 for (const value of [undefined, null, 'unknown', 'toString', {}]) assert.equal(emotions.emotionLabel(value)[1], 'Bình thản');
 class ApiRequestError extends Error { constructor(status, code, message) { super(message); this.status = status; this.code = code; } }
-const { SecretDrawer } = load('features/scam/SecretDrawer.tsx', { react, 'react/jsx-runtime': { jsx, jsxs: jsx } });
+const scenarios = load('features/scam/scenarios.ts', {});
+const { SecretDrawer } = load('features/scam/SecretDrawer.tsx', { './scenarios': scenarios, react, 'react/jsx-runtime': { jsx, jsxs: jsx } });
 async function tests() {
   reset(); let verified;
   const match = { id: 'match', stage: 'otp', status: 'active', revealed: ['account', 'password', 'otp'] };
@@ -80,7 +81,7 @@ async function tests() {
   const page = load('features/scam/ScamGamePage.tsx', { '../realtime/verification': { subscribeVerification: () => () => {} }, '../appLock/store': { subscribeAppLock: () => () => {} }, react, 'react/jsx-runtime': { jsx, jsxs: jsx }, 'react-router-dom': { Link: 'Link' },
     '@tanstack/react-query': { useQueryClient: () => ({ invalidateQueries: async () => {} }) }, '../auth/AuthContext': { useAuth: () => ({ me: { user: { id: 'u' } } }) },
     '../../lib/apiClient': { ApiRequestError, currentAccessEpoch: () => epoch }, '../../lib/tokenStore': { tokenStore: { generation: () => generation } },
-    './emotions': emotions, './outgoing': outgoingHelpers, './api': { scamApi: api, scamKey: wrappers.scamKey }, './SecretDrawer': { SecretDrawer: 'Drawer', stageLabels: { account: 'Tài khoản', password: 'Password', otp: 'OTP' } }, './ScamLeaderboard': { ScamLeaderboard: 'Board' }, './scam.css': {},
+    './scenarios': scenarios, './emotions': emotions, './outgoing': outgoingHelpers, './api': { scamApi: api, scamKey: wrappers.scamKey }, './SecretDrawer': { SecretDrawer: 'Drawer', stageLabels: { account: 'Tài khoản', password: 'Password', otp: 'OTP' } }, './ScamLeaderboard': { ScamLeaderboard: 'Board' }, './scam.css': {},
   }, { window: { confirm: () => true, matchMedia: () => ({ matches: true }) } });
   const boundary = page.ScamGamePage(); const room = boundary.type, roomProps = boundary.props;
   tree = render(room, roomProps); await new Promise(r => setImmediate(r)); tree = render(room, roomProps); assert.equal(reads, 1);
@@ -196,9 +197,19 @@ async function tests() {
   reset();
   let boardResult = { isSuccess: true, data: { pages: [{ items: [{ player: { id: 'u', displayName: 'Người chơi' }, bestScore: 600, wins: 2, rank: 1 }], nextCursor: 'next' }] }, hasNextPage: true };
   let query;
-  const boardUI = load('features/scam/ScamLeaderboard.tsx', { 'react/jsx-runtime': { jsx, jsxs: jsx }, '@tanstack/react-query': { useInfiniteQuery: o => { query = o; return boardResult; } }, '../../components/Avatar': { Avatar: 'Avatar' }, './api': { scamApi: { board() {} }, scamKey: wrappers.scamKey } });
-  tree = boardUI.ScamLeaderboard({ userId: 'u' }); assert.equal(query.queryKey.join('/'), 'friends/scam/u/board'); assert(text(tree).includes('600')); assert(text(tree).includes('2 ván thắng'));
+  const boardUI = load('features/scam/ScamLeaderboard.tsx', { 'react/jsx-runtime': { jsx, jsxs: jsx }, '@tanstack/react-query': { useInfiniteQuery: o => { query = o; return boardResult; } }, '../../components/Avatar': { Avatar: 'Avatar' }, '../../lib/apiClient': { ApiRequestError: class extends Error {} }, './api': { scamApi: { board() {} }, scamKey: wrappers.scamKey } });
+  tree = boardUI.ScamLeaderboard({ userId: 'u' }); assert.equal(query.queryKey.join('/'), 'friends/scam/u/board/friends-v2'); assert(text(tree).includes('600')); assert(text(tree).includes('2 ván thắng'));
   boardResult = { ...boardResult, isError: true, isSuccess: false }; tree = boardUI.ScamLeaderboard({ userId: 'u' }); assert(!text(tree).includes('Người chơi'), 'hide cached private board on failed revalidation');
+  let retries = 0, nextRetries = 0;
+  boardResult.refetch = () => { retries++; }; boardResult.fetchNextPage = () => { nextRetries++; };
+  tree = boardUI.ScamLeaderboard({ userId: 'u' }); nodes(tree).find(n => n.type === 'button' && text(n) === 'Thử lại').props.onClick();
+  assert.equal(retries, 1); assert.equal(nextRetries, 0);
+  boardResult.isFetchNextPageError = true; tree = boardUI.ScamLeaderboard({ userId: 'u' });
+  assert(text(tree).includes('Người chơi')); nodes(tree).find(n => n.type === 'button' && text(n) === 'Thử lại').props.onClick();
+  assert.equal(nextRetries, 1);
+  boardResult = { isSuccess: true, data: { pages: [{ items: [], nextCursor: 'next' }] }, hasNextPage: true };
+  tree = boardUI.ScamLeaderboard({ userId: 'u' }); assert(!text(tree).includes('chưa có ván đã kết thúc'));
+  boardResult.hasNextPage = false; tree = boardUI.ScamLeaderboard({ userId: 'u' }); assert(text(tree).includes('chưa có ván đã kết thúc'));
   console.log('PASS scam UI: entry route, consent/no auto-start, confirmed-stage progress/results, wrappers, scoped keys, native accordion/no pointer capture, terminal-only board, OTP zeros, draft retention, duplicate guard, uncertain-write GET reconciliation and late access/session fences');
 }
 tests().catch(e => { reset(); console.error(e); process.exitCode = 1; });

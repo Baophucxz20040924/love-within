@@ -75,8 +75,10 @@ export function revokeDomains(qc: QueryClient, space: Space, domains: readonly D
 
 /** Revalidate all currently observed private data while the route tree is masked.
  * Unobserved caches are removed so a later mount cannot show a stale private snapshot. */
-export async function verifyScope(qc: QueryClient, space: Space, valid: () => boolean): Promise<boolean> {
-  const keys = queryPrefixes(scopeDomains(space)).filter((key) => space === 'friends' ? key[0] === 'friends' : key[0] !== 'friends');
+export async function verifyScope(qc: QueryClient, space: Space, valid: () => boolean, domains: readonly Domain[] = scopeDomains(space)): Promise<boolean> {
+  if (!valid()) return false;
+  const relevant = space === 'friends' && domains.includes('account') ? [...domains, 'friend-profile' as const] : domains;
+  const keys = queryPrefixes(relevant).filter((key) => space === 'friends' ? key[0] === 'friends' : key[0] !== 'friends');
   const matches = (query: { queryKey: QueryKey }) => keys.some((key) => key.length <= query.queryKey.length && key.every((part, i) => part === query.queryKey[i]));
   const filters = { predicate: matches };
   await qc.cancelQueries(filters);

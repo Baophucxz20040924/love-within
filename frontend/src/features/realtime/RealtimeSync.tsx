@@ -3,7 +3,8 @@ import { isAppLocked, subscribeAppLock } from '../appLock/store';
 import { useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '../auth/AuthContext';
 import { tokenStore } from '../../lib/tokenStore';
-import { advanceAccessEpoch } from '../../lib/apiClient';
+import { advanceAccessEpoch, withRequestDeadline } from '../../lib/apiClient';
+import type { Domain } from './parser';
 import { DomainBatch, invalidateDomains, needsMe, revokeDomains, scopeDomains, verifyScope } from './invalidation';
 import { setVerification } from './verification';
 import { RealtimeStream } from './stream';
@@ -51,35 +52,58 @@ export function RealtimeSync() {
     let active = true;
     let verificationId = 0;
     let verifying = false;
-    let pendingDirty = false;
+    const pendingDirty = new Set<Domain>();
+    let controller: AbortController | undefined;
     let retryTimer: ReturnType<typeof setTimeout> | undefined;
     const valid = () => active && !isAppLocked() && tokenStore.isCurrent(generation) && document.visibilityState === 'visible' && navigator.onLine;
     const batch = new DomainBatch((domains) => {
       if (!valid()) return;
-      if (verifying) { pendingDirty = true; return; }
+      if (verifying) { domains.forEach(domain => pendingDirty.add(domain)); return; }
       invalidateDomains(qc, domains, space);
       if (space === 'friends' && domains.includes('account')) invalidateDomains(qc, ['friend-profile']);
       if (needsMe(domains)) void refreshMe();
     });
-    const reconcileAccess = (attempt = 0) => {
-      if (!valid()) return;
+    const reconcileAccess = (attempt = 0, supersede = false, alreadyRevoked = false) => {
+      // Initial REST and SSE ready describe the same boundary. Coalesce BEFORE fencing writes.
+      if (!valid() || (verifying && !supersede)) return;
       if (retryTimer !== undefined) clearTimeout(retryTimer);
+      retryTimer = undefined;
+      controller?.abort();
+      const round = new AbortController();
+      controller = round;
       const id = ++verificationId;
-      const current = () => valid() && id === verificationId;
-      batch.clear();
+      const current = () => valid() && id === verificationId && !round.signal.aborted;
       verifying = true;
+      batch.flush();
+      pendingDirty.clear(); // The full pass below covers hints already received.
       setVerification('checking');
-      advanceAccessEpoch();
-      void (async () => {
-        const [meOk, queriesOk] = await Promise.all([verifyMe(), verifyScope(qc, space, current)]);
-        if (!current()) return;
-        if (meOk && queriesOk) {
-          if (pendingDirty) { pendingDirty = false; reconcileAccess(); return; }
-          verifying = false; setVerification('clear', undefined, { generation, userId, space }); return;
+      if (!alreadyRevoked) advanceAccessEpoch();
+      void withRequestDeadline(20_000, round.signal, async signal => {
+        const fresh = () => current() && !signal?.aborted;
+        const [meOk, queriesOk] = await Promise.all([verifyMe(signal), verifyScope(qc, space, fresh)]);
+        if (!fresh() || !meOk || !queriesOk) return false;
+        // At most two trailing domain passes, not an unbounded series of full auth rounds.
+        for (let pass = 0; pendingDirty.size && pass < 2; pass++) {
+          const domains = [...pendingDirty];
+          pendingDirty.clear();
+          const [identityOk, scopeOk] = await Promise.all([
+            needsMe(domains) ? verifyMe(signal) : Promise.resolve(true),
+            verifyScope(qc, space, fresh, domains),
+          ]);
+          if (!fresh() || !identityOk || !scopeOk) return false;
         }
-        if (attempt < 2) retryTimer = setTimeout(() => reconcileAccess(attempt + 1), 1000 * 2 ** attempt);
-        else setVerification('failed', () => reconcileAccess());
-      })().catch(() => { if (current()) setVerification('failed', () => reconcileAccess()); });
+        return fresh() && pendingDirty.size === 0;
+      }).catch(() => false).then(ok => {
+        if (!current()) return;
+        if (ok) {
+          verifying = false;
+          setVerification('clear', undefined, { generation, userId, space });
+        } else {
+          round.abort(); // Fence late work before offering retry; never log out on timeout.
+          if (attempt < 2) retryTimer = setTimeout(() => reconcileAccess(attempt + 1, true), 1000 * 2 ** attempt);
+          else setVerification('failed', () => reconcileAccess(0, true));
+        }
+      });
     };
     const stream = new RealtimeStream(space, (event) => {
       if (!valid()) return;
@@ -90,9 +114,9 @@ export function RealtimeSync() {
         const domains = event.domains.length ? event.domains : scopeDomains(space);
         revokeMe(space === 'couple' && domains.some((d) => d === 'couple' || d === 'pairing' || d === 'account'));
         revokeDomains(qc, space, domains);
-        reconcileAccess();
+        reconcileAccess(0, true, true);
       } else if (verifying) {
-        pendingDirty = true;
+        event.domains.forEach(domain => pendingDirty.add(domain));
       } else {
         batch.add(event.domains);
       }
@@ -102,6 +126,7 @@ export function RealtimeSync() {
     stream.start();
     return () => {
       active = false; verificationId++;
+      controller?.abort();
       if (retryTimer !== undefined) clearTimeout(retryTimer);
       batch.clear(); stream.stop();
       clearVerification();

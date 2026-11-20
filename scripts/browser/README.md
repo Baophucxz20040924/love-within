@@ -112,6 +112,16 @@ Historical trust-only / AI hang-up result: **14/14 checks**, `%TEMP%/lw_scam_bro
 
 Historical UI-refresh result (before AI hang-up contract): **14/14 checks**, `%TEMP%/lw_scam_browser/1795080777494`; result JSON reviewed, six injected503/422 faults produced exactly12 budgeted HTTP/console errors, no unknown/external requests. The18 viewport captures are an inventory, not18 fully reviewed states. Visual review spans the same-source passing runs: feed/lobby/drawer/BXH/composer on both viewports at `1795080324632`, mobile/desktop character headers plus mobile consent at `1795080617052`, and final desktop consent at `1795080777494`. CTA/composer/stop are asserted scroll-reachable above navigation; textarea width, long wrapping/selectable bubbles and password-toggle draft retention are checked. They are not promised onscreen without scrolling or with a native keyboard open. Earlier failures remain separate (synthetic SSE EOF interrupted actions; a split count/input read raced terminal removal); the fixture now holds SSE and observes terminal input atomically. Latest frontend build and all29 offline suite files passed, including65 lock-store cases and the game VM suite. Backend30-suite evidence predates this frontend-only refresh; no backend runtime/provider probe ran here. Suite-file counts are not individual test counts. The owned preview was stopped; existing Vite was left untouched.
 
+## Friends board, scenarios and comment drafts (2026-11-20)
+
+Fully intercepted production-preview runs at360×780 and1280×800:
+
+- Game: **20/20 groups**, `%TEMP%/lw_scam_browser/1795134793835`. Adds identity two-step and social three-step forms, reload, wrong-answer retention/retry and600-point completion. The extra scenario DTOs/answers are synthetic; backend catalog/scoring is tested separately offline.
+- Friends story/event: **28/28 groups**, `%TEMP%/lw_friend_comments/1795134814034`. Adds actual page reload with text restoration and reply reload posting to the original root, alongside history,503 retention,403 hiding and local block checks.
+- Couple history: **14/14 groups**, `%TEMP%/lw_history_browser/1795134882712`. Adds actual reload restoration of the couple comment draft.
+
+All three runs passed their exact HTTP/console fault budgets and unknown-request assertions. JSON summaries reviewed. Four screenshots inspected: mobile identity DOB, desktop social second question, mobile Friends story failed draft and desktop couple failed draft. Controls/text fit; lower explanatory text can require scrolling above fixed navigation. This is not a complete visual review of every capture. No real API/provider/DB calls, native-device test or measured production improvement. Only owned preview5175 was stopped; existing4000/5173 listeners were not touched. Held-auth deadline, cross-account browser transitions and every draft revocation race are not covered by these runs; isolated auth/store/coordinator regressions provide narrower synthetic coverage. Parent resource-deletion cleanup was added after these browser runs and is not claimed browser-verified.
+
 ## Install external tooling
 
 PowerShell, from the repository root:

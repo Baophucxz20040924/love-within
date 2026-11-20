@@ -1,7 +1,7 @@
 // Shared API types (mirror backend response shapes).
 
 export interface ApiError {
-  error: { code: string; message: string; details?: unknown };
+  error: { code: string; message: string; details?: unknown; requestId?: string };
 }
 
 export interface AuthTokens {

@@ -101,6 +101,8 @@ if (process.argv.includes('--validate')) {
       await replies.getByText('Trả lời mẫu 2000', { exact: true }).waitFor(); checks.push(stage);
       const rootNav = section.getByRole('navigation').last();
       const input = section.getByRole('textbox'); await input.fill('Giữ nội dung synthetic');
+      await page.reload(); await until(() => input.inputValue().then(v => v === 'Giữ nội dung synthetic'), 'draft restored after actual reload');
+      checks.push(`${label}:draft-reload`);
       await rootNav.getByRole('button', { name: 'Cũ hơn', exact: true }).click(); await section.getByText('Gốc mẫu 961', { exact: true }).waitFor();
       assert.equal(await input.inputValue(), 'Giữ nội dung synthetic');
       stage = `${label}:failed-draft-add-from-history`;
@@ -121,7 +123,10 @@ if (process.argv.includes('--validate')) {
       await contextReplies.getByRole('navigation').getByRole('button', { name: 'Mới hơn', exact: true }).click(); await contextReplies.getByText(target.body, { exact: true }).waitFor();
       await shot(page, `${label}-deep-context`);
       await page.locator(`#comment-${target.id}`).getByRole('button', { name: 'Trả lời', exact: true }).click(); await section.getByRole('textbox').fill('Trả lời mới synthetic');
-      await section.getByRole('button', { name: 'Gửi bình luận', exact: true }).click(); await section.locator('.comment__body').filter({ hasText: /^Trả lời mới synthetic$/ }).waitFor(); checks.push(stage);
+      await page.reload();
+      await until(() => input.inputValue().then(v => v === 'Trả lời mới synthetic'), 'reply draft restored');
+      await section.getByRole('button', { name: 'Gửi bình luận', exact: true }).click(); await section.locator('.comment__body').filter({ hasText: /^Trả lời mới synthetic$/ }).waitFor();
+      assert.equal(s.replyAdded.parentId, target.parentId, 'restored reply posts only to the original root'); checks.push(stage);
       stage = `${label}:delete-reply-live-denial`;
       await page.locator(`#comment-${id(3001)}`).getByRole('button', { name: 'Xóa', exact: true }).click(); await page.getByRole('dialog', { name: 'Xóa bình luận?', exact: true }).getByRole('button', { name: 'Xóa', exact: true }).click();
       await page.locator(`#comment-${id(3001)}`).waitFor({ state: 'hidden' });

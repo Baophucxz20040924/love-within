@@ -18,6 +18,8 @@ import { updateFriendStoryInCache } from './cache';
 import { MentionField, type MentionSearch } from './MentionField';
 import { prefillMention, segments, toPayload, type DraftMention } from './mentions';
 import { BlockSheet, ReportSheet, type ReportTargetInfo } from './SafetySheets';
+import { useCommentDraft, useCommentDraftDenial } from '../../hooks/useCommentDraft';
+import type { CommentDraft } from '../../lib/commentDraftStore';
 
 const errorText = (err: unknown) => (err instanceof ApiRequestError ? err.message : 'Có lỗi xảy ra, thử lại nhé.');
 
@@ -186,9 +188,8 @@ function ScopedFriendComments({ api, focusKey, focusCommentId }: Props) {
   const errorRef = useRef<HTMLParagraphElement>(null);
   const formId = useId();
   const sending = useRef(false);
-  const [text, setText] = useState('');
+  const submitted = useRef<CommentDraft | undefined>(undefined);
   const [mentions, setMentions] = useState<DraftMention[]>([]);
-  const [replyTo, setReplyTo] = useState<{ rootId: string; name: string } | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
   const [highlight, setHighlight] = useState<string | null>(null);
   const [toDelete, setToDelete] = useState<FriendComment | null>(null);
@@ -216,6 +217,28 @@ function ScopedFriendComments({ api, focusKey, focusCommentId }: Props) {
     queryFn: ({ signal }) => api.context(contextId!, signal), enabled: Boolean(contextId),
     refetchInterval: 20_000, refetchOnWindowFocus: true });
   const current = contextId ? context : comments;
+  const kind = api.reportType === 'event_comment' ? 'event' : 'story';
+  const resourceId = String(api.key[2]);
+  const draft = useCommentDraft(kind, resourceId, current.isSuccess && !current.isPlaceholderData);
+  const { text, setText } = draft;
+  // Restored replies must resolve their original root; never silently post them at the top level.
+  const replyContext = useQuery({ queryKey: [...key, 'draft-root', scope, draft.rootId],
+    queryFn: ({ signal }) => api.context(draft.rootId!, signal), enabled: draft.ready && !!draft.rootId,
+    staleTime: 0, retry: false });
+  const replyTo = draft.rootId ? { rootId: draft.rootId, name: replyContext.data?.root.author.displayName ?? 'bình luận đã chọn' } : null;
+  const replyReady = !draft.rootId || (replyContext.isSuccess && !replyContext.isFetching && replyContext.data.root.id === draft.rootId);
+  const setReplyTo = (target: { rootId: string; name: string } | null) => {
+    draft.setText(text, target?.rootId ?? null);
+    setMentions([]);
+  };
+  useCommentDraftDenial(kind, resourceId, comments.error);
+  useEffect(() => { if (!draft.ready) setMentions([]); }, [draft.ready]);
+  useEffect(() => {
+    if (replyContext.error instanceof ApiRequestError && (replyContext.error.status === 403 || replyContext.error.status === 404)) {
+      draft.discard();
+      setMentions([]);
+    }
+  }, [replyContext.error]);
   const threads = (current.isError ? [] : contextId ? (context.data ? [context.data.root] : []) : [...(comments.data?.items ?? [])].reverse()).filter(visible);
   const invalidate = () => void qc.invalidateQueries({ queryKey: key, refetchType: 'active' });
   const newest = () => { setContextId(null); setCursors([undefined]); setExpanded(new Set()); };
@@ -251,9 +274,7 @@ function ScopedFriendComments({ api, focusKey, focusCommentId }: Props) {
     mutationFn: (input: FriendCommentInput) => api.add(input),
     onSuccess: (c) => {
       sending.current = false;
-      setText('');
-      setMentions([]);
-      setReplyTo(null);
+      if (submitted.current && draft.clear(submitted.current)) setMentions([]);
       requestAnimationFrame(() => resize(inputRef.current));
       if (c.parentId) {
         setContextId(c.parentId);
@@ -279,7 +300,7 @@ function ScopedFriendComments({ api, focusKey, focusCommentId }: Props) {
       setToDelete(null);
       if (contextId === c.id || (!c.parentId && context.data?.root.id === c.id)) newest();
       invalidate();
-      setReplyTo((r) => (r && r.rootId === c.id ? null : r));
+      if (draft.rootId === c.id) { draft.discard(); setMentions([]); }
       api.onCount(qc, -(res.removed ?? 1));
       toast.info('Đã xóa bình luận');
     },
@@ -291,12 +312,11 @@ function ScopedFriendComments({ api, focusKey, focusCommentId }: Props) {
     if (sending.current) return;
     const rootId = c.parentId ?? c.id;
     expand(rootId);
-    setReplyTo({ rootId, name: c.author.displayName });
     const next = c.author.id === me?.user.id || !api.mention ? { text, mentions }
       : api.reportType === 'event_comment' && !c.canMentionAuthor
         ? { text: `${text}${text && !/\s$/.test(text) ? ' ' : ''}@${c.author.displayName} `, mentions }
         : prefillMention(text, mentions, c.author);
-    setText(next.text);
+    setText(next.text, rootId);
     setMentions(next.mentions);
     requestAnimationFrame(() => {
       const el = inputRef.current;
@@ -310,7 +330,8 @@ function ScopedFriendComments({ api, focusKey, focusCommentId }: Props) {
   function submit(e?: FormEvent) {
     e?.preventDefault();
     const payload = toPayload(text, mentions);
-    if (!payload.body || add.isPending || sending.current) return;
+    if (!draft.ready || !replyReady || !payload.body || add.isPending || sending.current) return;
+    submitted.current = draft.snapshot();
     sending.current = true;
     add.mutate({ ...payload, ...(replyTo ? { parentId: replyTo.rootId } : {}) });
   }
@@ -357,7 +378,7 @@ function ScopedFriendComments({ api, focusKey, focusCommentId }: Props) {
         newest={cursors.length > 1 ? newest : undefined} />}
 
       <form className={`comment-bar${replyTo ? ' comment-bar--reply' : ''}`} onSubmit={submit}>
-        <fieldset className="comment-bar__fields" disabled={add.isPending} aria-label="Viết bình luận" aria-describedby={`${formId}-hint${add.isError ? ` ${formId}-error` : ''}`}>
+        <fieldset className="comment-bar__fields" disabled={add.isPending || !draft.ready} aria-label="Viết bình luận" aria-describedby={`${formId}-hint${add.isError ? ` ${formId}-error` : ''}`}>
         {replyTo && (
           <div className="comment-bar__replying">
             <span>
@@ -383,12 +404,14 @@ function ScopedFriendComments({ api, focusKey, focusCommentId }: Props) {
           onKeyDown={onKeyDown}
           onInput={resize}
         />
-        <button type="submit" className="icon-btn comment-bar__send" aria-label="Gửi bình luận" disabled={!text.trim() || add.isPending}>
+        <button type="submit" className="icon-btn comment-bar__send" aria-label="Gửi bình luận" disabled={!draft.ready || !replyReady || !text.trim() || add.isPending}>
           {add.isPending ? <span className="spinner" aria-hidden="true" /> : <Icon name="send" size={20} />}
         </button>
         </fieldset>
       </form>
       {add.isError && <p ref={errorRef} id={`${formId}-error`} className="form-feedback comment-feedback" role="alert" tabIndex={-1}>{errorText(add.error)} Nội dung vẫn được giữ lại, bạn có thể gửi lại.</p>}
+      {replyTo && !replyReady && <p role="status">Chưa xác minh được bình luận gốc. Không gửi nháp thành bình luận mới. <button type="button" className="text-link" onClick={() => void replyContext.refetch()}>Thử lại</button></p>}
+      {text && <p className="comment-hint">Nháp được giữ trong tab này tối đa 24 giờ; tag khôi phục là chữ thường, hãy chọn lại nếu cần. <button type="button" className="text-link" disabled={add.isPending} onClick={() => { draft.discard(); setMentions([]); }}>Bỏ nháp</button></p>}
       <p id={`${formId}-hint`} className="comment-hint">Trên máy tính: Enter để gửi, Shift + Enter để xuống dòng.</p>
 
       <BottomSheet open={toDelete !== null} busy={del.isPending} onClose={() => { if (!del.isPending) setToDelete(null); }} title="Xóa bình luận?">
@@ -415,7 +438,8 @@ function ScopedFriendComments({ api, focusKey, focusCommentId }: Props) {
       <BlockSheet user={blocking} onClose={() => setBlocking(null)} onBlocked={() => {
         if (blocking) setBlockedAuthors(s => new Set(s).add(blocking.id));
         setExpanded(new Set());
-        setReplyTo(null);
+        draft.discard();
+        setMentions([]);
         invalidate();
       }} />
     </section>

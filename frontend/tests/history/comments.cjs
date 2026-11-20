@@ -7,7 +7,10 @@ let states=[],refs=[],si,ri,mi,tree,query,mutations=[],invalidations=[];
 let result={isSuccess:true,data:{items:[{id:'2',body:'second',author:{id:'u',displayName:'U'}},{id:'1',body:'first',author:{id:'u',displayName:'U'}}],nextCursor:'older'}};
 const jsx=(type,props)=>({type,props});
 const api={commentsPage:async()=>{},addComment:async()=>{},deleteComment:async()=>{}};
+let draftText = '';
+const draftHook = { useCommentDraft: () => ({ ready: true, text: draftText, setText: text => { draftText = text; }, snapshot: () => ({ text: draftText }), clear: () => { draftText = ''; }, discard: () => { draftText = ''; } }), useCommentDraftDenial() {} };
 const {CommentSection}=load('features/stories/Comments.tsx',{
+ '../../hooks/useCommentDraft': draftHook,
  react:{useState(v){const i=si++;if(!(i in states))states[i]=v;return[states[i],v=>{states[i]=typeof v==='function'?v(states[i]):v;}];},useRef(v){return refs[ri++]??={current:v};},useEffect(){},useId:()=> 'form'},
  'react/jsx-runtime':{jsx,jsxs:jsx},'../stories/form-interactions.css':{},
  '@tanstack/react-query':{useQuery:o=>{query=o;return{isFetching:false,...result};},useQueryClient:()=>({invalidateQueries:async o=>invalidations.push(o),setQueryData:()=>assert.fail('No array cache overlay')}),useMutation:o=>{const i=mi++;mutations[i]=o;return{...o,isPending:false,isError:false,mutate(){}};}},
@@ -23,7 +26,7 @@ button('Bình luận cũ hơn').props.onClick();render();assert.equal(query.quer
 const input=nodes().find(n=>n.type==='textarea');input.props.onChange({target:{value:'draft',style:{},scrollHeight:20}});render();
 mutations[0].onError();render();assert.equal(nodes().find(n=>n.type==='textarea').props.value,'draft');
 result={isSuccess:true,data:{items:[],nextCursor:null}};render();assert.ok(button('Mới nhất'));
-mutations[0].onSuccess();render();assert.equal(query.queryKey.at(-1),null);assert.equal(nodes().find(n=>n.type==='textarea').props.value,'');
+nodes().find(n=>n.type==='form').props.onSubmit({preventDefault(){}}); mutations[0].onSuccess();render();assert.equal(query.queryKey.at(-1),null);assert.equal(nodes().find(n=>n.type==='textarea').props.value,'');
 assert.equal(invalidations[0].refetchType,'active');
 result={isError:true,data:{items:[{id:'secret',body:'private',author:{}}]}};render();assert.equal(nodes().filter(n=>n.props?.className==='comment__body').length,0);
 const calls=[];const wrapper=load('features/stories/api.ts',{'../../lib/apiClient':{apiRequest:(...a)=>calls.push(a)},'../../lib/image':{}});

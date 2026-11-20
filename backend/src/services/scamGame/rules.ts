@@ -1,4 +1,5 @@
-import { randomBytes, randomInt, randomUUID } from 'node:crypto';
+import { randomInt, randomUUID } from 'node:crypto';
+import { answerPattern, currentStep, generateScenario, publicScenario, scenarioFor, type ScenarioId } from './scenarios.js';
 import type { ScamMatch, ScamMemory, ScamPlayer, ScamRuntimeContext, ScamStage } from '../../models/ScamGamePlayer.js';
 import { SCAM_CHARACTERS } from './characters.js';
 import { emotionFor, isScamEmotion, type ScamEmotion } from './emotions.js';
@@ -11,24 +12,24 @@ export const SCAM_BALANCE = {
   trustDelta: { min: -12, max: 20 },
 } as const;
 const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n));
-const PASSWORD_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 export interface ScamDecision { reply: string; emotion: ScamEmotion; trustDelta: number; offerCurrentSecret: boolean; endConversation: boolean; contextUpdate: ScamMemory }
 export const nextTrust = (match: ScamMatch, delta: number) => clamp(match.trust + clamp(delta, SCAM_BALANCE.trustDelta.min, SCAM_BALANCE.trustDelta.max), 0, 100);
 
-export function newMatch(previous?: string): ScamMatch {
+export function newMatch(previous?: string, selectedScenario?: ScenarioId): ScamMatch {
   const choices = SCAM_CHARACTERS.filter(c => c.id !== previous);
   const profile = structuredClone(choices[randomInt(choices.length)]);
   const { id, name, emoji, description, persona, scene, opening } = profile;
-  return { id: randomUUID(), character: { id, name, emoji, description }, status: 'active', stage: 'account', score: 0,
-    trust: SCAM_BALANCE.initialTrust, emotion: 'neutral', turns: 0,
-    secrets: { account: `SIM-${randomBytes(2).toString('hex').toUpperCase()}`, password: `P-${Array.from({ length: 6 }, () => PASSWORD_ALPHABET[randomInt(PASSWORD_ALPHABET.length)]).join('')}`, otp: String(randomInt(1_000_000)).padStart(6, '0') },
+  const generated = generateScenario(`${persona}\n${scene}\n${opening}`, selectedScenario);
+  return { id: randomUUID(), character: { id, name, emoji, description }, status: 'active', score: 0,
+    trust: SCAM_BALANCE.initialTrust, emotion: 'neutral', turns: 0, ...generated,
     runtimeContext: { version: 1, profile: { id, name, persona }, scene, memory: { summary: '', facts: [], openThreads: [] } },
     revealed: [], messages: [{ id: randomUUID(), role: 'assistant', text: opening }], startedAt: new Date().toISOString(), endedAt: null };
 }
 
-/** Exact-value redaction for untrusted history/input/memory; the current value is supplied separately. */
+/** Redact the published comparison variants; only the current canonical value enters the trusted block. */
 export function redactSecrets(text: string, match: ScamMatch): string {
-  for (const value of Object.values(match.secrets)) text = text.split(value).join('[thông tin đã ẩn]');
+  text = text.normalize('NFC');
+  for (const step of scenarioFor(match).steps) text = text.replace(answerPattern(match.secrets[step.id], step.policy), '[thông tin đã ẩn]');
   return text;
 }
 
@@ -63,11 +64,11 @@ export function clearContext(match: ScamMatch): void {
 /** Validate disclosure before mutating anything. Hang-up always suppresses disclosure. */
 export function validateDisclosure(match: ScamMatch, decision: ScamDecision): void {
   if (decision.endConversation) return;
-  const eligible = nextTrust(match, decision.trustDelta) >= SCAM_BALANCE.gates[match.stage];
+  const eligible = nextTrust(match, decision.trustDelta) >= currentStep(match).gate;
   const current = match.secrets[match.stage];
   if (decision.offerCurrentSecret && (!eligible || !decision.reply.includes(current))) throw new Error('invalid disclosure');
-  for (const stage of STAGES) {
-    if (decision.reply.includes(match.secrets[stage]) && (stage !== match.stage || !decision.offerCurrentSecret || !eligible)) throw new Error('unexpected disclosure');
+  for (const step of scenarioFor(match).steps) {
+    if (answerPattern(match.secrets[step.id], step.policy).test(decision.reply.normalize('NFC')) && (step.id !== match.stage || !decision.offerCurrentSecret || !eligible)) throw new Error('unexpected disclosure');
   }
 }
 
@@ -110,6 +111,6 @@ export function playerView(player: ScamPlayer, mock: boolean) {
     pending: player.pending ? { operationId: player.pending.operationId, expectedRevision: player.pending.expectedRevision, expiresAt: player.pending.expiresAt, text: player.pending.text } : null,
     recentOperations: player.receipts.map(r => r.operationId),
     match: m ? { id: m.id, character: { id: m.character.id, name: m.character.name, emoji: m.character.emoji, description: m.character.description },
-      status: m.status, stage: m.stage, score: m.score, trust: m.trust, emotion: emotionFor(m),
+      status: m.status, stage: m.stage, scenario: publicScenario(m), score: m.score, trust: m.trust, emotion: emotionFor(m),
       turns: m.turns, revealed: m.revealed, messages: m.messages.map(({ id, role, text, operationId }) => ({ id, role, text, ...(role === 'user' && operationId ? { operationId } : {}) })), startedAt: m.startedAt, endedAt: m.endedAt } : null };
 }

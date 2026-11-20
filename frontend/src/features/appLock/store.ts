@@ -89,7 +89,7 @@ async function checkLockSettings(preserveEntry: boolean, grant: ReentryGrant | n
   if (!tokenStore.get()) { resetAppLock(); return; }
   const old = settings;
   try {
-    const next = await apiRequest<LockSettings>('/privacy-lock');
+    const next = await apiRequest<LockSettings>('/privacy-lock', { timeoutMs: 15_000 });
     if (id !== flight || expected !== epoch || !tokenStore.isCurrent(currentGeneration) || spaceStore.get() !== target) return;
     if (!next || typeof next.couple !== 'boolean' || typeof next.friends !== 'boolean' || !Number.isSafeInteger(next.revision) || next.revision < 0) throw new Error('Invalid lock configuration');
     const resumed = grant !== null && reentry === grant && withinGrace(grant) && next.revision === grant.revision;
