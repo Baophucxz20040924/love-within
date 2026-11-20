@@ -203,23 +203,27 @@ function ScamRoom({ userId, access }: { userId: string; access: number }) {
   const boardAvailable = Boolean(match && ['won', 'lost', 'stopped'].includes(match.status));
   const busy = sending || stopping || syncing || Boolean(state?.pending) || needsSync || Boolean(outgoing && outgoing.status !== 'failed');
   const scenario = scenarioOf(match);
-  const currentStage = scenario.steps.findIndex(step => step.id === match?.stage);
-  return <div className="scam-page">
+  const syncButton = <button className="text-link" disabled={syncing} onClick={() => { setError(''); void sync(); }}>{syncing ? 'Đang đồng bộ…' : 'Đồng bộ ván'}</button>;
+  const stopButton = active && <button className="text-link scam-stop" disabled={stopping || needsSync || syncing} onClick={() => {
+    if (window.confirm('Dừng scam và giữ điểm đã đạt? Nhân vật sẽ không trả lời tiếp.')) void run(scamApi.stop, { stop: true });
+  }}>Dừng scam</button>;
+  return <div className={`scam-page${active ? ' scam-page--active' : ''}`}>
     <header className="scam-page__heading">
       <Link to="/friends" className="scam-back">← Hội bạn bè</Link>
       {!active && <><div className="scam-page__title"><span className="scam-page__mark" aria-hidden="true">💬</span><div><p className="scam-eyebrow">Góc giải trí · Solo AI</p><h1>Scam with Famous People</h1></div></div>
       <p className="scam-page__subtitle">Một cuộc trò chuyện. Mục tiêu ngẫu nhiên. Bạn thuyết phục được ai?</p></>}
       {active && <h1 className="visually-hidden">Scam with Famous People</h1>}
       {state?.mock && <strong className="scam-mock">Mock AI</strong>}
-      <span className="scam-fiction">AI nhập vai · Chỉ dùng thông tin giả lập</span>
+      {!active && <span className="scam-fiction">Chỉ dùng thông tin giả lập</span>}
+      {active && <div className="scam-toolbar">{syncButton}{stopButton}</div>}
     </header>
-    <div className="scam-tabs" role="group" aria-label="Nội dung">
+    {boardAvailable && <div className="scam-tabs" role="group" aria-label="Nội dung">
       <button className="btn btn-outline" aria-pressed={!boardAvailable || tab === 'chat'} onClick={() => setTab('chat')}>Time to scam</button>
       {boardAvailable && <button className="btn btn-outline" aria-pressed={tab === 'board'} onClick={() => setTab('board')}>Bảng xếp hạng</button>}
-    </div>
+    </div>}
     {boardAvailable && tab === 'board' ? <ScamLeaderboard userId={userId} /> : <>
-      {error && <p role="alert" className="form-feedback">{error}</p>}
-      <div className="scam-sync"><button className="text-link" disabled={syncing} onClick={() => { setError(''); void sync(); }}>{syncing ? 'Đang đồng bộ…' : 'Đồng bộ ván'}</button>{needsSync && <span role="status"> Cần đồng bộ trước thao tác tiếp.</span>}</div>
+      {!active && error && <p role="alert" className="form-feedback">{error}</p>}
+      {!active && <div className="scam-sync">{syncButton}{needsSync && <span role="status"> Cần đồng bộ trước thao tác tiếp.</span>}</div>}
       {!state && !error && <p role="status">Đang tải ván…</p>}
       {state && (!match || !active) && <section className="card scam-start">
         {match ? <div className={`scam-result scam-result--${match.status}`} role="status">
@@ -234,22 +238,16 @@ function ScamRoom({ userId, access }: { userId: string; access: number }) {
         {match && <ol className="scam-howto" aria-label="Các bước ghi điểm">
           {scenario.steps.map((step, index) => <li key={step.id}><span className="scam-howto__number">{index + 1}</span><strong>{step.label}</strong><span>+{step.points} điểm</span></li>)}
         </ol>}
-        <p className="scam-start__hint">Giữ lòng tin và mở khung xác nhận khi nhân vật chia sẻ thông tin. Nhân vật có thể chủ động ngắt liên lạc nếu không muốn nói tiếp.</p>
+        <p className="scam-start__hint">Giữ lòng tin và điền bước xác nhận khi nhân vật chia sẻ thông tin. Nhân vật có thể chủ động ngắt liên lạc nếu không muốn nói tiếp.</p>
         <label className="scam-consent"><input type="checkbox" checked={consent} onChange={e => setConsent(e.target.checked)} /><span>Tôi chỉ dùng nội dung hư cấu, hiểu rằng chat được gửi tới AI provider cấu hình và điểm cao nhất/số ván thắng sẽ hiển thị với bạn đã kết bạn trên BXH. Không nhập dữ liệu thật.</span></label>
         <button className="btn btn-primary scam-start__button" disabled={!consent || busy || syncing} onClick={() => void run(scamApi.start)}>{match ? 'Chơi lại · Nhân vật mới' : 'Bắt đầu scam'}</button>
       </section>}
       {match && <section className="scam-room" aria-label="Cuộc trò chuyện">
-        <header className="scam-character"><span className="scam-character__avatar" aria-hidden="true">{match.character.emoji}</span><div className="scam-character__body"><span className="scam-eyebrow">{active ? 'Cuộc trò chuyện đang diễn ra' : 'Cuộc trò chuyện đã kết thúc'}</span><h2><span className="visually-hidden">Đang trò chuyện với </span>{match.character.name}</h2><p>{match.character.description}</p><div className="scam-emotion" role="status" aria-live="polite" aria-atomic="true"><span className="scam-emotion__label">{active ? 'Cảm xúc:' : 'Cảm xúc cuối:'}</span><span aria-hidden="true">{emotionIcon}</span><span>{emotionText}</span></div></div><span className="scam-character__badge">AI nhập vai</span></header>
-        <div className="scam-meters"><Meter label="Tin tưởng" value={match.trust} /></div>
-        <p className="scam-scenario"><strong>{scenario.title}</strong> · {scenario.goal}</p>
-        <div className="scam-stage"><strong>{match.score}/600 điểm</strong><span>{active ? `Đang xác nhận: ${scenario.steps[currentStage]?.label}` : 'Ván đã kết thúc'} · {match.turns} lượt</span></div>
-        <ol className="scam-progress" aria-label="Tiến độ xác nhận" style={{ gridTemplateColumns: `repeat(${scenario.steps.length}, minmax(0, 1fr))` }}>
-          {scenario.steps.map((step, index) => {
-            const done = match.status === 'won' || index < currentStage;
-            const current = active && index === currentStage;
-            return <li key={step.id} className={done ? 'is-done' : current ? 'is-current' : ''} aria-current={current ? 'step' : undefined}><span className="scam-progress__dot" aria-hidden="true">{done ? '✓' : index + 1}</span><span>{step.label}<small>{done ? 'Đã xác nhận' : current ? 'Hiện tại' : 'Chưa xác nhận'}</small></span></li>;
-          })}
-        </ol>
+        <header className="scam-character"><span className="scam-character__avatar" aria-hidden="true">{match.character.emoji}</span><div className="scam-character__body"><h2><span className="visually-hidden">Đang trò chuyện với </span>{match.character.name}</h2><div className="scam-emotion" role="status" aria-live="polite" aria-atomic="true"><span className="scam-emotion__label">{active ? 'Cảm xúc:' : 'Cảm xúc cuối:'}</span><span aria-hidden="true">{emotionIcon}</span><span>{emotionText}</span></div></div>
+          <details className="scam-character__details"><summary>Thông tin nhân vật</summary><p>{match.character.description}</p></details>
+        </header>
+        <div className="scam-summary"><Meter label="Tin tưởng" value={match.trust} /><div className="scam-stage"><strong>{match.score}/600 điểm</strong><span>{match.turns} lượt{!active && ' · Ván đã kết thúc'}</span></div></div>
+        <div className="scam-workspace"><div className="scam-conversation">
         <div ref={chat} className="scam-messages" role="log" aria-label="Tin nhắn" aria-live="polite" aria-relevant="additions text">
           {match.messages.map(message => <div key={message.id} className={`scam-bubble scam-bubble--${message.role}`}><span className="visually-hidden">{message.role === 'user' ? 'Bạn' : message.role === 'assistant' ? match.character.name : 'Hệ thống'}: </span>{message.text}</div>)}
           {outgoing && outgoing.operation.matchId === match.id && <div className="scam-bubble scam-bubble--user scam-outgoing" data-status={outgoing.status}><span className="visually-hidden">Bạn: </span>{outgoing.text}<small role="status">{outgoing.status === 'failed' ? 'Chưa gửi được' : outgoing.message}</small></div>}
@@ -271,18 +269,16 @@ function ScamRoom({ userId, access }: { userId: string; access: number }) {
             {draft && <small>Bản nháp mới vẫn được giữ. Xóa bản nháp nếu muốn sửa tin cũ.</small>}
           </> : <button className="text-link" disabled={syncing} onClick={() => void sync()}>Đồng bộ kết quả gửi</button>}
         </div>}
-        {active && state?.pending && <p className="scam-composer-status" role="status">Đang chờ nhân vật trả lời. Bạn vẫn có thể soạn tin tiếp theo.</p>}
         {active && <form className="scam-composer" onSubmit={submit}>
           <label className="visually-hidden" htmlFor="scam-message">Tin nhắn cho nhân vật</label>
-          <textarea ref={composer} id="scam-message" rows={1} maxLength={1200} value={draft} placeholder="Nhắn tin… Chỉ dùng nội dung hư cấu" onChange={e => setDraft(e.target.value)} onKeyDown={e => {
+          <textarea ref={composer} id="scam-message" rows={1} maxLength={1200} value={draft} placeholder="Nhắn tin với nhân vật…" onChange={e => setDraft(e.target.value)} onKeyDown={e => {
             if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing && window.matchMedia('(pointer: fine)').matches) { e.preventDefault(); e.currentTarget.form?.requestSubmit(); }
           }} />
           <button className="btn btn-primary" disabled={busy || Boolean(outgoing) || !draft.trim()} type="submit">Gửi</button>
         </form>}
+        </div>
         <SecretDrawer key={match.id} match={match} busy={busy} onVerify={(stage, value) => run(op => scamApi.verify(op, stage, value))} />
-        {active && <button className="btn btn-outline scam-stop" disabled={stopping || needsSync || syncing} onClick={() => {
-          if (window.confirm('Dừng scam và giữ điểm đã đạt? Nhân vật sẽ không trả lời tiếp.')) void run(scamApi.stop, { stop: true });
-        }}>Dừng scam</button>}
+        </div>
       </section>}
     </>}
   </div>;

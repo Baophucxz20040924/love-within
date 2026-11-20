@@ -13,7 +13,13 @@ async function tests() {
     assert.equal(scenario.steps.reduce((n, s) => n + s.points, 0), 600);
     assert.equal(Object.keys(match.secrets).length, scenario.steps.length);
     if (id === 'identity') { assert.match(match.secrets.identityCode, /^SIM-ID-/); assert.equal(scenarios.normalizeAnswer(match.secrets.dob, 'date'), match.secrets.dob); }
-    if (id === 'social') { assert.equal(new Set(match.scenario.questions).size, 2); assert.match(match.secrets.account, /^SIM-USER-/); }
+    if (id === 'social') {
+      assert.equal(new Set(match.scenario.questions).size, 2); assert.match(match.secrets.account, /^SIM-USER-/);
+      const descriptor = scenarios.publicScenario(match);
+      assert.equal(descriptor.steps[0].label, 'Tài khoản'); assert.equal(descriptor.steps[0].id, 'account');
+      assert(!/handle/i.test(JSON.stringify(descriptor)));
+      assert.equal(JSON.stringify(scenario.steps.map(s => [s.points, s.gate])), JSON.stringify([[100, 35], [200, 50], [300, 65]]));
+    }
     for (const c of load('services/scamGame/characters.ts').SCAM_CHARACTERS) {
       match.character = { id: c.id, name: c.name, emoji: c.emoji, description: c.description };
       match.runtimeContext.profile = { id: c.id, name: c.name, persona: c.persona }; match.runtimeContext.scene = c.scene;
