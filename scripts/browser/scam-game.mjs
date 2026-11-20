@@ -30,7 +30,7 @@ if (process.argv.includes('--validate')) {
   const shot = async name => { await h.noOverflow(page); await h.screenshot(page, name, { fullPage: false }); inventory.push(`${name}.png`); };
   const compact = async () => {
     await page.evaluate(() => window.scrollTo(0, 0));
-    const nav = await page.locator('.bottom-nav').boundingBox();
+    const nav = ({ y: page.viewportSize().height });
     for (const selector of ['.scam-character h2', '.scam-emotion', '.scam-summary', '.scam-objective', '.scam-messages', '.scam-composer', '.scam-secret']) {
       const box = await page.locator(selector).boundingBox();
       assert(box && box.y >= 0 && box.y + box.height <= nav.y + 1, `${selector} fits above navigation: ${JSON.stringify(box)} / ${nav.y}`);
@@ -110,7 +110,7 @@ if (process.argv.includes('--validate')) {
                 const steps = s.match.scenario?.steps ?? stages.map((id, i) => ({ id, points: (i + 1) * 100 }));
                 const i = steps.findIndex(step => step.id === input.stage); s.match.score += steps[i].points;
                 s.match.messages.push(bubble('system', `Đã xác nhận ${input.stage}. +${steps[i].points} điểm.`));
-                if (i === steps.length - 1) { s.match.status = 'won'; s.match.endedAt = fixedTime; s.wins++; s.bestScore = Math.max(s.bestScore, s.match.score); }
+                if (i === steps.length - 1) { s.match.status = 'won'; s.match.bonus = 90; s.match.score += 90; s.match.endedAt = fixedTime; s.wins++; s.bestScore = Math.max(s.bestScore, s.match.score); }
                 else s.match.stage = steps[i + 1].id;
               } else if (action === 'stop') {
                 s.pending = null; s.match.status = 'stopped'; s.match.endedAt = fixedTime; s.bestScore = Math.max(s.bestScore, s.match.score);
@@ -138,6 +138,9 @@ if (process.argv.includes('--validate')) {
       assert.equal(operations.filter(o => o.device === device && o.action !== 'state').length, 0, 'feed never starts or messages a game');
       await shot(`${device}-feed-entry`); await entry.click();
       const start = page.getByRole('button', { name: 'Bắt đầu scam', exact: true }); await start.waitFor(); assert(await start.isDisabled());
+      assert.equal(await page.locator('.bottom-nav').count(), 0, 'game has no bottom navigation');
+      await page.getByRole('link', { name: '← Hội bạn bè', exact: true }).click();
+      await page.locator('.bottom-nav').waitFor();
       await page.getByRole('link', { name: 'Tôi', exact: true }).click();
       await page.getByRole('link', { name: /Scam with Famous People/ }).click(); await start.waitFor();
       await page.goto(`${h.baseURL}/friends/scam`); await start.waitFor(); await page.reload(); await start.waitFor();
@@ -148,7 +151,7 @@ if (process.argv.includes('--validate')) {
       await shot(`${device}-lobby`); checks.push(stage);
       stage = `${device}:start-consent-persona`;
       await start.evaluate(el => el.scrollIntoView({ block: 'center' }));
-      const startBox = await start.boundingBox(), startNav = await page.locator('.bottom-nav').boundingBox();
+      const startBox = await start.boundingBox(), startNav = ({ y: page.viewportSize().height });
       assert(startBox.y >= 0 && startBox.y + startBox.height <= startNav.y, 'consent CTA is scroll-reachable above navigation');
       await shot(`${device}-consent`);
       await page.getByRole('checkbox').check(); await start.click(); await page.getByRole('heading', { name: 'Đang trò chuyện với Alice', exact: true }).waitFor();
@@ -156,7 +159,11 @@ if (process.argv.includes('--validate')) {
       assert.match(await emotion.innerText(), /Cảm xúc:.*Bình thản/s);
       assert.equal(await page.locator('.scam-meter').count(), 1); assert.equal(await page.getByRole('progressbar', { name: 'Tin tưởng' }).count(), 1);
       assert.equal(await page.locator('.scam-warning').count(), 0); assert(!await page.locator('.scam-page').innerText().then(t => t.includes('Cảnh giác')));
-      await compact(); await shot(`${device}-chat-header`); checks.push(stage);
+      await compact();
+      const info = page.locator('.scam-character__details summary');
+      await info.click(); assert(await page.getByText('Nhân vật hư cấu tò mò, biết hỏi lại.', { exact: true }).isVisible());
+      await shot(`${device}-character-info`); await info.click();
+      await shot(`${device}-chat-header`); checks.push(stage);
       const composer = page.getByRole('textbox', { name: 'Tin nhắn cho nhân vật', exact: true });
       const send = async text => { await composer.fill(text); await page.getByRole('button', { name: 'Gửi', exact: true }).click(); await until(async () => !await page.locator('.scam-outgoing').count() && await page.locator('.scam-stage').innerText().then(v => v.includes(`${s.match.turns} lượt`)), 'send completes'); };
       stage = `${device}:provider-error-draft-uncertain-reconcile`;
@@ -206,24 +213,50 @@ if (process.argv.includes('--validate')) {
         if (index === 2) assert.equal(await page.getByLabel('OTP', { exact: true }).inputValue(), '001234');
         await compact(); await shot(`${device}-bank-${stages[index]}`);
         await page.getByRole('button', { name: 'Xác nhận', exact: true }).click();
-        await until(() => page.locator('.scam-stage').innerText().then(v => v.startsWith(`${[100, 300, 600][index]}/600`)), 'stage points');
+        await until(() => page.locator('.scam-stage').innerText().then(v => v.startsWith(index === 2 ? '690$' : `${[100, 300][index]}$ / 600$`)), 'stage points');
+        await page.locator('.scam-effect__label').waitFor();
+        assert.equal(await page.locator('.scam-effect__piece').count(), 0, 'reduced motion has no particles');
+        await shot(`${device}-reward-${index}`);
+        await page.locator('.scam-effect').waitFor({ state: 'hidden' });
       }
-      await page.getByText('Bạn đã thắng!', { exact: true }).waitFor(); await page.getByRole('button', { name: 'Bảng xếp hạng', exact: true }).click(); await page.locator('.scam-board__row').waitFor(); assert.match(await page.locator('.scam-board__row').innerText(), /600.*điểm/s); assert.match(await page.locator('.scam-board__row').innerText(), /1 ván thắng/); await shot(`${device}-leaderboard`); checks.push(stage);
+      await page.getByText('Bạn đã thắng!', { exact: true }).waitFor(); await page.getByRole('button', { name: 'Bảng xếp hạng', exact: true }).click(); await page.locator('.scam-board__row').waitFor(); assert.match(await page.locator('.scam-board__row').innerText(), /690\$/s); assert.match(await page.locator('.scam-board__row').innerText(), /1 ván thắng/); await shot(`${device}-leaderboard`); checks.push(stage);
       await page.getByRole('button', { name: 'Time to scam', exact: true }).click(); await page.getByRole('checkbox', { name: /Tôi chỉ dùng nội dung hư cấu/ }).check(); await page.getByRole('button', { name: 'Chơi lại · Nhân vật mới', exact: true }).click(); await page.getByRole('heading', { name: 'Đang trò chuyện với Sherlock Holmes', exact: true }).waitFor();
       stage = `${device}:ai-hangup-partial-score-loss`;
+      await page.emulateMedia({ reducedMotion: 'no-preference' });
       await send('#continue-low-trust'); assert.equal(s.match.status, 'active'); assert.equal(s.match.trust, 0); assert(await composer.isVisible());
       await send('chia sẻ tài khoản'); await send('kể tiếp'); // Trust60, but no forced loss or auto-win.
       await account.fill(props.account); await page.getByRole('button', { name: 'Xác nhận', exact: true }).click();
-      await until(() => page.locator('.scam-stage').innerText().then(v => v.startsWith('100/600')), 'partial stage points');
+      await until(() => page.locator('.scam-stage').innerText().then(v => v.startsWith('100$ / 600$')), 'partial stage points');
+      await page.locator('.scam-effect__piece').first().waitFor();
+      assert.equal(await page.locator('.scam-effect__piece').count(), 10);
+      await composer.fill('typing through effect');
+      await page.locator('.scam-effect').evaluate(el => {
+        for (const animation of el.getAnimations({ subtree: true })) { animation.pause(); animation.currentTime = 600; }
+      });
+      await h.screenshot(page, `${device}-money-motion`, { fullPage: false, animations: 'allow' }); inventory.push(`${device}-money-motion.png`);
+      await page.locator('.scam-effect').waitFor({ state: 'hidden' });
+      await page.getByRole('button', { name: 'Đồng bộ ván', exact: true }).click();
+      await until(() => page.getByRole('button', { name: 'Đồng bộ ván', exact: true }).isEnabled(), 'manual sync completes');
+      assert.equal(await page.locator('.scam-effect').count(), 0, 'sync does not replay rewards');
       await send('#hangup'); await page.getByText('Nhân vật đã ngắt liên lạc.', { exact: true }).waitFor();
+      await page.locator('.scam-effect--lost').waitFor();
+      assert.equal(await page.locator('.scam-effect__piece').count(), 6);
+      await page.locator('.scam-effect').evaluate(el => {
+        for (const animation of el.getAnimations({ subtree: true })) { animation.pause(); animation.currentTime = 500; }
+      });
+      await h.screenshot(page, `${device}-loss-motion`, { fullPage: false, animations: 'allow' }); inventory.push(`${device}-loss-motion.png`);
       await page.getByText('Nhân vật đã ngắt liên lạc. Ván kết thúc.', { exact: false }).waitFor();
       assert.match(await emotion.innerText(), /Cảm xúc cuối:.*Tức giận/s);
       assert.equal(await composer.count(), 0); assert.equal(await page.getByRole('button', { name: 'Dừng scam', exact: true }).count(), 0);
-      assert.equal(s.match.score, 100); assert.equal(s.bestScore, 600); assert.equal(s.wins, 1); assert.deepEqual(s.match.revealed, ['account']);
-      assert(!s.match.messages.some(b => b.text.includes(props.password))); assert.match(await page.locator('.scam-result').innerText(), /100\/600.*1 ván thắng/s);
+      assert.equal(s.match.score, 100); assert.equal(s.bestScore, 690); assert.equal(s.wins, 1); assert.deepEqual(s.match.revealed, ['account']);
+      assert(!s.match.messages.some(b => b.text.includes(props.password))); assert.match(await page.locator('.scam-result').innerText(), /100\$.*1 ván thắng/s);
       assert.equal(await page.locator('.scam-progress .is-done').count(), 1);
       assert.equal(await page.getByRole('button', { name: 'Xác nhận', exact: true }).isDisabled(), true);
       await page.locator('.scam-result').scrollIntoViewIfNeeded(); await shot(`${device}-loss`); checks.push(stage);
+      await page.reload(); await page.locator('.scam-result--lost').waitFor();
+      assert.equal(await page.locator('.scam-effect').count(), 0, 'reload does not replay loss');
+      await page.emulateMedia({ reducedMotion: 'reduce' });
+      await page.getByRole('checkbox', { name: /Tôi chỉ dùng nội dung hư cấu/ }).check();
       stage = `${device}:reload-pending-stop-replay`;
       await page.getByRole('button', { name: 'Chơi lại · Nhân vật mới', exact: true }).click();
       await composer.waitFor();
@@ -249,7 +282,7 @@ if (process.argv.includes('--validate')) {
       await h.noOverflow(page);
       assert.equal(await page.locator('.scam-bubble--user').last().evaluate(el => getComputedStyle(el).userSelect), 'text');
       await page.getByRole('button', { name: 'Dừng scam', exact: true }).evaluate(el => el.scrollIntoView({ block: 'center' }));
-      const inputBox = await composer.boundingBox(), stopBox = await page.getByRole('button', { name: 'Dừng scam', exact: true }).boundingBox(), navBox = await page.locator('.bottom-nav').boundingBox();
+      const inputBox = await composer.boundingBox(), stopBox = await page.getByRole('button', { name: 'Dừng scam', exact: true }).boundingBox(), navBox = ({ y: page.viewportSize().height });
       assert(inputBox.width >= (device === 'mobile' ? 180 : 400), 'composer keeps usable width');
       assert(inputBox.y >= 0 && inputBox.y + inputBox.height <= navBox.y && stopBox.y + stopBox.height <= navBox.y, 'composer and stop remain reachable above navigation');
       await shot(`${device}-composer`); checks.push(stage);
@@ -259,7 +292,7 @@ if (process.argv.includes('--validate')) {
       for (const size of [{ width: 320, height: 780 }, { width: 360, height: 460 }]) {
         await page.setViewportSize(size); await h.noOverflow(page);
         await verifyButton.evaluate(el => el.scrollIntoView({ block: 'center', behavior: 'instant' }));
-        const answerBox = await verifyButton.boundingBox(), navigation = await page.locator('.bottom-nav').boundingBox();
+        const answerBox = await verifyButton.boundingBox(), navigation = ({ y: page.viewportSize().height });
         assert(answerBox.y >= 0 && answerBox.y + answerBox.height <= navigation.y, 'verification reachable at small viewport');
         assert.equal(await account.inputValue(), 'SIM-resize-draft');
         assert.equal(await composer.inputValue(), 'Giữ nháp khi đổi kích thước');
@@ -269,7 +302,7 @@ if (process.argv.includes('--validate')) {
       await page.locator('.scam-page').evaluate(el => { el.style.zoom = '2'; });
       await h.noOverflow(page);
       await verifyButton.evaluate(el => el.scrollIntoView({ block: 'center', behavior: 'instant' }));
-      const zoomBox = await verifyButton.boundingBox(), zoomNav = await page.locator('.bottom-nav').boundingBox();
+      const zoomBox = await verifyButton.boundingBox(), zoomNav = ({ y: page.viewportSize().height });
       assert(zoomBox.y >= 0 && zoomBox.y + zoomBox.height <= zoomNav.y, `zoomed verification reachable: ${JSON.stringify({ zoomBox, zoomNav, scroll: await page.evaluate(() => ({ y: scrollY, height: document.documentElement.scrollHeight })) })}`);
       assert.equal(await account.inputValue(), 'SIM-resize-draft');
       await shot(`${device}-zoom200`);
@@ -277,7 +310,7 @@ if (process.argv.includes('--validate')) {
       await composer.fill(''); await account.fill(''); await compact(); checks.push(stage);
       for (const scenario of extraScenarios) {
         stage = `${device}:${scenario.id}-form-reload-wrong-win`;
-        s.match = { ...s.match, id: randomUUID(), status: 'active', stage: scenario.steps[0].id, score: 0, revealed: [], messages: [], endedAt: null,
+        s.match = { ...s.match, id: randomUUID(), status: 'active', stage: scenario.steps[0].id, score: 0, bonus: 0, revealed: [], messages: [], endedAt: null,
           scenario: { ...scenario, version: 1, maxScore: 600, steps: scenario.steps.map(({ value, ...step }) => step) } };
         s.revision++;
         await page.reload(); await composer.waitFor();
@@ -294,10 +327,10 @@ if (process.argv.includes('--validate')) {
           await field.fill(step.value);
           await shot(`${device}-${scenario.id}-${step.id}`);
           await verify.click(); score += step.points;
-          await until(() => page.locator('.scam-stage').innerText().then(v => v.startsWith(`${score}/600`)), 'scenario score');
+          await until(() => page.locator('.scam-stage').innerText().then(v => v.startsWith(score === 600 ? '690$' : `${score}$ / 600$`)), 'scenario score');
         }
         await page.getByText('Bạn đã thắng!', { exact: true }).waitFor();
-        assert.equal(s.match.score, 600); checks.push(stage);
+        assert.equal(s.match.score, 690); assert.match(await page.locator('.scam-result').innerText(), /May mắn \+90\$/); checks.push(stage);
       }
       closing = true; await context.close(); closing = false;
     }

@@ -521,7 +521,7 @@ function authHarness(options = {}) {
   const document = eventTarget({ visibilityState: 'visible' });
   const window = eventTarget({ setTimeout: () => 1, clearTimeout() {} });
   let generation = 'session-0', tokens = options.persisted ? { accessToken: 'old-access', refreshToken: 'old-refresh' } : null;
-  let space = options.space || 'couple', epoch = 1, lockRefresh = () => Promise.resolve();
+  let space = options.space || 'couple', epoch = 1, access = 0, lockRefresh = () => Promise.resolve();
   const lock = { phase: 'ready', discard: false };
   const tokenStore = { generation: () => generation, isCurrent: value => value === generation, get: () => tokens,
     set(value) { tokens = value; generation = `session-${Number(generation.split('-')[1]) + 1}`; calls.push(['tokens']); },
@@ -540,7 +540,15 @@ function authHarness(options = {}) {
   const { AuthProvider } = load('features/auth/AuthContext.tsx', {
     react: h.react, 'react/jsx-runtime': jsxRuntime, '@tanstack/react-query': { useQueryClient: () => qc },
     '../../lib/commentDraftStore': { commentDraftStore: { sessionChanged() {}, revokeCouple() {} } },
-    '../../lib/apiClient': { SESSION_EXPIRED_EVENT: 'expired', apiRequest, advanceAccessEpoch() {}, currentAccessEpoch: () => 0, waitForAbort: promise => promise,
+    '../../lib/apiClient': { SESSION_EXPIRED_EVENT: 'expired', apiRequest, advanceAccessEpoch() { access++; }, currentAccessEpoch: () => access, waitForAbort: (promise, signal) => {
+        if (!signal) return promise;
+        return new Promise((resolve, reject) => {
+          const abort = () => reject(new DOMException('Aborted', 'AbortError'));
+          if (signal.aborted) return abort();
+          signal.addEventListener('abort', abort, { once: true });
+          promise.then(resolve, reject).finally(() => signal.removeEventListener('abort', abort));
+        });
+      },
       assertCurrentSession(value) { if (!tokenStore.isCurrent(value)) throw new DOMException('Session changed', 'AbortError'); } },
     '../../lib/tokenStore': { tokenStore },
     '../../lib/spaceStore': { spaceStore: { get: () => space, set: value => { space = value; }, isSpaceKey: key => key === 'space' } },
@@ -555,7 +563,7 @@ function authHarness(options = {}) {
   const render = () => h.render(AuthProvider, { children: 'private' }).props.value;
   return { h, calls, handlers, document, window, tokenStore, render,
     async boot() { render(); await tick(); return render(); },
-    setLockRefresh(fn) { lockRefresh = fn; }, changeEpoch() { epoch++; },
+    setLockRefresh(fn) { lockRefresh = fn; }, changeEpoch() { epoch++; }, changeAccess() { access++; },
     changeGeneration() { generation = `session-${Number(generation.split('-')[1]) + 1}`; },
   };
 }
@@ -584,6 +592,30 @@ test('equivalent verifyMe calls share a flight; revoke fences its late response'
   held.resolve(profile()); assert.equal(await first, false); assert.equal(await second, false); await refresh;
   fresh.resolve(profile(false)); assert.equal(await replacement, true);
   assert.equal(h.render().me.couple, null); h.h.unmount();
+});
+
+test('refresh-first /me shares transport with verification; aborting one waiter does not cancel another', async () => {
+  const h = authHarness({ persisted: true }); await h.boot();
+  const held = deferred(); let calls = 0;
+  h.handlers.set('/me', opts => { calls++; assert.equal(opts.timeoutMs, 15000); assert.equal(opts.signal, undefined); return held.promise; });
+  const auth = h.render(), controller = new AbortController();
+  const refresh = auth.refreshMe(), cancelled = auth.verifyMe(controller.signal), active = auth.verifyMe();
+  assert.equal(calls, 1); controller.abort(); assert.equal(await cancelled, false); held.resolve(profile());
+  await refresh; assert.equal(await cancelled, false); assert.equal(await active, true);
+  await auth.verifyMe(); assert.equal(calls, 2, 'completed responses are not a verification TTL cache');
+  h.h.unmount();
+});
+
+for (const change of ['generation', 'space', 'access', 'unmount']) test(`shared /me rejects scope change: ${change}`, async () => {
+  const h = authHarness({ persisted: true }); await h.boot();
+  const held = deferred(); h.handlers.set('/me', () => held.promise);
+  const auth = h.render(), result = auth.verifyMe();
+  if (change === 'generation') h.changeGeneration();
+  else if (change === 'space') auth.switchSpace('friends');
+  else if (change === 'access') h.changeAccess();
+  else h.h.unmount();
+  held.resolve(profile()); assert.equal(await result, false);
+  if (change !== 'unmount') h.h.unmount();
 });
 
 test('actual AuthProvider publishes completedAuth only after final explicit login/register steps', async () => {

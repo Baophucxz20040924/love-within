@@ -132,6 +132,16 @@ Pre-fix runs are retained: `1795144013149` exposed history growing the workspace
 
 Audited backend34/frontend30 offline suite files and both builds passed; final frontend build, compact-form VM tests and browser fixture were rerun after the last UI adjustments. No real API/provider/DB, native-device, deployment or production-performance verification. Only owned preview5175 was stopped; existing listeners were left untouched.
 
+## Game money/effects and PIN work reduction (2026-11-20)
+
+Final new-match effect cleanup was rebuilt and rerun: game VM and **22/22 browser groups passed** at `%TEMP%/lw_scam_browser/1795154088418`; blocked list empty and mobile money screenshot inspected. Only the owned5175 preview was stopped afterwards; no existing API/Vite listener was stopped. No commit, push or deployment was performed.
+
+The fully intercepted game run at `%TEMP%/lw_scam_browser/1795152806080` passed **22/22 groups** at360×780 and1280×800, including small-height/320px/enlarged-text regressions. It checks hidden game navigation/back navigation, compact controls/details,600$ base plus90$ synthetic bonus on every scenario win, leaderboard690$, static reduced-motion feedback,10 note/6 smoke particles, typing through the overlay, timed removal and no replay on sync/reload. Result JSON has16 injected503/422 faults,32 budgeted HTTP/console errors and no blocked/unknown requests. Motion screenshots pause CSS animations at600ms/500ms solely for inspection; the normal timer still removes the overlay. Mobile money, desktop loss and mobile final-win screenshots were inspected. These show the intended assets and bonus breakdown, not measured FPS. Earlier run `1795151606860` passed but its default screenshot helper fast-forwarded animations; those captures are not visual evidence of falling notes.
+
+Backend/frontend audited offline commands and builds passed. Synthetic tests cover bonus30/150,2/3-stage wins, final-stage CAS competition/replay, legacy bonus0 and leaderboard cursors750; PIN tests cover cost11/two compares, no request-time dummy hash, no existing-row upsert, missing/duplicate-insert handling, blocked budgets and revision/credential fences. Auth VM tests cover equivalent pending refresh/verify transport reuse, independent waiter abort and stale generation/space/access/revoke/unmount. Actual PIN-browser overlapping `/me` request counts and production CPU were **not** verified; the game browser uses synthetic auth.
+
+Explicit offline benchmark: `node backend/tests/privacy-lock/cpu.cjs` (Node24.18.0/win32, three sequential samples per variant). Baseline cold wall341–351ms/CPU328–360ms versus new cold wall226–240ms/CPU219–234ms. Warm baseline wall229–265ms/CPU219–250ms versus new warm wall281–285ms/CPU280–282ms: **warm samples were slower**, so no warm speedup is claimed. Warm algorithms still perform two bcrypt compares; measured maximum event-loop delay remained roughly202–219ms. This isolates removal of one cold dummy hash, not HTTP/DB latency, server throughput or the user's observed production CPU percentage. No rounds reduction, PIN cache, worker/native dependency or extra installation. No real API/provider/DB, phone/Safari or deployment verification.
+
 ## Install external tooling
 
 PowerShell, from the repository root:

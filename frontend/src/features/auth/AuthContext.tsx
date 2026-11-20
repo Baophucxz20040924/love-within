@@ -87,8 +87,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (credentialsPending.current) { credentialsPending.current = false; loginAttempt.current += 1; }
   }, []);
   const meEpoch = useRef(0);
-  const meFlight = useRef<{ generation: string; epoch: number; promise: Promise<void> } | null>(null);
-  const verificationFlight = useRef<{ generation: string; epoch: number; access: number; signal?: AbortSignal; promise: Promise<boolean> } | null>(null);
+  const meFlight = useRef<{ generation: string; epoch: number; access: number; space: Space; promise: Promise<boolean> } | null>(null);
 
   const confirmedCouple = useRef<{ generation: string; userId: string; coupleId: string } | null>(null);
   const acceptMe = useCallback((data: Me, generation: string) => {
@@ -137,54 +136,44 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } : null);
   }, []);
 
-  const refreshMe = useCallback((): Promise<void> => {
-    const generation = tokenStore.generation();
-    const epoch = meEpoch.current;
+  const requestMe = useCallback((): Promise<boolean> => {
+    const generation = tokenStore.generation(), epoch = meEpoch.current;
+    const access = currentAccessEpoch(), space = spaceStore.get();
     if (!tokenStore.get()) {
       setMe(null);
       setBootstrapFailed(false);
-      return Promise.resolve();
+      return Promise.resolve(false);
     }
-    const verification = verificationFlight.current;
-    if (verification?.generation === generation && verification.epoch === epoch && verification.access === currentAccessEpoch() && !verification.signal?.aborted) return verification.promise.then(() => undefined);
-    if (meFlight.current?.generation === generation && meFlight.current.epoch === epoch) return meFlight.current.promise;
+    const existing = meFlight.current;
+    if (existing?.generation === generation && existing.epoch === epoch && existing.access === access && existing.space === space) return existing.promise;
+    const current = () => tokenStore.isCurrent(generation) && meEpoch.current === epoch &&
+      currentAccessEpoch() === access && spaceStore.get() === space;
+    // The bounded transport belongs to the scope, not to any individual verification waiter.
     const promise = (async () => {
       try {
         const data = await apiRequest<Me>('/me', { timeoutMs: 15_000 });
-        if (tokenStore.isCurrent(generation) && meEpoch.current === epoch) {
-          acceptMe(data, generation);
-          setBootstrapFailed(false);
-        }
-      } catch {
-        if (tokenStore.isCurrent(generation) && meEpoch.current === epoch && tokenStore.get()) setBootstrapFailed(true);
-      }
-    })().finally(() => { if (meFlight.current?.promise === promise) meFlight.current = null; });
-    meFlight.current = { generation, epoch, promise };
-    return promise;
-  }, [acceptMe]);
-
-  const verifyMe = useCallback((signal?: AbortSignal): Promise<boolean> => {
-    const generation = tokenStore.generation();
-    const access = currentAccessEpoch();
-    const existing = verificationFlight.current;
-    if (existing?.generation === generation && existing.epoch === meEpoch.current && existing.access === access && !existing.signal?.aborted) {
-      return waitForAbort(existing.promise, signal).catch(() => false);
-    }
-    const epoch = ++meEpoch.current;
-    const promise = (async () => {
-      try {
-        const data = await apiRequest<Me>('/me', { timeoutMs: 15_000, signal });
-        if (signal?.aborted || !tokenStore.isCurrent(generation) || meEpoch.current !== epoch || currentAccessEpoch() !== access) return false;
+        if (!current()) return false;
         acceptMe(data, generation);
         setBootstrapFailed(false);
         return true;
       } catch {
+        if (current() && tokenStore.get()) setBootstrapFailed(true);
         return false;
       }
-    })().finally(() => { if (verificationFlight.current?.promise === promise) verificationFlight.current = null; });
-    verificationFlight.current = { generation, epoch, access, signal, promise };
+    })().finally(() => { if (meFlight.current?.promise === promise) meFlight.current = null; });
+    meFlight.current = { generation, epoch, access, space, promise };
     return promise;
   }, [acceptMe]);
+
+  const refreshMe = useCallback((): Promise<void> => requestMe().then(() => undefined), [requestMe]);
+  const verifyMe = useCallback((signal?: AbortSignal): Promise<boolean> => {
+    if (signal?.aborted) return Promise.resolve(false);
+    const generation = tokenStore.generation(), epoch = meEpoch.current;
+    const access = currentAccessEpoch(), space = spaceStore.get();
+    return waitForAbort(requestMe(), signal).then(ok => ok && !signal?.aborted &&
+      tokenStore.isCurrent(generation) && meEpoch.current === epoch && currentAccessEpoch() === access &&
+      spaceStore.get() === space).catch(() => false);
+  }, [requestMe]);
 
   useLayoutEffect(() => {
     const deactivate = activateAppLock();

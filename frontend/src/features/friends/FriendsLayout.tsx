@@ -71,14 +71,15 @@ export function FriendsLayout() {
   pathRef.current = pathname;
   useEffect(() => scheduleRoutePrefetch(friendsPrefetchCandidates, () => pathRef.current), []);
 
+  const game = /^\/friends\/scam\/?$/.test(pathname);
   return (
-    <div className="app-shell">
+    <div className={`app-shell${game ? ' app-shell--scam' : ''}`}>
       <main className="app-content">
         <Suspense fallback={<Loading />}>
           <Outlet />
         </Suspense>
       </main>
-      <FriendsNav />
+      {!game && <FriendsNav />}
     </div>
   );
 }

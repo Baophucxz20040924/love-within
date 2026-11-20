@@ -44,8 +44,18 @@ for (const value of emotionValues) assert(emotions.emotionLabel(value).every(Boo
 for (const value of [undefined, null, 'unknown', 'toString', {}]) assert.equal(emotions.emotionLabel(value)[1], 'Bình thản');
 class ApiRequestError extends Error { constructor(status, code, message) { super(message); this.status = status; this.code = code; } }
 const scenarios = load('features/scam/scenarios.ts', {});
+const presentation = load('features/scam/presentation.ts', { './scenarios': scenarios });
 const { SecretDrawer } = load('features/scam/SecretDrawer.tsx', { './scenarios': scenarios, react, 'react/jsx-runtime': { jsx, jsxs: jsx } });
 async function tests() {
+  const before = { id: 'fx', status: 'active', stage: 'otp', score: 300 };
+  const won = { ...before, status: 'won', score: 750, bonus: 150 };
+  assert.equal(presentation.stageReward(before, won, 'otp').amount, 300);
+  assert.equal(presentation.stageReward(before, won, 'otp').bonus, 150);
+  assert.equal(presentation.stageReward(before, { ...won, id: 'other' }, 'otp'), null);
+  assert.equal(presentation.stageReward(won, won, 'otp'), null);
+  assert.equal(presentation.stageReward(before, { ...won, score: 600 }, 'otp'), null);
+  assert.equal(presentation.bubbleText({ role: 'system', text: 'Đã xác nhận OTP. +300 điểm.' }), 'Đã xác nhận OTP. +300$.');
+  assert.equal(presentation.bubbleText({ role: 'user', text: 'Đã xác nhận OTP. +300 điểm.' }), 'Đã xác nhận OTP. +300 điểm.');
   reset(); let verified;
   const match = { id: 'match', stage: 'otp', status: 'active', revealed: ['account', 'password', 'otp'] };
   const props = { match, busy: false, onVerify: async (...args) => { verified = args; return false; } };
@@ -102,8 +112,9 @@ async function tests() {
   const page = load('features/scam/ScamGamePage.tsx', { '../realtime/verification': { subscribeVerification: () => () => {} }, '../appLock/store': { subscribeAppLock: () => () => {} }, react, 'react/jsx-runtime': { jsx, jsxs: jsx }, 'react-router-dom': { Link: 'Link' },
     '@tanstack/react-query': { useQueryClient: () => ({ invalidateQueries: async () => {} }) }, '../auth/AuthContext': { useAuth: () => ({ me: { user: { id: 'u' } } }) },
     '../../lib/apiClient': { ApiRequestError, currentAccessEpoch: () => epoch }, '../../lib/tokenStore': { tokenStore: { generation: () => generation } },
+    './GameEffect': { GameEffect: 'Effect' }, './presentation': presentation,
     './scenarios': scenarios, './emotions': emotions, './outgoing': outgoingHelpers, './api': { scamApi: api, scamKey: wrappers.scamKey }, './SecretDrawer': { SecretDrawer: 'Drawer', stageLabels: { account: 'Tài khoản', password: 'Password', otp: 'OTP' } }, './ScamLeaderboard': { ScamLeaderboard: 'Board' }, './scam.css': {},
-  }, { window: { confirm: () => true, matchMedia: () => ({ matches: true }) } });
+  }, { document: { visibilityState: 'visible' }, window: { confirm: () => true, matchMedia: () => ({ matches: true }) } });
   const boundary = page.ScamGamePage(); const room = boundary.type, roomProps = boundary.props;
   tree = render(room, roomProps); await new Promise(r => setImmediate(r)); tree = render(room, roomProps); assert.equal(reads, 1);
   const boardButton = () => nodes(tree).find(n => n.type === 'button' && text(n) === 'Bảng xếp hạng');
@@ -147,7 +158,7 @@ async function tests() {
   assert(emotionText().includes('Hào hứng'), 'late access response cannot overwrite emotion');
   assert.equal(input().props.value, 'nháp sau đổi quyền'); assert(nodes(tree).some(n => n.props?.['data-status'] === 'uncertain'));
   state.revision += 2; state.recentOperations.push(heldOp.operationId);
-  nodes(tree).find(n => n.type === 'button' && text(n) === 'Đồng bộ ván').props.onClick(); await new Promise(r => setImmediate(r)); tree = render(room, roomProps);
+  nodes(tree).find(n => n.type === 'button' && n.props['aria-label'] === 'Đồng bộ ván').props.onClick(); await new Promise(r => setImmediate(r)); tree = render(room, roomProps);
   assert(!nodes(tree).some(n => n.props?.['data-status']));
   api.message = async op => { state.revision += 2; state.recentOperations.push(op.operationId); return structuredClone(state); };
   form().props.onSubmit({ preventDefault() {} }); await new Promise(r => setImmediate(r)); tree = render(room, roomProps); assert.equal(input().props.value, '', 'new action works after epoch reconciliation');
@@ -161,13 +172,13 @@ async function tests() {
   assert(nodes(tree).some(n => n.props?.className === 'scam-send-feedback'));
   readReject(Error('offline')); await new Promise(r => setImmediate(r)); tree = render(room, roomProps);
   api.state = async () => ({ ...state, revision: state.revision - 1, recentOperations: [] });
-  nodes(tree).find(n => n.type === 'button' && text(n) === 'Đồng bộ ván').props.onClick(); await new Promise(r => setImmediate(r)); tree = render(room, roomProps);
+  nodes(tree).find(n => n.type === 'button' && n.props['aria-label'] === 'Đồng bộ ván').props.onClick(); await new Promise(r => setImmediate(r)); tree = render(room, roomProps);
   assert(nodes(tree).some(n => n.props?.['data-status'] === 'uncertain'));
   assert(nodes(tree).find(n => n.type === 'button' && text(n) === 'Gửi').props.disabled);
   api.state = normalRead;
   // A terminal state settles uncertainty without reposting the message.
   state.revision++; state.match.status = 'stopped';
-  nodes(tree).find(n => n.type === 'button' && text(n) === 'Đồng bộ ván').props.onClick(); await new Promise(r => setImmediate(r)); tree = render(room, roomProps);
+  nodes(tree).find(n => n.type === 'button' && n.props['aria-label'] === 'Đồng bộ ván').props.onClick(); await new Promise(r => setImmediate(r)); tree = render(room, roomProps);
   assert(!nodes(tree).some(n => n.props?.['data-status']));
   assert(boardButton()); boardButton().props.onClick(); tree = render(room, roomProps);
   assert(nodes(tree).some(n => n.type === 'Board'));
@@ -196,9 +207,24 @@ async function tests() {
   assert.equal(steps[0].props['aria-current'], 'step');
   assert(!steps.some(n => n.props.className === 'is-done'), 'revealed props do not count as confirmed stages');
   async function refresh() {
-    nodes(tree).find(n => n.type === 'button' && text(n) === 'Đồng bộ ván').props.onClick();
+    nodes(tree).find(n => n.type === 'button' && n.props['aria-label'] === 'Đồng bộ ván').props.onClick();
     await new Promise(r => setImmediate(r)); tree = render(room, roomProps);
   }
+  api.verify = async (op, stage) => {
+    state.revision++; state.recentOperations.push(op.operationId);
+    state.match.score += stage === 'account' ? 100 : stage === 'password' ? 200 : 300;
+    if (stage === 'otp') { state.match.status = 'won'; state.match.bonus = 90; state.match.score += 90; }
+    else state.match.stage = stage === 'account' ? 'password' : 'otp';
+    return structuredClone(state);
+  };
+  const verifyStage = () => nodes(tree).find(n => n.type === 'Drawer').props.onVerify;
+  assert.equal(await verifyStage()('account', 'synthetic'), true); tree = render(room, roomProps);
+  assert.equal(nodes(tree).find(n => n.type === 'Effect').props.reward.amount, 100);
+  await refresh(); assert.equal(nodes(tree).filter(n => n.type === 'Effect').length, 1, 'sync does not add a burst');
+  const effectKey = nodes(tree).find(n => n.type === 'Effect').props.reward.key;
+  api.verify = async () => { throw new ApiRequestError(422, 'SCAM_INCORRECT', 'wrong'); };
+  assert.equal(await verifyStage()('password', 'wrong'), false); tree = render(room, roomProps);
+  assert.equal(nodes(tree).find(n => n.type === 'Effect').props.reward.key, effectKey, 'wrong answer does not create reward');
   state.revision++; state.match.stage = 'password'; await refresh();
   steps = nodes(progress()).filter(n => n.type === 'li');
   assert.equal(steps[0].props.className, 'is-done'); assert.equal(steps[1].props['aria-current'], 'step'); assert.equal(steps[2].props.className, '');

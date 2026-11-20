@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash, randomInt, randomUUID } from 'node:crypto';
 import type { Types } from 'mongoose';
 import { SCAM_RULE_VERSION, type ScamPlayer, type ScamStage } from '../models/ScamGamePlayer.js';
 import { scamGameRepository, type ScamBoardPosition } from '../repositories/scamGame.repository.js';
@@ -93,8 +93,14 @@ export const scamGameService = {
     const next = copy(p), match = next.match!;
     ensureContext(match);
     match.score += step.points;
-    append(match, 'system', `Đã xác nhận ${step.label}. +${step.points} điểm.`);
-    if (index === scenario.steps.length - 1) { match.status = 'won'; match.endedAt = new Date().toISOString(); finishStats(next); }
+    append(match, 'system', `Đã xác nhận ${step.label}. +${step.points}$.`);
+    if (index === scenario.steps.length - 1) {
+      match.status = 'won'; match.endedAt = new Date().toISOString();
+      match.bonus = randomInt(30, 151);
+      match.score += match.bonus;
+      append(match, 'system', `Thưởng may mắn: +${match.bonus}$. $ là tiền giả lập.`);
+      finishStats(next);
+    }
     else match.stage = scenario.steps[index + 1].id;
     receipt(next, op, hash);
     return commit(p, next);
@@ -106,7 +112,7 @@ export const scamGameService = {
     const next = copy(p);
     next.pending = null;
     next.match!.status = 'stopped'; next.match!.endedAt = new Date().toISOString();
-    append(next.match!, 'system', 'Bạn đã dừng scam. Điểm đã đạt được giữ lại.');
+    append(next.match!, 'system', 'Bạn đã dừng scam. Tiền giả lập đã đạt được giữ lại.');
     finishStats(next); receipt(next, op, hash);
     return commit(p, next);
   },
@@ -116,7 +122,7 @@ export const scamGameService = {
     if (cursor) {
       try {
         const a = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8'));
-        if (!Array.isArray(a) || a.length !== 5 || a[0] !== scope || !Number.isSafeInteger(a[1]) || a[1] < 0 || a[1] > 600
+        if (!Array.isArray(a) || a.length !== 5 || a[0] !== scope || !Number.isSafeInteger(a[1]) || a[1] < 0 || a[1] > 750
           || !Number.isSafeInteger(a[2]) || a[2] < 0 || !/^[a-f\d]{24}$/.test(a[3]) || a[4] !== 1
           || Buffer.from(JSON.stringify(a)).toString('base64url') !== cursor) throw new Error('cursor');
         after = { score: a[1], wins: a[2], id: a[3] };

@@ -20,7 +20,7 @@ export function newMatch(previous?: string, selectedScenario?: ScenarioId): Scam
   const profile = structuredClone(choices[randomInt(choices.length)]);
   const { id, name, emoji, description, persona, scene, opening } = profile;
   const generated = generateScenario(`${persona}\n${scene}\n${opening}`, selectedScenario);
-  return { id: randomUUID(), character: { id, name, emoji, description }, status: 'active', score: 0,
+  return { id: randomUUID(), character: { id, name, emoji, description }, status: 'active', score: 0, bonus: 0,
     trust: SCAM_BALANCE.initialTrust, emotion: 'neutral', turns: 0, ...generated,
     runtimeContext: { version: 1, profile: { id, name, persona }, scene, memory: { summary: '', facts: [], openThreads: [] } },
     revealed: [], messages: [{ id: randomUUID(), role: 'assistant', text: opening }], startedAt: new Date().toISOString(), endedAt: null };
@@ -111,6 +111,6 @@ export function playerView(player: ScamPlayer, mock: boolean) {
     pending: player.pending ? { operationId: player.pending.operationId, expectedRevision: player.pending.expectedRevision, expiresAt: player.pending.expiresAt, text: player.pending.text } : null,
     recentOperations: player.receipts.map(r => r.operationId),
     match: m ? { id: m.id, character: { id: m.character.id, name: m.character.name, emoji: m.character.emoji, description: m.character.description },
-      status: m.status, stage: m.stage, scenario: publicScenario(m), score: m.score, trust: m.trust, emotion: emotionFor(m),
+      status: m.status, stage: m.stage, scenario: publicScenario(m), score: m.score, bonus: m.bonus ?? 0, trust: m.trust, emotion: emotionFor(m),
       turns: m.turns, revealed: m.revealed, messages: m.messages.map(({ id, role, text, operationId }) => ({ id, role, text, ...(role === 'user' && operationId ? { operationId } : {}) })), startedAt: m.startedAt, endedAt: m.endedAt } : null };
 }

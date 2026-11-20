@@ -20,6 +20,7 @@ export interface ScamState {
     stage: ScamStage;
     scenario?: ScamScenario;
     score: number;
+    bonus?: number;
     trust: number;
     emotion?: ScamEmotion;
     turns: number;
