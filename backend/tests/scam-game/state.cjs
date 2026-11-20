@@ -150,10 +150,12 @@ async function tests() {
     await assert.rejects(s.verify('u', f.op(), stage, 'sai'), e => e.status === 422);
     const operation = f.op(), value = f.get().match.secrets[stage];
     await s.verify('u', operation, stage, value); await s.verify('u', operation, stage, value);
-    assert.equal(f.get().match.score, stageScores[i++]); assert.equal(f.get().match.emotion, 'happy', 'verification retains emotion');
+    assert.equal(f.get().match.score - (f.get().match.bonus ?? 0), stageScores[i++]); assert.equal(f.get().match.emotion, 'happy', 'verification retains emotion');
   }
+  const winningTotal = f.get().match.score;
+  assert(winningTotal >= 630 && winningTotal <= 750);
   assert(!f.get().match.runtimeContext); assert(!f.get().match.memory);
-  assert.equal(f.get().match.status, 'won'); assert.equal(f.get().wins, 1); assert.equal(f.get().completed, 1); assert.equal(f.get().bestScore, 600);
+  assert.equal(f.get().match.status, 'won'); assert.equal(f.get().wins, 1); assert.equal(f.get().completed, 1); assert.equal(f.get().bestScore, winningTotal);
   await assert.rejects(s.verify('u', f.op(), 'otp', f.get().match.secrets.otp), e => e.status === 409);
   await s.start('u', f.op()); assert.notEqual(f.get().match.character.id, character);
   const starts = fixture(); const same = starts.op(); const results = await Promise.allSettled([starts.service.start('u', same), starts.service.start('u', { ...same, operationId: randomUUID() })]); assert.equal(results.filter(r => r.status === 'fulfilled').length, 1);
@@ -173,7 +175,7 @@ async function tests() {
   f.decide(async () => { throw Error('provider-failure'); }); const revision = f.get().revision; const before = clone(f.get().match);
   await assert.rejects(s.message('u', f.op(), 'fail')); assert.equal(f.get().pending, null); assert.equal(f.get().revision, revision + 2); assert.deepEqual(f.get().match, before);
   f.decide(async m => offer(m)); while (f.get().match.score === 0) { if (f.get().match.revealed.includes('account')) await s.verify('u', f.op(), 'account', f.get().match.secrets.account); else await s.message('u', f.op(), 'hello'); }
-  await s.stop('u', f.op()); assert.equal(f.get().match.score, 100); assert.equal(f.get().bestScore, 600); assert.equal(f.get().wins, 1);
+  await s.stop('u', f.op()); assert.equal(f.get().match.score, 100); assert.equal(f.get().bestScore, winningTotal); assert.equal(f.get().wins, 1);
   assert(f.get().receipts.length <= 16);
   const loss = fixture(), ls = loss.service; await ls.start('u', loss.op());
   loss.get().match.suspicion = 100; loss.get().match.warned = true;

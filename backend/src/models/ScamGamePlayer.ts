@@ -19,6 +19,7 @@ export interface ScamMatch {
   status: ScamStatus;
   stage: ScamStage;
   score: number;
+  bonus?: number; // Legacy terminal matches have no bonus.
   trust: number;
   emotion?: ScamEmotion; // Older matches have no emotion until an accepted AI turn.
   turns: number;

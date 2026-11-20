@@ -44,7 +44,7 @@ export function SecretDrawer({ match, busy, onVerify }: {
     </ol>
     {match.status === 'active' && index !== current && <button type="button" className="text-link scam-current-step" onClick={() => setSelected(match.stage)}>Về bước hiện tại: {stages[current]?.label}</button>}
     <form id={`${id}-form`} className={`scam-secret${enabled ? ' is-current' : ''}`} aria-label={`Xác nhận ${step.label}`} autoComplete="off" onSubmit={e => { e.preventDefault(); void verify(); }}>
-      <div className="scam-secret__heading"><label htmlFor={`${id}-answer`}>{step.label}</label><span>+{step.points} điểm</span></div>
+      <div className="scam-secret__heading"><label htmlFor={`${id}-answer`}>{step.label}</label><span>+{step.points}$</span></div>
       <span className="visually-hidden" role="status">{done ? 'Đã xác nhận' : enabled ? `Bước hiện tại: ${step.label}` : editable ? 'Chờ xác nhận bước trước' : 'Ván đã kết thúc'}</span>
       <div className="row">
         <input id={`${id}-answer`} name={`prop-${stage}`} type={step.inputKind === 'password' && !showPassword ? 'password' : 'text'}

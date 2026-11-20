@@ -27,15 +27,19 @@ global.Date = class extends RealDate { constructor(...args) { super(...(args.len
 let passwordHash;
 let joined = true;
 let onNextCompare;
-const originalCompare = bcrypt.compare;
-bcrypt.compare = async (...args) => { if (onNextCompare) { const fn = onNextCompare; onNextCompare = null; await fn(); } return originalCompare(...args); };
+let compares = [], hashes = 0, upserts = 0, duplicateInsert = false;
+const originalCompare = bcrypt.compare, originalHash = bcrypt.hash;
+bcrypt.hash = (...args) => { if (typeof args[1] === 'number') hashes++; return originalHash(...args); };
+bcrypt.compare = async (...args) => { compares.push(args[1]); if (onNextCompare) { const fn = onNextCompare; onNextCompare = null; await fn(); } return originalCompare(...args); };
 User.findById = () => query({ passwordHash, credentialVersion, mustChangePassword, role: 'user', friendsJoinedAt: joined ? new Date() : null });
 PrivacyLock.findOne = ({ userId }) => query(docs.get(userId));
 PrivacyLock.updateOne = async (filter, update, opts) => {
   let doc = docs.get(filter.userId);
+  if (opts?.upsert) upserts++;
   if (opts?.upsert && !doc) {
     doc = { userId: filter.userId, couple: false, friends: false, coupleHash: null, friendsHash: null, revision: 0, unlockBudget: budget(), reauthBudget: budget() };
     docs.set(filter.userId, doc);
+    if (duplicateInsert) { duplicateInsert = false; throw Object.assign(new Error('insert race'), { code: 11000 }); }
     return { modifiedCount: 0 };
   }
   if (!doc) return { modifiedCount: 0 };
@@ -51,6 +55,7 @@ PrivacyLock.updateOne = async (filter, update, opts) => {
 };
 PrivacyLock.findOneAndUpdate = (filter, pipeline) => {
   const doc = docs.get(filter.userId);
+  if (!doc) return query(null);
   const set = pipeline[0].$set;
   const key = Object.keys(set)[0].split('.')[0];
   const b = doc[key];
@@ -68,6 +73,24 @@ const fails = async (fn, status) => assert.rejects(fn, e => e.status === status)
   await fails(() => service.configure('a', 'couple', 'wrong', 0, '000001'), 400);
   assert.deepEqual(await service.configure('a', 'couple', 'password', 0, '000001'), { couple: true, friends: false, revision: 1 });
   assert.notEqual(docs.get('a').coupleHash, '000001');
+  compares = []; hashes = 0; upserts = 0;
+  assert.equal((await service.unlock('a', '000001')).space, 'couple');
+  assert.equal(compares.length, 2);
+  assert.ok(compares.every(h => bcrypt.getRounds(h) === 11));
+  assert.equal(hashes, 0, 'unlock never creates a dummy hash');
+  assert.equal(upserts, 0, 'existing row does not need an initialization write');
+  compares = [];
+  await fails(() => service.unlock('missing', '999999'), 400);
+  assert.equal(compares.length, 2);
+  assert.equal(compares[0], compares[1]);
+  assert.equal(await originalCompare('privacy-lock-dummy-verifier', compares[0]), true);
+  assert.equal(hashes, 0);
+  assert.equal(upserts, 1);
+  duplicateInsert = true; compares = []; upserts = 0;
+  await fails(() => service.unlock('insert-race', '999999'), 400);
+  assert.equal(compares.length, 2, 'duplicate insert retries reservation against the winning row');
+  assert.equal(upserts, 1);
+  assert.equal(docs.get('insert-race').unlockBudget.failures, 1);
   joined = false;
   await fails(() => service.configure('a', 'friends', 'password', 1, '000002'), 403);
   joined = true;
@@ -77,7 +100,10 @@ const fails = async (fn, status) => assert.rejects(fn, e => e.status === status)
   assert.deepEqual(await service.unlock('a', '000002'), { space: 'friends', revision: 2 });
   await fails(() => service.configure('a', 'couple', 'password', 1, '111111'), 409);
   for (let i = 0; i < 5; i++) await fails(() => service.unlock('a', '999999'), 400);
+  upserts = 0; compares = [];
   await assert.rejects(() => service.unlock('a', '000001'), e => e.status === 429 && e.details.retryAfterSeconds === 30);
+  assert.equal(upserts, 0, 'blocked rows are never reinitialized');
+  assert.equal(compares.length, 0, 'blocked requests do no bcrypt work');
   clock += 30000;
   await fails(() => service.unlock('a', '999999'), 400);
   await assert.rejects(() => service.unlock('a', '000001'), e => e.status === 429 && e.details.retryAfterSeconds === 60);

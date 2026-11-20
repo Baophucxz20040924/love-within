@@ -127,7 +127,7 @@ async function tests() {
   assert.deepEqual(Object.keys(pipeline[7].$project).sort(), ['_id', 'bestScore', 'wins']);
 
   let received;
-  const rows = [{ _id: id(1), bestScore: 600, wins: 3, rank: 1 }, { _id: id(2), bestScore: 300, wins: 0, rank: 2 }];
+  const rows = [{ _id: id(1), bestScore: 750, wins: 3, rank: 1 }, { _id: id(2), bestScore: 300, wins: 0, rank: 2 }];
   const service = loader({
     'models/ScamGamePlayer.ts': { SCAM_RULE_VERSION: 1 },
     'repositories/scamGame.repository.ts': { scamGameRepository: { leaderboard: async (...args) => { received = args; return rows; } } },
@@ -137,7 +137,7 @@ async function tests() {
   })('services/scamGame.service.ts').scamGameService;
   const page = await service.leaderboard(id(1), 1); assert.equal(page.items.length, 1); assert(page.nextCursor); assert.equal(String(received[0]), String(id(1))); assert.equal(received[1][0], String(id(9)));
   assert.deepEqual(Object.keys(page.items[0]).sort(), ['bestScore', 'player', 'rank', 'wins']);
-  await service.leaderboard(id(1), 1, page.nextCursor); assert.equal(received[3].score, 600); assert.equal(received[3].wins, 3);
+  await service.leaderboard(id(1), 1, page.nextCursor); assert.equal(received[3].score, 750); assert.equal(received[3].wins, 3);
   await assert.rejects(service.leaderboard(id(2), 1, page.nextCursor), e => e.status === 400);
   await assert.rejects(service.leaderboard(id(1), 1, page.nextCursor + '='), e => e.status === 400);
   console.log('PASS scam AI/board: strict JSON, secret-redacted 24-bubble context, concurrency4, mock isolation, rank/filter/seek pipeline and scoped cursors (no Mongo/provider)');

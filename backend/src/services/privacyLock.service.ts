@@ -10,8 +10,8 @@ type Budget = 'unlockBudget' | 'reauthBudget';
 const ROUNDS = 11;
 const LEASE_MS = 60_000;
 const LOCK_MESSAGE = 'Thao tác quá nhanh, vui lòng thử lại sau.';
-let dummyHash: Promise<string> | undefined;
-const dummy = () => (dummyHash ??= bcrypt.hash('privacy-lock-dummy-verifier', ROUNDS));
+// Public padding verifier for a non-PIN string; never hash it on the request path.
+const DUMMY_HASH = '$2a$11$.uErRPlGGgZhX85t8B8Txu00PsamHXVc3Dl0At.ka6rmawEdz2K8G';
 
 function retry(seconds: number): AppError {
   return new AppError(429, 'TOO_MANY_REQUESTS', LOCK_MESSAGE, { retryAfterSeconds: Math.max(1, seconds) });
@@ -27,14 +27,13 @@ async function ensureRow(userId: string): Promise<void> {
 
 /** A reservation is charged as a failure before bcrypt. An abandoned lease therefore fails closed. */
 async function reserve(userId: string, budget: Budget) {
-  await ensureRow(userId);
   const now = new Date();
   const leaseId = randomUUID();
   const failures = `$${budget}.failures`;
   const nextFailures = { $add: [{ $ifNull: [failures, 0] }, 1] };
   // 5th attempt triggers 30s; each further charged attempt doubles the delay, capped at 15m.
   const delay = { $min: [900_000, { $multiply: [30_000, { $pow: [2, { $min: [5, { $max: [0, { $subtract: [nextFailures, 5] }] }] }] }] }] };
-  const row = await PrivacyLock.findOneAndUpdate({
+  const attempt = () => PrivacyLock.findOneAndUpdate({
     userId,
     $and: [
       { $or: [{ [`${budget}.blockedUntil`]: null }, { [`${budget}.blockedUntil`]: { $lte: now } }] },
@@ -46,8 +45,15 @@ async function reserve(userId: string, budget: Budget) {
     [`${budget}.leaseId`]: leaseId,
     [`${budget}.leaseUntil`]: new Date(now.getTime() + LEASE_MS),
   } }], { new: true }).select('+coupleHash +friendsHash +unlockBudget +reauthBudget').lean();
+  let row = await attempt();
   if (row) return { row, leaseId };
-  const current = await PrivacyLock.findOne({ userId }).select('+unlockBudget +reauthBudget').lean();
+  let current = await PrivacyLock.findOne({ userId }).select('+unlockBudget +reauthBudget').lean();
+  if (!current) {
+    await ensureRow(userId);
+    row = await attempt();
+    if (row) return { row, leaseId };
+    current = await PrivacyLock.findOne({ userId }).select('+unlockBudget +reauthBudget').lean();
+  }
   if (!current) throw Errors.internal();
   const state = current[budget];
   const until = Math.max(state?.blockedUntil?.getTime() ?? 0, state?.leaseUntil?.getTime() ?? 0);
@@ -75,7 +81,7 @@ async function complete(userId: string, budget: Budget, leaseId: string, revisio
 async function verifyPassword(userId: string, password: string, credentialVersion: number): Promise<void> {
   const { row, leaseId } = await reserve(userId, 'reauthBudget');
   const user = await User.findById(userId).select('passwordHash credentialVersion mustChangePassword role').lean();
-  const match = await bcrypt.compare(password, user?.passwordHash ?? await dummy());
+  const match = await bcrypt.compare(password, user?.passwordHash ?? DUMMY_HASH);
   const valid = !!user && match && !user.mustChangePassword && user.role !== 'admin' &&
     (user.credentialVersion ?? 0) === credentialVersion;
   const completed = await complete(userId, 'reauthBudget', leaseId, row.revision, valid);
@@ -101,7 +107,7 @@ export const privacyLockService = {
     let hash: string | null = null;
     if (pin !== undefined) {
       const otherHash = space === 'couple' ? row.friendsHash : row.coupleHash;
-      if (await bcrypt.compare(pin, otherHash ?? await dummy())) {
+      if (await bcrypt.compare(pin, otherHash ?? DUMMY_HASH)) {
         throw Errors.badRequest('Mã này không dùng được, hãy chọn mã khác.');
       }
       hash = await bcrypt.hash(pin, ROUNDS);
@@ -121,7 +127,7 @@ export const privacyLockService = {
 
   async unlock(userId: string, pin: string) {
     const { row, leaseId } = await reserve(userId, 'unlockBudget');
-    const fallback = (!row.coupleHash || !row.friendsHash) ? await dummy() : '';
+    const fallback = (!row.coupleHash || !row.friendsHash) ? DUMMY_HASH : '';
     const [coupleMatch, friendsMatch] = await Promise.all([
       bcrypt.compare(pin, row.coupleHash ?? fallback),
       bcrypt.compare(pin, row.friendsHash ?? fallback),

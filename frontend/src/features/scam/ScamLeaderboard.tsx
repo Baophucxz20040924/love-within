@@ -22,14 +22,14 @@ export function ScamLeaderboard({ userId }: { userId: string }) {
   const reference = board.error instanceof ApiRequestError ? board.error.requestId : undefined;
   return <section className="scam-board" aria-label="Bảng xếp hạng bạn bè">
     <header className="scam-board__header"><span className="scam-board__trophy" aria-hidden="true">🏆</span><div><p className="scam-eyebrow">Ai thuyết phục khéo hơn?</p><h2>Bảng xếp hạng bạn bè</h2></div></header>
-    <p className="text-sm text-muted">Chỉ gồm bạn và những người đã kết bạn. Xếp theo điểm cao nhất, rồi số ván thắng; bằng cả hai được đồng hạng. Kết quả cập nhật khi ván kết thúc; nhân vật và tin nhắn luôn riêng tư.</p>
+    <p className="text-sm text-muted">Chỉ gồm bạn và những người đã kết bạn. Xếp theo tổng tiền giả lập cao nhất trong một ván (gồm bonus), rồi số ván thắng; bằng cả hai được đồng hạng. Kết quả cập nhật khi ván kết thúc; nhân vật và tin nhắn luôn riêng tư.</p>
     {board.isPending && <p role="status">Đang tải bảng xếp hạng…</p>}
     {board.isError && <p role="alert">{boardError(board.error)} {reference && <small>Mã tham chiếu: {reference}. </small>}<button className="text-link" onClick={() => void (board.isFetchNextPageError ? board.fetchNextPage() : board.refetch())}>Thử lại</button></p>}
     <ol className="scam-board__list">
       {(!board.isError || board.isFetchNextPageError) && board.data?.pages.flatMap(p => p.items).filter((row, index, all) => all.findIndex(r => r.player.id === row.player.id) === index).map(row => <li key={row.player.id} className={`scam-board__row${row.player.id === userId ? ' is-self' : ''}`}>
         <strong className={`scam-board__rank${row.rank <= 3 ? ' is-top' : ''}`}>#{row.rank}</strong><Avatar name={row.player.displayName} src={row.player.avatarUrl} size={36} />
         <span className="scam-board__name">{row.player.displayName}{row.player.id === userId ? ' (bạn)' : ''}</span>
-        <span><strong>{row.bestScore}</strong> điểm<br /><small>{row.wins} ván thắng</small></span>
+        <span><strong>{row.bestScore}$</strong><br /><small>{row.wins} ván thắng</small></span>
       </li>)}
     </ol>
     {board.isSuccess && !board.hasNextPage && !board.data.pages.some(p => p.items.length) && <p>Bạn và bạn bè chưa có ván đã kết thúc. Hoàn thành hoặc dừng một ván để lên bảng nhé.</p>}

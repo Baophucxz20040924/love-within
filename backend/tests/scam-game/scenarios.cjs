@@ -39,13 +39,20 @@ async function tests() {
       assert.throws(() => rules.validateDisclosure(match, { ...decision, reply: match.secrets[step.id] }));
     }
     let stored = { _id: 'u', revision: 0, ruleVersion: 1, bestScore: 0, wins: 0, completed: 0, match: rules.newMatch(undefined, id), pending: null, receipts: [] };
-    const service = loader({ 'models/ScamGamePlayer.ts': { SCAM_RULE_VERSION: 1 },
+    let bonusCalls = 0;
+    const bonus = id === 'identity' ? 150 : 30;
+    const service = loader({ 'node:crypto': { ...require('node:crypto'), randomInt: (min, max) => {
+      if (min === 30 && max === 151) { bonusCalls++; return bonus; }
+      return require('node:crypto').randomInt(min, max);
+    } }, 'models/ScamGamePlayer.ts': { SCAM_RULE_VERSION: 1 },
       'repositories/scamGame.repository.ts': { scamGameRepository: { get: async () => structuredClone(stored), cas: async (old, next) => { if (old.revision !== stored.revision) return false; stored = structuredClone({ ...next, revision: old.revision + 1 }); return true; } } },
       'repositories/friendSafety.repository.ts': { friendBlockRepository: {} }, 'services/profile.service.ts': { profileService: {} },
       'config/env.ts': { env: {} }, 'services/scamGame/ai.ts': { isScamMock: () => true },
     })('services/scamGame.service.ts').scamGameService;
     const op = () => ({ operationId: randomUUID(), expectedRevision: stored.revision, matchId: stored.match.id });
+    let beforeFinal;
     for (const step of scenario.steps) {
+      if (step === scenario.steps.at(-1)) beforeFinal = structuredClone(stored);
       const operation = op(), original = stored.match.secrets[step.id];
       const value = step.policy === 'date' ? original.split('-').reverse().join('/') : step.policy === 'name' ? original.toUpperCase().replaceAll(' ', '   ').normalize('NFD') : original;
       await assert.rejects(service.verify('u', operation, step.id, 'wrong'), e => e.code === 'SCAM_INCORRECT');
@@ -54,10 +61,23 @@ async function tests() {
       await service.verify('u', operation, step.id, value); assert.equal(stored.revision, revision);
       if (value !== original) await assert.rejects(service.verify('u', operation, step.id, original), e => e.status === 409, 'raw fingerprint remains distinct');
     }
-    assert.equal(stored.match.score, 600); assert.equal(stored.match.status, 'won'); assert.equal(stored.wins, 1); assert.equal(stored.completed, 1); assert(!stored.match.runtimeContext);
+    assert.equal(stored.match.score, 600 + stored.match.bonus); assert(stored.match.bonus >= 30 && stored.match.bonus <= 150); assert.equal(stored.bestScore, stored.match.score); assert.equal(stored.match.status, 'won'); assert.equal(stored.wins, 1); assert.equal(stored.completed, 1); assert(!stored.match.runtimeContext);
+    assert.equal(stored.match.bonus, bonus); assert.equal(bonusCalls, 1, 'replay does not roll again');
     const view = JSON.stringify(rules.playerView(stored, true));
+    const legacyWon = structuredClone(stored); delete legacyWon.match.bonus; legacyWon.match.score = 600;
+    assert.equal(rules.playerView(legacyWon, true).match.bonus, 0, 'no retrospective payout');
     for (const value of Object.values(stored.match.secrets)) assert(!view.includes(value));
     assert(!view.includes('policy')); assert(!view.includes('gate')); assert(!view.includes('premise'));
+    stored = structuredClone(beforeFinal); bonusCalls = 0;
+    const final = scenario.steps.at(-1), contenders = [op(), op()];
+    const race = await Promise.allSettled(contenders.map(operation => service.verify('u', operation, final.id, stored.match.secrets[final.id])));
+    assert.equal(race.filter(result => result.status === 'fulfilled').length, 1);
+    assert.equal(race.filter(result => result.status === 'rejected' && result.reason.status === 409).length, 1);
+    assert.equal(stored.match.score, 600 + bonus); assert.equal(stored.wins, 1); assert.equal(stored.completed, 1);
+    const rolled = bonusCalls, winner = race.findIndex(result => result.status === 'fulfilled');
+    await service.verify('u', contenders[winner], final.id, stored.match.secrets[final.id]);
+    assert.equal(bonusCalls, rolled, 'winning receipt does not reroll after concurrent candidates');
+    assert.equal(stored.match.score, 600 + bonus);
   }
   for (const date of ['2023-02-29', '31/04/2000', '2000-13-01', '01/01/0000', '1/1/2000']) assert.equal(scenarios.normalizeAnswer(date, 'date'), null);
   assert.equal(scenarios.normalizeAnswer('29/02/2000', 'date'), '2000-02-29');

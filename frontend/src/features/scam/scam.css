@@ -122,9 +122,27 @@
   .scam-board { padding: 16px 12px; }
   .scam-board__row { gap: 6px; padding-inline: 4px; }
 }
-/* The active game budgets for the shell navigation; other pages keep their flow. */
-.app-content:has(> .scam-page--active) { padding-bottom: calc(var(--nav-h) + env(safe-area-inset-bottom, 0px) + 8px); }
-.scam-page--active { --scam-clearance: calc(var(--nav-h) + env(safe-area-inset-bottom, 0px) + 8px); max-width: 1040px; height: calc(100vh - var(--scam-clearance)); height: calc(100dvh - var(--scam-clearance)); min-height: min-content; padding: 8px 0 0; display: flex; flex-direction: column; gap: 6px; }
+/* The game owns its viewport; Friends navigation returns on other routes. */
+.app-shell--scam > .app-content { padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 8px); }
+.scam-page { position: relative; }
+.scam-icon-button, .scam-character__details summary { display: inline-grid; place-items: center; width: 44px; min-height: 44px; border: 1px solid var(--border); border-radius: 50%; background: var(--surface-2); color: var(--brand-700); cursor: pointer; }
+.scam-icon-button svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.scam-icon-button.scam-stop { color: var(--warning-700); }
+.scam-icon-button[aria-busy="true"] svg { opacity: .45; }
+.scam-effect { position: absolute; z-index: 3; inset: 50px 0 auto; height: min(430px, 60vh); pointer-events: none; overflow: hidden; }
+.scam-effect__particles { position: absolute; inset: 0; }
+.scam-effect__piece { position: absolute; left: var(--x); top: -65px; width: 62px; height: 40px; animation: scam-money-fall 1450ms var(--delay) both cubic-bezier(.3,.05,.65,1); }
+.scam-effect__label { position: absolute; top: 28%; left: 50%; transform: translateX(-50%); display: grid; justify-items: center; gap: 4px; width: max-content; max-width: 90%; padding: 10px 16px; border: 2px solid #28564d; border-radius: 16px; background: #e9ffd9; color: #235247; box-shadow: 3px 4px 0 #28564d; text-align: center; }
+.scam-effect__label strong { font-size: 26px; font-weight: 900; }
+.scam-effect__label span { font-size: 12px; }
+.scam-effect--lost .scam-effect__label { background: #eee6ff; color: #514868; border-color: #514868; box-shadow: 3px 4px 0 #514868; }
+.scam-effect--lost .scam-effect__piece { top: 24%; width: 70px; height: 55px; animation-name: scam-smoke; }
+.scam-effect__crack { position: absolute; top: 12%; left: 5%; width: 90%; height: 120px; fill: none; stroke: #807092; stroke-width: 3; animation: scam-smoke 1400ms both; }
+@keyframes scam-money-fall { 0% { opacity: 0; transform: translate3d(0,-20px,0) rotate(-25deg); } 12% { opacity: 1; } 75% { opacity: 1; } 100% { opacity: 0; transform: translate3d(var(--drift),460px,0) rotate(var(--turn)); } }
+@keyframes scam-smoke { from { opacity: 0; transform: scale(.4); } 20% { opacity: .9; } to { opacity: 0; transform: translateY(-65px) scale(1.3); } }
+@media (prefers-reduced-motion: reduce) { .scam-effect__particles { display: none; } }
+.app-content:has(> .scam-page--active) { padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 8px); }
+.scam-page--active { --scam-clearance: calc(env(safe-area-inset-bottom, 0px) + 8px); max-width: 1040px; height: calc(100vh - var(--scam-clearance)); height: calc(100dvh - var(--scam-clearance)); min-height: min-content; padding: 8px 0 0; display: flex; flex-direction: column; gap: 6px; }
 .scam-page--active .scam-page__heading { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; flex-shrink: 0; }
 .scam-toolbar { display: flex; align-items: center; gap: 10px; margin-left: auto; }
 .scam-page .scam-toolbar button { min-height: 44px; font-size: 12px; }
@@ -137,7 +155,8 @@
 .scam-character h2 { margin: 0; font-size: 16px; }
 .scam-emotion { margin-top: 3px; padding: 0; background: transparent; }
 .scam-character__details { font-size: 12px; color: var(--text-muted); }
-.scam-character__details summary { display: flex; align-items: center; min-height: 44px; cursor: pointer; text-decoration: underline; }
+.scam-character__details summary { display: grid; font-size: 20px; list-style: none; }
+.scam-character__details summary::-webkit-details-marker { display: none; }
 .scam-character__details[open] { flex-basis: 100%; }
 .scam-character__details p { padding-bottom: 6px; }
 .scam-summary { display: flex; align-items: center; gap: 18px; padding: 0 12px 10px; }
@@ -170,8 +189,8 @@
 .scam-page button:focus-visible, .scam-character summary:focus-visible { outline: 2px solid var(--brand-600); outline-offset: 2px; }
 .scam-pending, .scam-send-feedback { padding: 8px 10px; flex-shrink: 0; }
 @media (min-width: 700px) {
-  .app-content:has(> .scam-page--active) { padding-bottom: calc(var(--nav-h) + env(safe-area-inset-bottom, 0px) + 32px); }
-  .scam-page--active { --scam-clearance: calc(var(--nav-h) + env(safe-area-inset-bottom, 0px) + 32px); }
+  .app-content:has(> .scam-page--active) { padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 32px); }
+  .scam-page--active { --scam-clearance: calc(env(safe-area-inset-bottom, 0px) + 32px); }
 }
 @media (min-width: 900px) {
   .scam-page--active .scam-workspace { grid-template-columns: minmax(0, 1fr) 300px; grid-template-rows: minmax(210px, 1fr); }
@@ -182,7 +201,6 @@
 @media (max-width: 350px) {
   .scam-toolbar { gap: 6px; }
   .scam-back, .scam-toolbar button { font-size: 11px; }
-  .scam-character__details { flex-basis: 100%; }
 }
 @media (max-height: 600px) {
   .scam-page--active { height: auto; }
