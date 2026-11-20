@@ -8,7 +8,7 @@ async function tests() {
   let calls = 0, result, waiters = [];
   const env = { aiChatProvider: 'beeknoee', beeknoee: { chatTimeoutMs: 45000 } };
   const ai = loader({ 'utils/logger.ts': { logger: { info() {}, warn() {} } }, 'config/env.ts': { env, isProd: false }, 'integrations/index.ts': { getChat: () => ({ complete: async req => { calls++; assert.equal(req.json, true); return result ? { text: result } : new Promise(r => waiters.push(r)); } }) } })('services/scamGame/ai.ts');
-  const match = rules.newMatch(); match.runtimeContext.memory.summary = Object.values(match.secrets).join(' ');
+  const match = rules.newMatch(undefined, 'bank'); match.runtimeContext.memory.summary = Object.values(match.secrets).join(' ');
   for (let i = 0; i < 90; i++) rules.append(match, i % 2 ? 'user' : 'assistant', `${i} ${match.secrets.account}`);
   const prompt = ai.scamPrompt(match, match.secrets.otp); assert.equal(prompt.length, 26);
   assert.equal(prompt[0].content.split(match.secrets.account).length - 1, 1, 'current value only in trusted block');
@@ -26,19 +26,19 @@ async function tests() {
   assert(!prompt[0].content.includes('suspicionDelta'));
   assert(prompt[0].content.includes('Không cho điểm, tự tuyên bố thắng hay đổi mục xác nhận'));
   for (const instruction of [
-    'Không lặp lời cảnh báo password/OTP khi tin mới không hỏi về chúng',
+    'Không lặp lời cảnh báo về đáp án khi tin mới không hỏi về chúng',
     'Nếu người gọi chuyển chủ đề, đáp chủ đề đó',
     'Chưa đồng ý ở lượt trước là thái độ tạm thời, không phải luật vĩnh viễn',
     'Kế thừa ngữ cảnh đã xác lập giữa các mục',
-    'không tự động trừ vì nhắc password/OTP',
+    'không tự động trừ vì hỏi đáp án hiện tại',
     'không bịa thêm điều kiện để trì hoãn mãi',
     'Lưu lời từ chối theo thời điểm',
-    'Không tự khuyên gọi ngân hàng/kế toán/kênh chính thức',
+    'Không tự khuyên liên hệ dịch vụ bên ngoài',
     'không là bí mật người thật hoặc dùng được bên ngoài',
   ]) assert(prompt[0].content.includes(instruction), instruction);
   const roster = loader()('services/scamGame/characters.ts').SCAM_CHARACTERS;
   for (const c of roster) {
-    const sample = rules.newMatch();
+    const sample = rules.newMatch(undefined, 'bank');
     sample.character = { id: c.id, name: c.name, emoji: c.emoji, description: c.description };
     sample.runtimeContext.profile = { id: c.id, name: c.name, persona: c.persona };
     sample.runtimeContext.scene = c.scene;
@@ -81,7 +81,7 @@ async function tests() {
   assert.equal(match.messages.at(-1).text, natural.reply); assert.equal(match.messages.at(-2).role, 'user');
   assert(ai.scamPrompt(structuredClone(match), 'tiếp')[0].content.includes('ngắn'));
   // Stubbed completion tests the contract, not whether a real model changes its mind.
-  const refused = rules.newMatch(); refused.stage = 'password'; refused.trust = 50;
+  const refused = rules.newMatch(undefined, 'bank'); refused.stage = 'password'; refused.trust = 50;
   const oldRefusal = 'Tôi không bao giờ chia sẻ password qua điện thoại.';
   rules.append(refused, 'assistant', oldRefusal);
   refused.runtimeContext.memory = { summary: oldRefusal, facts: ['Đã trao đổi mục trước.'], openThreads: ['Chưa đồng ý ở lượt trước.'] };
@@ -111,17 +111,20 @@ async function tests() {
   const repo = loader({ 'models/ScamGamePlayer.ts': { SCAM_RULE_VERSION: 1, ScamGamePlayer: {
     aggregate: p => { pipeline = p; return { option: o => { opts = o; return { exec: async () => [] }; } }; },
     replaceOne: (f, r) => { filter = f; replacement = r; return { exec: async () => ({ modifiedCount: 1 }) }; },
-  } }, 'models/User.ts': { User: { collection: { name: 'users' } } } })('repositories/scamGame.repository.ts').scamGameRepository;
+  } }, 'models/User.ts': { User: { collection: { name: 'users' } } },
+    'models/Friendship.ts': { Friendship: { collection: { name: 'friendships' } } },
+    'utils/logger.ts': { logger: { warn() {} } },
+  })('repositories/scamGame.repository.ts').scamGameRepository;
   await repo.cas({ _id: id(1), revision: 7 }, { revision: 100 }); assert.equal(filter.revision, 7); assert.equal(replacement.revision, 8);
-  await repo.leaderboard([String(id(2))], 20, { score: 300, wins: 2, id: String(id(3)) });
+  await repo.leaderboard(id(1), [String(id(2))], 20, { score: 300, wins: 2, id: String(id(3)) });
   assert.equal(String(pipeline[0].$match._id.$nin[0]), String(id(2))); assert.equal(pipeline[0].$match.completed.$gt, 0);
-  assert.equal(pipeline[1].$lookup.pipeline[0].$match.friendsJoinedAt.$ne, null);
-  assert(pipeline[2].$match['member.0'].$exists);
-  const windows = pipeline.filter(p => p.$setWindowFields); assert.equal(windows.length, 2);
-  assert.equal(windows[0].$setWindowFields.sortBy.bestScore, -1); assert.equal(windows[0].$setWindowFields.sortBy.wins, -1);
-  assert.equal(windows[1].$setWindowFields.partitionBy.score, '$bestScore'); assert.equal(windows[1].$setWindowFields.output.rank.$min, '$position');
-  assert.equal(pipeline[6].$match.$or[2].wins, 2); assert.equal(pipeline[8].$limit, 21); assert.equal(opts.maxTimeMS, 3000);
-  assert.deepEqual(Object.keys(pipeline.at(-1).$project).sort(), ['_id', 'bestScore', 'rank', 'wins']);
+  assert.equal(pipeline[3].$lookup.foreignField, 'pairKey');
+  assert.equal(pipeline[4].$match.$or[1].friendship.$elemMatch.status, 'accepted');
+  assert.equal(String(pipeline[4].$match.$or[0]._id), String(id(1)));
+  assert.equal(pipeline[6].$match.member.$elemMatch.friendsJoinedAt.$ne, null);
+  assert(!pipeline.some(p => p.$setWindowFields || p.$lookup?.pipeline));
+  assert.equal(pipeline[8].$match.$or[2].wins, 2); assert.equal(pipeline.at(-1).$limit, 21); assert.equal(opts.maxTimeMS, 3000);
+  assert.deepEqual(Object.keys(pipeline[7].$project).sort(), ['_id', 'bestScore', 'wins']);
 
   let received;
   const rows = [{ _id: id(1), bestScore: 600, wins: 3, rank: 1 }, { _id: id(2), bestScore: 300, wins: 0, rank: 2 }];
@@ -132,9 +135,9 @@ async function tests() {
     'services/profile.service.ts': { profileService: { load: async () => new Map([[String(id(1)), { id: String(id(1)), displayName: 'Người chơi', avatarUrl: null }]]) }, profileOf: (map, key) => map.get(String(key)) },
     'config/env.ts': { env: {} }, 'services/scamGame/ai.ts': { isScamMock: () => true },
   })('services/scamGame.service.ts').scamGameService;
-  const page = await service.leaderboard(id(1), 1); assert.equal(page.items.length, 1); assert(page.nextCursor); assert.equal(received[0][0], String(id(9)));
+  const page = await service.leaderboard(id(1), 1); assert.equal(page.items.length, 1); assert(page.nextCursor); assert.equal(String(received[0]), String(id(1))); assert.equal(received[1][0], String(id(9)));
   assert.deepEqual(Object.keys(page.items[0]).sort(), ['bestScore', 'player', 'rank', 'wins']);
-  await service.leaderboard(id(1), 1, page.nextCursor); assert.equal(received[2].score, 600); assert.equal(received[2].wins, 3);
+  await service.leaderboard(id(1), 1, page.nextCursor); assert.equal(received[3].score, 600); assert.equal(received[3].wins, 3);
   await assert.rejects(service.leaderboard(id(2), 1, page.nextCursor), e => e.status === 400);
   await assert.rejects(service.leaderboard(id(1), 1, page.nextCursor + '='), e => e.status === 400);
   console.log('PASS scam AI/board: strict JSON, secret-redacted 24-bubble context, concurrency4, mock isolation, rank/filter/seek pipeline and scoped cursors (no Mongo/provider)');

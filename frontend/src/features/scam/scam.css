@@ -23,7 +23,7 @@
 .scam-lobby__cast span:last-child { transform: rotate(12deg); }
 .scam-lobby h2 { font-size: 20px; letter-spacing: -.02em; margin-bottom: 8px; }
 .scam-lobby p { max-width: 420px; margin: 0 auto; color: var(--text-muted); font-size: 13px; }
-.scam-howto { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); list-style: none; gap: 8px; padding: 0; margin: 0; }
+.scam-howto { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); list-style: none; gap: 8px; padding: 0; margin: 0; }
 .scam-howto li { display: grid; justify-items: center; gap: 5px; padding: 12px 4px; background: var(--brand-50); border: 1px solid var(--brand-100); border-radius: 14px; font-size: 11px; color: var(--text-muted); }
 .scam-howto strong { color: var(--text); font-size: 12px; }
 .scam-howto__number { display: grid; place-items: center; width: 24px; height: 24px; border-radius: 8px; background: var(--brand-100); color: var(--brand-700); font-weight: 700; }
@@ -57,6 +57,8 @@
 .scam-stage strong { color: var(--brand-700); font-variant-numeric: tabular-nums; }
 .scam-progress { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; list-style: none; padding: 12px 20px; margin: 0; border-top: 1px solid var(--border); }
 .scam-progress li { display: flex; align-items: center; gap: 7px; font-size: 11px; color: var(--text-muted); min-width: 0; }
+.scam-scenario { padding: 0 20px 12px; font-size: 12px; color: var(--text-muted); }
+.scam-progress li > span:last-child { min-width: 0; overflow-wrap: anywhere; }
 .scam-progress small { display: block; font-size: 9px; margin-top: 1px; }
 .scam-progress__dot { display: grid; place-items: center; flex: 0 0 24px; height: 24px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 50%; font-size: 11px; font-weight: 700; }
 .scam-progress .is-current { color: var(--brand-700); font-weight: 700; }
@@ -87,7 +89,9 @@
 .scam-secret__heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .scam-secret__heading > span { font-size: 10px; color: var(--text-muted); }
 .scam-secret label { font-size: 12px; }
-.scam-secret .row { display: flex; gap: 8px; }
+.scam-secret .row { display: flex; flex-wrap: wrap; gap: 8px; }
+.scam-secret .row > input { flex: 1 1 180px; }
+.scam-secret .row > button { max-width: 100%; overflow-wrap: anywhere; }
 .scam-secret input:not([type="checkbox"]) { min-width: 0; width: 100%; border: 1px solid var(--control-border); border-radius: 10px; padding: 10px; font: inherit; font-size: 16px; background: var(--surface); color: inherit; }
 .scam-secret input:disabled { opacity: .65; }
 .scam-secret button { font-size: 11px; flex-shrink: 0; padding: 8px 10px; min-height: 44px; }

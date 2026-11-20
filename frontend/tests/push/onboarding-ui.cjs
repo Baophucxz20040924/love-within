@@ -539,7 +539,8 @@ function authHarness(options = {}) {
   };
   const { AuthProvider } = load('features/auth/AuthContext.tsx', {
     react: h.react, 'react/jsx-runtime': jsxRuntime, '@tanstack/react-query': { useQueryClient: () => qc },
-    '../../lib/apiClient': { SESSION_EXPIRED_EVENT: 'expired', apiRequest, advanceAccessEpoch() {},
+    '../../lib/commentDraftStore': { commentDraftStore: { sessionChanged() {}, revokeCouple() {} } },
+    '../../lib/apiClient': { SESSION_EXPIRED_EVENT: 'expired', apiRequest, advanceAccessEpoch() {}, currentAccessEpoch: () => 0, waitForAbort: promise => promise,
       assertCurrentSession(value) { if (!tokenStore.isCurrent(value)) throw new DOMException('Session changed', 'AbortError'); } },
     '../../lib/tokenStore': { tokenStore },
     '../../lib/spaceStore': { spaceStore: { get: () => space, set: value => { space = value; }, isSpaceKey: key => key === 'space' } },
@@ -569,6 +570,20 @@ test('actual AuthProvider bootstrap, refreshMe and verification never emit compl
     if (persisted) { assert.equal(await value.verifyMe(), true); assert.equal(h.render().completedAuth, null); }
     h.h.unmount();
   }
+});
+
+test('equivalent verifyMe calls share a flight; revoke fences its late response', async () => {
+  const h = authHarness({ persisted: true }); await h.boot();
+  const held = deferred(); let calls = 0;
+  h.handlers.set('/me', () => { calls++; return held.promise; });
+  const auth = h.render(), first = auth.verifyMe(), second = auth.verifyMe(), refresh = auth.refreshMe();
+  assert.equal(calls, 1);
+  auth.revokeMe(true);
+  const fresh = deferred(); h.handlers.set('/me', () => { calls++; return fresh.promise; });
+  const replacement = auth.verifyMe(); assert.equal(calls, 2);
+  held.resolve(profile()); assert.equal(await first, false); assert.equal(await second, false); await refresh;
+  fresh.resolve(profile(false)); assert.equal(await replacement, true);
+  assert.equal(h.render().me.couple, null); h.h.unmount();
 });
 
 test('actual AuthProvider publishes completedAuth only after final explicit login/register steps', async () => {

@@ -12,6 +12,7 @@ function fixture() {
   let stored = player(), decision = async m => offer(m);
   const load = loader({
     'models/ScamGamePlayer.ts': { SCAM_RULE_VERSION: 1 },
+    'services/scamGame/rules.ts': { ...rules, newMatch: previous => rules.newMatch(previous, 'bank') },
     'repositories/scamGame.repository.ts': { scamGameRepository: { get: async () => clone(stored), cas: async (old, next) => {
       if (stored.revision !== old.revision) return false;
       stored = clone({ ...next, revision: old.revision + 1 }); return true;
@@ -28,19 +29,19 @@ function fixture() {
 async function tests() {
   let previous;
   for (let i = 0; i < 50; i++) {
-    const m = rules.newMatch(previous); assert.notEqual(m.character.id, previous); previous = m.character.id;
+    const m = rules.newMatch(previous, 'bank'); assert.notEqual(m.character.id, previous); previous = m.character.id;
     assert.match(m.secrets.account, /^SIM-[A-F0-9]{4}$/); assert.match(m.secrets.password, /^P-[A-HJ-NP-Z2-9]{6}$/); assert.equal(m.secrets.account.length, 8); assert.equal(m.secrets.password.length, 8); assert.match(m.secrets.otp, /^\d{6}$/);
   }
   const { SCAM_EMOTIONS } = loader()('services/scamGame/emotions.ts');
   assert.equal(SCAM_EMOTIONS.length, 16);
   for (const emotion of SCAM_EMOTIONS) {
-    const emotional = rules.newMatch(); assert.equal(emotional.emotion, 'neutral'); emotional.trust = 90;
+    const emotional = rules.newMatch(undefined, 'bank'); assert.equal(emotional.emotion, 'neutral'); emotional.trust = 90;
     rules.applyDecision(emotional, 'state', { ...positive, emotion, trustDelta: 0 });
     assert.equal(emotional.emotion, emotion); assert.equal(emotional.status, 'active'); assert.equal(emotional.trust, 90);
     assert.equal(rules.playerView({ ...player(), match: emotional }, true).match.emotion, emotion);
   }
   for (const emotion of [undefined, null, 'rage', 'toString', 1, {}]) {
-    const old = rules.newMatch(); old.emotion = emotion;
+    const old = rules.newMatch(undefined, 'bank'); old.emotion = emotion;
     const saved = JSON.stringify(old);
     assert.equal(rules.playerView({ ...player(), match: old }, true).match.emotion, 'neutral');
     assert.equal(JSON.stringify(old), saved, 'legacy view never mutates');
@@ -65,8 +66,8 @@ async function tests() {
   const rhythms = roster.map(c => c.persona.match(/Nhịp tin tưởng trong vai: (Cởi mở|Điềm tĩnh|Bộc trực|Kín đáo):/)?.[1]);
   assert(rhythms.every(Boolean)); assert.equal(new Set(rhythms).size, 4);
   assert.equal(new Set(roster.map(c => c.persona.split('Nhịp tin tưởng trong vai: ')[1])).size, 40);
-  const m = rules.newMatch(); assert.equal(m.trust, 30);
-  const other = rules.newMatch(), original = JSON.stringify(roster);
+  const m = rules.newMatch(undefined, 'bank'); assert.equal(m.trust, 30);
+  const other = rules.newMatch(undefined, 'bank'), original = JSON.stringify(roster);
   assert.notEqual(m.runtimeContext, other.runtimeContext); assert.notEqual(m.runtimeContext.memory, other.runtimeContext.memory);
   assert(!m.character.persona); assert(!m.memory);
   rules.applyDecision(m, 'context', { ...positive, trustDelta: 0, contextUpdate: { summary: m.secrets.otp, facts: ['Người gọi tự nhận là bạn', 'Người gọi tự nhận là bạn'], openThreads: ['Hỏi mục đích'] } }, 'correlation');
@@ -79,10 +80,10 @@ async function tests() {
   rules.applyDecision(restored, 'đính chính', { ...positive, trustDelta: 0, contextUpdate: { summary: 'Đã đính chính', facts: ['Người gọi nói chưa từng gặp'], openThreads: [] } });
   assert.equal(restored.runtimeContext.memory.facts.length, 1); assert(!restored.runtimeContext.memory.facts.includes('Người gọi tự nhận là bạn'));
   assert.equal(m.runtimeContext.memory.facts[0], 'Người gọi tự nhận là bạn');
-  const legacy = rules.newMatch(); delete legacy.runtimeContext; legacy.character.persona = 'Vai cũ'; legacy.memory = 'Chuyện cũ';
+  const legacy = rules.newMatch(undefined, 'bank'); delete legacy.runtimeContext; legacy.character.persona = 'Vai cũ'; legacy.memory = 'Chuyện cũ';
   rules.ensureContext(legacy); assert.equal(legacy.runtimeContext.profile.persona, 'Vai cũ'); assert.equal(legacy.runtimeContext.memory.summary, 'Chuyện cũ'); assert(!legacy.memory);
   assert(legacy.runtimeContext.scene.includes('không đổi địa điểm'));
-  const activeSnapshot = rules.newMatch(); activeSnapshot.runtimeContext.profile.persona = 'Hồ sơ đã clone từ bản trước';
+  const activeSnapshot = rules.newMatch(undefined, 'bank'); activeSnapshot.runtimeContext.profile.persona = 'Hồ sơ đã clone từ bản trước';
   activeSnapshot.secrets = { account: 'SIM-012345ABCDEF', password: 'PROP-legacy-long-value', otp: '001234' };
   const savedSecrets = JSON.stringify(activeSnapshot.secrets);
   const savedContext = JSON.stringify(activeSnapshot.runtimeContext);
@@ -94,7 +95,7 @@ async function tests() {
   assert.equal(rules.nextTrust({ trust: 99 }, 100), 100);
   assert.equal(rules.nextTrust({ trust: 1 }, -100), 0);
   for (const [stage, gate] of Object.entries(rules.SCAM_BALANCE.gates)) {
-    const boundary = rules.newMatch(); boundary.stage = stage; boundary.trust = gate - 21;
+    const boundary = rules.newMatch(undefined, 'bank'); boundary.stage = stage; boundary.trust = gate - 21;
     assert.throws(() => rules.validateDisclosure(boundary, offer(boundary)), 'gate uses clamped delta, not raw100');
     boundary.trust++;
     rules.applyDecision(boundary, 'boundary', offer(boundary)); assert.equal(boundary.trust, gate);
@@ -102,36 +103,36 @@ async function tests() {
   rules.applyDecision(m, 'xin chào', offer(m)); assert.equal(m.trust, 50); assert.equal(m.revealed[0], 'account');
   rules.applyDecision(m, 'xin chào', offer(m)); assert.equal(m.trust, 70);
   for (const [stage, gate] of Object.entries(rules.SCAM_BALANCE.gates)) {
-    const below = rules.newMatch(); below.stage = stage; below.trust = gate - 1;
+    const below = rules.newMatch(undefined, 'bank'); below.stage = stage; below.trust = gate - 1;
     assert.throws(() => rules.applyDecision(below, 'chưa đủ', { ...offer(below), trustDelta: 0 })); assert.equal(below.revealed.length, 0);
     rules.applyDecision(below, 'vừa đủ', { ...offer(below), trustDelta: 1 }); assert.equal(below.revealed[0], stage);
-    const noOffer = rules.newMatch(); noOffer.stage = stage; noOffer.trust = 100;
+    const noOffer = rules.newMatch(undefined, 'bank'); noOffer.stage = stage; noOffer.trust = 100;
     rules.applyDecision(noOffer, 'chưa đồng ý', { ...positive, offerCurrentSecret: false }); assert.equal(noOffer.revealed.length, 0);
   }
-  const penalty = rules.newMatch(); rules.applyDecision(penalty, 'x', { ...positive, trustDelta: -100 });
+  const penalty = rules.newMatch(undefined, 'bank'); rules.applyDecision(penalty, 'x', { ...positive, trustDelta: -100 });
   assert.equal(penalty.trust, 18); assert.equal(penalty.status, 'active');
   assert(!('suspicion' in penalty)); assert(!('warned' in penalty));
   for (const trust of [0, 100]) {
-    const ended = rules.newMatch(); ended.trust = trust;
+    const ended = rules.newMatch(undefined, 'bank'); ended.trust = trust;
     rules.applyDecision(ended, 'x', { ...hangup, offerCurrentSecret: true, trustDelta: 0 });
     assert(!ended.runtimeContext); assert.equal(ended.emotion, 'neutral'); assert.equal(ended.status, 'lost'); assert(ended.endedAt); assert.equal(ended.turns, 1);
     assert.equal(ended.revealed.length, 0, 'hang-up overrides simultaneous offer even at trust100');
     assert(!ended.messages.some(b => b.text.includes(ended.secrets.account)));
     assert.equal(ended.messages.at(-2).text, hangup.reply); assert.equal(ended.messages.at(-1).role, 'system');
   }
-  const closing = rules.newMatch();
+  const closing = rules.newMatch(undefined, 'bank');
   rules.applyDecision(closing, 'bye', { ...hangup, offerCurrentSecret: true, reply: `Tạm biệt ${closing.secrets.account} ${closing.secrets.password} ${closing.secrets.otp}` });
   assert(!closing.runtimeContext); for (const value of Object.values(closing.secrets)) assert(!closing.messages.at(-2).text.includes(value));
-  const continuing = rules.newMatch(); continuing.trust = 0;
+  const continuing = rules.newMatch(undefined, 'bank'); continuing.trust = 0;
   continuing.suspicion = 100; continuing.warned = true; // Legacy Mixed fields are inert.
   rules.applyDecision(continuing, 'x', { ...positive, trustDelta: -100, reply: 'Bạn vừa nói cúp máy, ngắt liên lạc sao? Tôi vẫn đang nghe.' });
   assert.equal(continuing.status, 'active'); assert.equal(continuing.trust, 0); assert.equal(continuing.endedAt, null);
   for (let i = 0; i < 120; i++) rules.applyDecision(continuing, 'x', positive); assert.equal(continuing.messages.length, 80); assert(continuing.turns > 100);
-  const aged = rules.newMatch(); aged.trust = 100; rules.applyDecision(aged, 'x', offer(aged));
+  const aged = rules.newMatch(undefined, 'bank'); aged.trust = 100; rules.applyDecision(aged, 'x', offer(aged));
   for (let i = 0; i < 90; i++) rules.append(aged, 'user', 'cửa sổ mới');
   assert(!aged.messages.some(m => m.text.includes(aged.secrets.account)));
   rules.applyDecision(aged, 'xin lại', offer(aged)); assert(aged.messages.some(m => m.text.includes(aged.secrets.account))); assert.equal(aged.revealed.length, 1);
-  const p = player(); p.match = rules.newMatch(); p.pending = { operationId: 'op', fingerprint: 'private', token: 'private-token', expectedRevision: 0, expiresAt: 3, text: 'draft' };
+  const p = player(); p.match = rules.newMatch(undefined, 'bank'); p.pending = { operationId: 'op', fingerprint: 'private', token: 'private-token', expectedRevision: 0, expiresAt: 3, text: 'draft' };
   p.match.suspicion = 100; p.match.warned = true;
   const view = JSON.stringify(rules.playerView(p, true)); assert(!view.includes('suspicion')); assert(!view.includes('warned')); for (const secret of Object.values(p.match.secrets)) assert(!view.includes(secret));
   assert(!view.includes('private-token')); assert(!view.includes('fingerprint')); assert(!view.includes('persona')); assert(!view.includes('memory'));

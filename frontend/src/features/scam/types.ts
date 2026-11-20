@@ -1,6 +1,10 @@
 import type { ScamEmotion } from './emotions';
 
-export type ScamStage = 'account' | 'password' | 'otp';
+export type ScamStage = 'account' | 'password' | 'otp' | 'identityCode' | 'dob' | 'recoveryQuestion1' | 'recoveryQuestion2';
+export interface ScamScenario {
+  id: 'bank' | 'identity' | 'social'; version: 1; title: string; goal: string; maxScore: number;
+  steps: { id: ScamStage; label: string; format: string; inputKind: 'text' | 'password' | 'numeric' | 'date'; points: number }[];
+}
 export interface ScamOperation { operationId: string; expectedRevision: number; matchId?: string }
 export interface ScamState {
   revision: number;
@@ -14,6 +18,7 @@ export interface ScamState {
     character: { id: string; name: string; emoji: string; description: string };
     status: 'active' | 'won' | 'lost' | 'stopped';
     stage: ScamStage;
+    scenario?: ScamScenario;
     score: number;
     trust: number;
     emotion?: ScamEmotion;

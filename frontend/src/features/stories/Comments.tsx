@@ -14,6 +14,8 @@ import { timeAgo } from '../../lib/format';
 import type { StoryComment } from '../../lib/types';
 import { storiesApi, storyCommentsKey } from './api';
 import { updateStoryInCache } from './cache';
+import { useCommentDraft, useCommentDraftDenial } from '../../hooks/useCommentDraft';
+import type { CommentDraft } from '../../lib/commentDraftStore';
 
 const errorText = (err: unknown) => (err instanceof ApiRequestError ? err.message : 'Có lỗi xảy ra, thử lại nhé.');
 
@@ -38,7 +40,7 @@ export function CommentSection({ storyId, focusKey }: Props) {
   const errorRef = useRef<HTMLParagraphElement>(null);
   const formId = useId();
   const sending = useRef(false);
-  const [text, setText] = useState('');
+  const submitted = useRef<CommentDraft | undefined>(undefined);
   const [toDelete, setToDelete] = useState<StoryComment | null>(null);
 
   const scope = `${me?.user.id ?? ''}:${me?.couple?.id ?? ''}:${storyId}`;
@@ -54,6 +56,10 @@ export function CommentSection({ storyId, focusKey }: Props) {
     refetchOnWindowFocus: true,
   });
 
+  const draft = useCommentDraft('story', storyId, comments.isSuccess && !comments.isPlaceholderData);
+  const { text, setText } = draft;
+  useCommentDraftDenial('story', storyId, comments.error);
+
   useEffect(() => {
     if (focusKey > 0) inputRef.current?.focus();
   }, [focusKey]);
@@ -62,7 +68,7 @@ export function CommentSection({ storyId, focusKey }: Props) {
     mutationFn: (body: string) => storiesApi.addComment(storyId, body),
     onSuccess: () => {
       sending.current = false;
-      setText('');
+      if (submitted.current) draft.clear(submitted.current);
       requestAnimationFrame(() => resize(inputRef.current));
       navigate([undefined]);
       void qc.invalidateQueries({ queryKey: storyCommentsKey(storyId), refetchType: 'active' }).catch(() => undefined);
@@ -92,7 +98,8 @@ export function CommentSection({ storyId, focusKey }: Props) {
   function submit(e?: FormEvent) {
     e?.preventDefault();
     const body = text.trim();
-    if (!body || add.isPending || sending.current) return;
+    if (!draft.ready || !body || add.isPending || sending.current) return;
+    submitted.current = draft.snapshot();
     sending.current = true;
     add.mutate(body);
   }
@@ -154,7 +161,7 @@ export function CommentSection({ storyId, focusKey }: Props) {
           ref={inputRef}
           className="comment-bar__input"
           rows={1}
-          readOnly={add.isPending}
+          readOnly={add.isPending || !draft.ready}
           aria-invalid={add.isError}
           aria-describedby={`${formId}-hint${add.isError ? ` ${formId}-error` : ''}`}
           value={text}
@@ -167,11 +174,12 @@ export function CommentSection({ storyId, focusKey }: Props) {
           }}
           onKeyDown={onKeyDown}
         />
-        <button type="submit" className="icon-btn comment-bar__send" aria-label="Gửi bình luận" disabled={!text.trim() || add.isPending}>
+        <button type="submit" className="icon-btn comment-bar__send" aria-label="Gửi bình luận" disabled={!draft.ready || !text.trim() || add.isPending}>
           {add.isPending ? <span className="spinner" aria-hidden="true" /> : <Icon name="send" size={20} />}
         </button>
       </form>
       {add.isError && <p ref={errorRef} id={`${formId}-error`} className="form-feedback comment-feedback" role="alert" tabIndex={-1}>{errorText(add.error)} Nội dung vẫn được giữ lại, bạn có thể gửi lại.</p>}
+      {text && <p className="comment-hint">Nháp được giữ trong tab này tối đa 24 giờ. <button type="button" className="text-link" disabled={add.isPending} onClick={draft.discard}>Bỏ nháp</button></p>}
       <p id={`${formId}-hint`} className="comment-hint">Trên máy tính: Enter để gửi, Shift + Enter để xuống dòng.</p>
 
       <BottomSheet open={toDelete !== null} busy={del.isPending} onClose={() => { if (!del.isPending) setToDelete(null); }} title="Xóa bình luận?">

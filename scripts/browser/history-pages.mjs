@@ -132,6 +132,8 @@ if (process.argv.includes('--validate')) {
       await page.getByRole('button', { name: 'Bình luận', exact: true }).click();
       assert(await input.evaluate(el => document.activeElement === el));
       await input.fill('Nội dung giữ khi lỗi');
+      await page.reload(); await until(() => input.inputValue().then(v => v === 'Nội dung giữ khi lỗi'), 'couple draft restored after reload');
+      checks.push(`${label}:comment-draft-reload`);
       await section.getByRole('button', { name: 'Bình luận cũ hơn', exact: true }).click();
       await section.getByText('Bình luận synthetic 01', { exact: true }).waitFor();
       assert.equal(await input.inputValue(), 'Nội dung giữ khi lỗi');

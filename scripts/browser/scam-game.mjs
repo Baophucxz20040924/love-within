@@ -6,6 +6,17 @@ import { randomUUID } from 'node:crypto';
 import { fixtures, fixedTime } from './daily-rewards-water.mjs';
 const props = { account: 'SIM-AB12', password: 'P-ABC234', otp: '001234' };
 const stages = ['account', 'password', 'otp'];
+const extraScenarios = [
+  { id: 'identity', title: 'Giấy tờ hư cấu', goal: 'Xác nhận mã CCCD giả lập và ngày sinh của vai.', steps: [
+    { id: 'identityCode', label: 'CCCD giả lập', points: 200, inputKind: 'text', format: 'Mã bắt đầu bằng SIM-ID-', value: 'SIM-ID-AB12' },
+    { id: 'dob', label: 'Ngày sinh', points: 400, inputKind: 'date', format: 'YYYY-MM-DD hoặc DD/MM/YYYY', value: '1995-02-20' },
+  ] },
+  { id: 'social', title: 'Khôi phục mạng xã hội hư cấu', goal: 'Xác nhận handle và hai câu trả lời hư cấu.', steps: [
+    { id: 'account', label: 'Handle', points: 100, inputKind: 'text', format: 'Nhập đúng giá trị', value: 'SIM-USER-AB12' },
+    { id: 'recoveryQuestion1', label: 'Thú cưng của bạn tên gì?', points: 200, inputKind: 'text', format: 'Giữ dấu; không phân biệt hoa/thường và khoảng trắng', value: 'Mèo Mây A123' },
+    { id: 'recoveryQuestion2', label: 'Biệt danh thời nhỏ của bạn là gì?', points: 300, inputKind: 'text', format: 'Giữ dấu; không phân biệt hoa/thường và khoảng trắng', value: 'Bé Nắng B456' },
+  ] },
+];
 function initial() { return { revision: 0, bestScore: 0, wins: 0, mock: true, recentOperations: [], pending: null, match: null }; }
 if (process.argv.includes('--validate')) {
   assert.equal(props.otp.length, 6); assert.match(props.account, /^SIM-[A-F0-9]{4}$/); assert.match(props.password, /^P-[A-HJ-NP-Z2-9]{6}$/); assert.equal(initial().match, null);
@@ -83,11 +94,13 @@ if (process.argv.includes('--validate')) {
                 }
               } else if (action === 'verify') {
                 assert.equal(input.stage, s.match.stage);
-                if (input.value !== props[input.stage]) return fault(422, 'Thông tin chưa chính xác.');
-                const i = stages.indexOf(input.stage); s.match.score += (i + 1) * 100;
-                s.match.messages.push(bubble('system', `Đã xác nhận ${input.stage}. +${(i + 1) * 100} điểm.`));
-                if (i === 2) { s.match.status = 'won'; s.match.endedAt = fixedTime; s.wins++; s.bestScore = Math.max(s.bestScore, s.match.score); }
-                else s.match.stage = stages[i + 1];
+                const expected = extraScenarios.find(c => c.id === s.match.scenario?.id)?.steps.find(step => step.id === input.stage)?.value ?? props[input.stage];
+                if (input.value !== expected) return fault(422, 'Thông tin chưa chính xác.');
+                const steps = s.match.scenario?.steps ?? stages.map((id, i) => ({ id, points: (i + 1) * 100 }));
+                const i = steps.findIndex(step => step.id === input.stage); s.match.score += steps[i].points;
+                s.match.messages.push(bubble('system', `Đã xác nhận ${input.stage}. +${steps[i].points} điểm.`));
+                if (i === steps.length - 1) { s.match.status = 'won'; s.match.endedAt = fixedTime; s.wins++; s.bestScore = Math.max(s.bestScore, s.match.score); }
+                else s.match.stage = steps[i + 1].id;
               } else if (action === 'stop') {
                 s.pending = null; s.match.status = 'stopped'; s.match.endedAt = fixedTime; s.bestScore = Math.max(s.bestScore, s.match.score);
               } else assert.fail(`Unknown action ${action}`);
@@ -230,6 +243,30 @@ if (process.argv.includes('--validate')) {
       assert(inputBox.width >= (device === 'mobile' ? 180 : 400), 'composer keeps usable width');
       assert(inputBox.y >= 0 && inputBox.y + inputBox.height <= navBox.y && stopBox.y + stopBox.height <= navBox.y, 'composer and stop remain reachable above navigation');
       await shot(`${device}-composer`); checks.push(stage);
+      for (const scenario of extraScenarios) {
+        stage = `${device}:${scenario.id}-form-reload-wrong-win`;
+        s.match = { ...s.match, id: randomUUID(), status: 'active', stage: scenario.steps[0].id, score: 0, revealed: [], messages: [], endedAt: null,
+          scenario: { ...scenario, version: 1, maxScore: 600, steps: scenario.steps.map(({ value, ...step }) => step) } };
+        s.revision++;
+        await page.reload(); await composer.waitFor();
+        await page.locator('.scam-drawer__handle').click();
+        assert.equal(await page.locator('.scam-secret').count(), scenario.steps.length);
+        assert.equal(await page.locator('.scam-progress li').count(), scenario.steps.length);
+        let score = 0;
+        for (const step of scenario.steps) {
+          const field = page.getByLabel(step.label, { exact: true });
+          const verify = page.getByRole('button', { name: `Xác nhận ${step.label}`, exact: true });
+          await field.fill('sai'); await verify.click();
+          await page.locator('.scam-send-feedback').waitFor(); await until(() => verify.isEnabled(), 'wrong answer recovery');
+          assert.equal(await field.inputValue(), 'sai');
+          await field.fill(step.value);
+          await shot(`${device}-${scenario.id}-${step.id}`);
+          await verify.click(); score += step.points;
+          await until(() => page.locator('.scam-stage').innerText().then(v => v.startsWith(`${score}/600`)), 'scenario score');
+        }
+        await page.getByText('Bạn đã thắng!', { exact: true }).waitFor();
+        assert.equal(s.match.score, 600); checks.push(stage);
+      }
       closing = true; await context.close(); closing = false;
     }
     assert.deepEqual(blocked, []);

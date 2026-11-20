@@ -6,7 +6,9 @@ const { spawnSync } = require('node:child_process');
 const path = require('node:path');
 const suites = [
   'scam-game/state.cjs',
+  'scam-game/scenarios.cjs',
   'scam-game/ai-board.cjs',
+  'scam-game/friends-board.cjs',
   'scam-game/reliability.cjs',
   'scam-game/chat-adapter.cjs',
   'personal-wallets/service.cjs',

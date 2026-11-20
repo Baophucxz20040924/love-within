@@ -19,7 +19,7 @@ scamGameRouter.post('/start', scamWriteLimiter, validate({ body: base.extend({ c
   asyncHandler(async (req, res) => ok(res, await scamGameService.start(req.friendsMember!._id, req.body))));
 scamGameRouter.post('/message', scamMessageLimiter, validate({ body: match.extend({ text: z.string().trim().min(1).max(1200) }) }),
   asyncHandler(async (req, res) => ok(res, await scamGameService.message(req.friendsMember!._id, req.body, req.body.text))));
-scamGameRouter.post('/verify', scamWriteLimiter, validate({ body: match.extend({ stage: z.enum(['account', 'password', 'otp']), value: z.string().min(1).max(100) }) }),
+scamGameRouter.post('/verify', scamWriteLimiter, validate({ body: match.extend({ stage: z.enum(['account', 'password', 'otp', 'identityCode', 'dob', 'recoveryQuestion1', 'recoveryQuestion2']), value: z.string().min(1).max(100) }) }),
   asyncHandler(async (req, res) => ok(res, await scamGameService.verify(req.friendsMember!._id, req.body, req.body.stage, req.body.value))));
 scamGameRouter.post('/stop', scamWriteLimiter, validate({ body: match }),
   asyncHandler(async (req, res) => ok(res, await scamGameService.stop(req.friendsMember!._id, req.body))));

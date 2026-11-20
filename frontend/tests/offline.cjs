@@ -15,6 +15,7 @@ const suites = [
   'tests/prefetch/routes.cjs',
   'tests/history/ledger.cjs',
   'tests/history/comments.cjs',
+  'tests/history/comment-drafts.cjs',
   'tests/history/friend-comments.cjs',
   'tests/history/cancellation.cjs',
   'tests/realtime/realtime.cjs',

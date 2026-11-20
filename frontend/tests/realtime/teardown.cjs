@@ -22,27 +22,49 @@ function deferred() { let resolve, reject; const promise = new Promise((yes, no)
 function fixture({ locked = false, eligible = true, authenticated = true } = {}) {
   const effects = [], cleanups = [], listeners = new Map(), transitions = [], streams = [], timers = new Map();
   const identity = deferred(), scope = deferred();
+  const calls = { identity: 0, scope: 0, epochs: 0, revokes: 0 };
   const document = { visibilityState: eligible ? 'visible' : 'hidden', addEventListener: (type, fn) => listeners.set(type, fn), removeEventListener: type => listeners.delete(type) };
   const window = { addEventListener: (type, fn) => listeners.set(type, fn), removeEventListener: type => listeners.delete(type) };
   const mocks = {
     react: { useState: initial => [typeof initial === 'function' ? initial() : initial, () => {}], useLayoutEffect: effect => effects.push(effect), useSyncExternalStore: (_subscribe, get) => get() },
     '@tanstack/react-query': { useQueryClient: () => ({}) },
     '../appLock/store': { subscribeAppLock() {}, isAppLocked: () => locked },
-    '../auth/AuthContext': { useAuth: () => ({ isAuthenticated: authenticated, me: authenticated ? { user: { id: 'synthetic-user' } } : null, space: 'couple', refreshMe() {}, revokeMe() {}, verifyMe: () => identity.promise }) },
+    '../auth/AuthContext': { useAuth: () => ({ isAuthenticated: authenticated, me: authenticated ? { user: { id: 'synthetic-user' } } : null, space: 'couple', refreshMe() {}, revokeMe() {}, verifyMe: () => { calls.identity++; return identity.promise; } }) },
     '../../lib/tokenStore': { tokenStore: { generation: () => 'synthetic', isCurrent: () => true, get: () => authenticated ? {} : null } },
-    '../../lib/apiClient': { advanceAccessEpoch() {} },
+    '../../lib/apiClient': { advanceAccessEpoch() { calls.epochs++; }, withRequestDeadline: (_ms, signal, run) => run(signal) },
     './verification': { setVerification: (value, retry) => transitions.push({ value, retry }) },
-    './invalidation': { DomainBatch: class { add() {} clear() {} }, invalidateDomains() {}, needsMe() { return false; }, revokeDomains() {}, scopeDomains() { return []; }, verifyScope: () => scope.promise },
+    './invalidation': { DomainBatch: class { add() {} clear() {} flush() {} }, invalidateDomains() {}, needsMe() { return false; }, revokeDomains() {}, scopeDomains() { return []; }, verifyScope: () => { calls.scope++; return scope.promise; } },
     './stream': { RealtimeStream: class { constructor(_space, event, disconnected) { this.event = event; this.disconnected = disconnected; this.stopped = false; streams.push(this); } start() {} stop() { this.stopped = true; } } },
   };
   const module = { exports: {} };
-  vm.runInNewContext(output, { module, exports: module.exports, document, window, navigator: { onLine: true },
+  vm.runInNewContext(output, { module, exports: module.exports, document, window, AbortController, navigator: { onLine: true },
     setTimeout(fn) { const id = timers.size + 1; timers.set(id, fn); return id; }, clearTimeout(id) { timers.delete(id); },
     require(name) { assert.ok(Object.hasOwn(mocks, name), `Unexpected import ${name}`); return mocks[name]; } }, { filename });
   module.exports.RealtimeSync();
   effects.forEach(effect => { const cleanup = effect(); if (cleanup) cleanups.push(cleanup); });
-  return { identity, scope, streams, document, listeners, transitions, timers, unmount: () => cleanups.forEach(cleanup => cleanup()) };
+  return { calls, identity, scope, streams, document, listeners, transitions, timers, unmount: () => cleanups.forEach(cleanup => cleanup()) };
 }
+
+test('initial and ready coalesce before fencing; genuine access supersedes', async () => {
+  const f = fixture();
+  for (let i = 0; i < 10; i++) f.streams[0].event({ type: 'ready', domains: [] });
+  assert.equal(f.calls.identity, 1); assert.equal(f.calls.scope, 1); assert.equal(f.calls.epochs, 1);
+  f.streams[0].event({ type: 'access', domains: ['account'] });
+  assert.equal(f.calls.identity, 2); assert.equal(f.calls.scope, 2);
+  // revokeDomains owns the new epoch; reconcile must not advance it a second time.
+  assert.equal(f.calls.epochs, 1);
+  f.identity.resolve(true); f.scope.resolve(true); await new Promise(setImmediate);
+  assert.equal(f.transitions.filter(t => t.value === 'clear').length, 1);
+  f.unmount();
+});
+
+test('dirty burst during verification gets one trailing scope pass, not another auth epoch', async () => {
+  const f = fixture();
+  for (let i = 0; i < 50; i++) f.streams[0].event({ type: 'dirty', domains: ['stories'] });
+  f.identity.resolve(true); f.scope.resolve(true); await new Promise(setImmediate);
+  assert.equal(f.calls.scope, 2); assert.equal(f.calls.identity, 1); assert.equal(f.calls.epochs, 1);
+  assert.equal(f.transitions.at(-1).value, 'clear'); f.unmount();
+});
 
 for (const scenario of [{ locked: true }, { eligible: false }, { authenticated: false }]) {
   test(`teardown releases verification for early branch ${JSON.stringify(scenario)}`, () => {

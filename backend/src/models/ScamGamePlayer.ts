@@ -3,7 +3,7 @@ import type { ScamCharacter } from '../services/scamGame/characters.js';
 import type { ScamEmotion } from '../services/scamGame/emotions.js';
 
 export const SCAM_RULE_VERSION = 1;
-export type ScamStage = 'account' | 'password' | 'otp';
+export type ScamStage = 'account' | 'password' | 'otp' | 'identityCode' | 'dob' | 'recoveryQuestion1' | 'recoveryQuestion2';
 export type ScamStatus = 'active' | 'won' | 'lost' | 'stopped';
 export interface ScamBubble { id: string; role: 'user' | 'assistant' | 'system'; text: string; operationId?: string }
 export interface ScamMemory { summary: string; facts: string[]; openThreads: string[] }
@@ -22,7 +22,8 @@ export interface ScamMatch {
   trust: number;
   emotion?: ScamEmotion; // Older matches have no emotion until an accepted AI turn.
   turns: number;
-  secrets: Record<ScamStage, string>;
+  scenario?: import('../services/scamGame/scenarios.js').ScenarioSelection;
+  secrets: Record<string, string>;
   revealed: ScamStage[];
   messages: ScamBubble[];
   memory?: string; // Legacy active matches are upgraded on their next mutation.
