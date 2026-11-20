@@ -13,8 +13,8 @@ function fixture() {
   const load = loader({
     'models/ScamGamePlayer.ts': { SCAM_RULE_VERSION: 1 },
     'services/scamGame/rules.ts': { ...rules, newMatch: previous => rules.newMatch(previous, 'bank') },
-    'repositories/scamGame.repository.ts': { scamGameRepository: { get: async () => clone(stored), cas: async (old, next) => {
-      if (stored.revision !== old.revision) return false;
+    'repositories/scamGame.repository.ts': { scamGameRepository: { get: async () => clone(stored), cas: async (old, next, deadline) => {
+      if (stored.revision !== old.revision || deadline !== undefined && Date.now() >= deadline) return false;
       stored = clone({ ...next, revision: old.revision + 1 }); return true;
     } } },
     'repositories/friendSafety.repository.ts': { friendBlockRepository: {} },
@@ -194,6 +194,35 @@ async function tests() {
   await assert.rejects(ls.stop('u', loss.op()), e => e.status === 409);
   await ls.start('u', loss.op()); await ls.message('u', lossOp, 'kết thúc');
   assert.equal(loss.get().match.status, 'active'); assert.equal(loss.get().match.turns, 0); assert.equal(loss.get().completed, 1);
+  const time = loader()('services/scamGame/time.ts');
+  const boundaryMatch = rules.newMatch(undefined, 'bank'), startTime = Date.parse(boundaryMatch.startedAt);
+  assert.equal(time.matchExpired(boundaryMatch, startTime + 899999), false);
+  assert.equal(time.matchExpired(boundaryMatch, startTime + 900000), true);
+  assert.equal(time.conversationTime(boundaryMatch, startTime + 899000).remainingSeconds, 1);
+  for (const action of ['state', 'message', 'verify', 'stop']) {
+    const expired = fixture(); await expired.service.start('u', expired.op());
+    expired.get().match.score = 100; expired.get().match.startedAt = new Date(Date.now() - 900001).toISOString();
+    expired.decide(() => { throw Error('expired match called provider'); });
+    const operation = expired.op();
+    if (action === 'state') await expired.service.state('u');
+    else await assert.rejects(action === 'message' ? expired.service.message('u', operation, 'late') : action === 'verify' ? expired.service.verify('u', operation, 'account', expired.get().match.secrets.account) : expired.service.stop('u', operation), e => e.status === 409);
+    assert.equal(expired.get().match.endReason, 'timeout'); assert.equal(expired.get().match.score, 100);
+    assert.equal(expired.get().match.bonus, 0); assert.equal(expired.get().wins, 0); assert.equal(expired.get().completed, 1);
+    await expired.service.state('u'); assert.equal(expired.get().completed, 1); assert(!expired.get().match.runtimeContext);
+  }
+  const idle = fixture(); await idle.service.start('u', idle.op()); idle.get().match.startedAt = 'invalid';
+  await idle.service.state('u'); assert.equal(idle.get().match.endReason, 'timeout');
+  for (const failed of [false, true]) {
+    const late = fixture(); await late.service.start('u', late.op());
+    late.get().match.startedAt = new Date(Date.now() - 899000).toISOString();
+    let finish; late.decide(() => new Promise((resolve, reject) => { finish = () => failed ? reject(Error('late failure')) : resolve(positive); }));
+    const turn = late.service.message('u', late.op(), 'held'); await new Promise(r => setImmediate(r));
+    const realNow = Date.now; Date.now = () => realNow() + 2000;
+    try {
+      await late.service.state('u'); assert.equal(late.get().pending, null); finish();
+      await assert.rejects(turn, e => e.status === 409); assert.equal(late.get().match.turns, 0); assert.equal(late.get().completed, 1);
+    } finally { Date.now = realNow; }
+  }
   console.log('PASS scam state: generated props, trust gates, 600 points, structured AI loss/partial stats, legacy compatibility, replay/CAS, bounded storage and stale-worker fences');
 }
 tests().catch(e => { console.error(e); process.exitCode = 1; });

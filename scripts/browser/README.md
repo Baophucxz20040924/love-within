@@ -142,6 +142,14 @@ Backend/frontend audited offline commands and builds passed. Synthetic tests cov
 
 Explicit offline benchmark: `node backend/tests/privacy-lock/cpu.cjs` (Node24.18.0/win32, three sequential samples per variant). Baseline cold wall341–351ms/CPU328–360ms versus new cold wall226–240ms/CPU219–234ms. Warm baseline wall229–265ms/CPU219–250ms versus new warm wall281–285ms/CPU280–282ms: **warm samples were slower**, so no warm speedup is claimed. Warm algorithms still perform two bcrypt compares; measured maximum event-loop delay remained roughly202–219ms. This isolates removal of one cold dummy hash, not HTTP/DB latency, server throughput or the user's observed production CPU percentage. No rounds reduction, PIN cache, worker/native dependency or extra installation. No real API/provider/DB, phone/Safari or deployment verification.
 
+## Fifteen-minute game deadline (2026-11-20)
+
+The fixture now supplies server time/deadline and adds idle/pending expiry plus reload at both viewports. It starts synthetic matches with four seconds remaining (does not wait15 real minutes), checks the countdown, retained100$, no bonus/reward effect, terminal read-only UI and reload persistence. Production deadline behavior is tested separately with fake-time service/CAS mocks; no API/Mongo/provider is contacted.
+
+First browser run `1795162569542` failed on an enlarged-text scroll observation reading y=0 before layout settled. The fixture now waits for the same reachability condition while scrolling instantly; it does not relax the geometry assertion. Rerun `1795162655007` passed24 groups, blocked list empty; mobile countdown and desktop pending-timeout screenshots inspected. A subsequent fixture correction resets synthetic scenario/history consistently before expiry. Final rebuilt run `1795163023146` passed24/24 groups after that correction and terminal pending-action cleanup; blocked list empty, mobile timeout result screenshot inspected. Both builds/offline suites passed; clock cleanup and service/repository tests were also rerun after the final test additions. No live API/DB/provider or physical-phone verification.
+
+Offline failures fixed during this change: safe-source harness needed the new time helper allowlisted; prompt context exceeded the old8500-character cap (explicitly raised to8800, observed max8720 across40×3); the no-private-field test matched `gate` inside a public character identifier and now checks JSON field keys instead. Neither a live provider nor a live Mongo deadline predicate was tested.
+
 ## Install external tooling
 
 PowerShell, from the repository root:

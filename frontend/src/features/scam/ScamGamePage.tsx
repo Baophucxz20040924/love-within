@@ -9,6 +9,7 @@ import { tokenStore } from '../../lib/tokenStore';
 import { scamApi, scamKey } from './api';
 import type { ScamOperation, ScamStage, ScamState } from './types';
 import { GameEffect } from './GameEffect';
+import { GameClock } from './GameClock';
 import { baseMoney, bubbleText, stageReward, type GameReward } from './presentation';
 import { SecretDrawer } from './SecretDrawer';
 import { scenarioOf } from './scenarios';
@@ -47,6 +48,10 @@ function ScamRoom({ userId, access }: { userId: string; access: number }) {
   const [needsSync, setNeedsSync] = useState(false);
   const [error, setError] = useState('');
   const [now, setNow] = useState(Date.now);
+  const [deadline, setDeadline] = useState<number | null>(null);
+  const [expired, setExpired] = useState(false);
+  const deadlineRef = useRef<number | null>(null);
+  const expirySynced = useRef<string | null>(null);
   const live = useRef(false);
   const lock = useRef(false);
   const stopLock = useRef(false);
@@ -71,10 +76,18 @@ function ScamRoom({ userId, access }: { userId: string; access: number }) {
     if (stateRef.current && next.revision < stateRef.current.revision) return false;
     const previous = stateRef.current;
     if (previous?.match?.id !== next.match?.id) { celebrated.current.clear(); setReward(null); lossOperation.current = null; }
+    if (previous?.match?.id !== next.match?.id) expirySynced.current = null;
+    const until = next.match?.status === 'active' && next.match.expiresAt !== undefined && next.serverNow !== undefined
+      ? performance.now() + Math.max(0, next.match.expiresAt - next.serverNow) : null;
+    deadlineRef.current = until; setDeadline(until); setExpired(until !== null && until <= performance.now());
     const tracked = lossOperation.current;
-    if (previous?.match?.status === 'active' && next.match?.id === previous.match.id && next.match.status === 'lost' &&
+    if (previous?.match?.status === 'active' && next.match?.id === previous.match.id && next.match.status === 'lost' && next.match.endReason !== 'timeout' &&
       tracked && next.recentOperations.includes(tracked)) {
       celebrate({ key: `${next.match.id}:lost`, kind: 'lost', amount: 0, bonus: 0 });
+    }
+    if (previous?.match?.status === 'active' && next.match?.id === previous.match.id && next.match.endReason === 'timeout') {
+      actionSequence.current++; lock.current = false; stopLock.current = false;
+      setSending(false); setStopping(false); setReward(null);
     }
     stateRef.current = next;
     setState(next);
@@ -113,7 +126,7 @@ function ScamRoom({ userId, access }: { userId: string; access: number }) {
     if (epoch.current === access) return;
     epoch.current = access;
     actionSequence.current++;
-    setReward(null); lossOperation.current = null;
+    setReward(null); lossOperation.current = null; expirySynced.current = null;
     lock.current = false; stopLock.current = false;
     setSending(false); setStopping(false); setNeedsSync(true);
     if (outgoingRef.current) updateOutgoing({ ...outgoingRef.current, status: 'uncertain', message: 'Quyền truy cập đã thay đổi. Đang kiểm tra kết quả gửi…' });
@@ -128,6 +141,25 @@ function ScamRoom({ userId, access }: { userId: string; access: number }) {
     const timer = setTimeout(() => setNow(Date.now()), Math.max(0, expiresAt - Date.now()) + 10);
     return () => clearTimeout(timer);
   }, [state?.pending?.expiresAt]);
+  useEffect(() => {
+    if (deadline === null || state?.match?.status !== 'active') return;
+    const id = state.match.id, controller = new AbortController();
+    const expire = () => {
+      if (!valid() || controller.signal.aborted) return;
+      setExpired(true);
+      if (expirySynced.current === id) return;
+      expirySynced.current = id;
+      void sync(controller.signal);
+    };
+    const timer = window.setTimeout(expire, Math.max(0, deadline - performance.now()) + 20);
+    const resume = () => {
+      if (document.visibilityState !== 'visible' || !valid()) return;
+      if (performance.now() >= deadline) expire();
+      else void sync(controller.signal);
+    };
+    document.addEventListener('visibilitychange', resume);
+    return () => { window.clearTimeout(timer); controller.abort(); document.removeEventListener('visibilitychange', resume); };
+  }, [deadline, state?.match?.id, state?.match?.status, access]);
   // Reconcile only a pending turn, with a bounded retry budget. No idle chat polling.
   useEffect(() => {
     if (!state?.pending) return;
@@ -152,6 +184,7 @@ function ScamRoom({ userId, access }: { userId: string; access: number }) {
 
   async function run(action: (op: ScamOperation) => Promise<ScamState>, options?: { stop?: boolean; retry?: ScamOperation; sentText?: string }) {
     const isStop = options?.stop === true;
+    if (stateRef.current?.match?.status === 'active' && deadlineRef.current !== null && performance.now() >= deadlineRef.current) { setExpired(true); await sync(); return false; }
     if (isStop ? stopLock.current : lock.current || stopLock.current) return false;
     const actionEpoch = epoch.current, sequence = actionSequence.current;
     const currentAction = () => valid() && actionEpoch === epoch.current && sequence === actionSequence.current;
@@ -229,10 +262,10 @@ function ScamRoom({ userId, access }: { userId: string; access: number }) {
   const active = match?.status === 'active';
   const [emotionIcon, emotionText] = emotionLabel(match?.emotion);
   const boardAvailable = Boolean(match && ['won', 'lost', 'stopped'].includes(match.status));
-  const busy = sending || stopping || syncing || Boolean(state?.pending) || needsSync || Boolean(outgoing && outgoing.status !== 'failed');
+  const busy = expired || sending || stopping || syncing || Boolean(state?.pending) || needsSync || Boolean(outgoing && outgoing.status !== 'failed');
   const scenario = scenarioOf(match);
   const syncButton = <button className="scam-icon-button" aria-label="Đồng bộ ván" title="Đồng bộ ván" aria-busy={syncing} disabled={syncing} onClick={() => { setError(''); void sync(); }}><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M20 7v5h-5M4 17v-5h5M6 7a7 7 0 0 1 12-1l2 3M4 15l2 3a7 7 0 0 0 12-1" /></svg></button>;
-  const stopButton = active && <button className="scam-icon-button scam-stop" aria-label="Dừng scam" title="Dừng scam" disabled={stopping || needsSync || syncing} onClick={() => {
+  const stopButton = active && <button className="scam-icon-button scam-stop" aria-label="Dừng scam" title="Dừng scam" disabled={expired || stopping || needsSync || syncing} onClick={() => {
     if (window.confirm('Dừng scam và giữ tiền giả lập đã đạt? Nhân vật sẽ không trả lời tiếp.')) void run(scamApi.stop, { stop: true });
   }}><svg aria-hidden="true" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="3" /></svg></button>;
   return <div className={`scam-page${active ? ' scam-page--active' : ''}`}>
@@ -257,13 +290,13 @@ function ScamRoom({ userId, access }: { userId: string; access: number }) {
       {state && (!match || !active) && <section className="card scam-start">
         {match ? <div className={`scam-result scam-result--${match.status}`} role="status">
           <span className="scam-result__art" aria-hidden="true">{match.status === 'won' ? '🏆' : match.status === 'lost' ? '📵' : '☕'}</span>
-          <div><strong>{match.status === 'won' ? 'Bạn đã thắng!' : match.status === 'lost' ? 'Nhân vật đã ngắt liên lạc.' : 'Đã dừng scam.'}</strong><p>Tổng {match.score}$ · {state.wins} ván thắng.</p>{match.status === 'won' && <p>Cơ bản {baseMoney(match)}$ · May mắn +{match.bonus ?? 0}$</p>}</div>
+          <div><strong>{match.status === 'won' ? 'Bạn đã thắng!' : match.status === 'lost' ? (match.endReason === 'timeout' ? 'Hết 15 phút. Cuộc trò chuyện đã kết thúc.' : 'Nhân vật đã ngắt liên lạc.') : 'Đã dừng scam.'}</strong><p>Tổng {match.score}$ · {state.wins} ván thắng.</p>{match.status === 'won' && <p>Cơ bản {baseMoney(match)}$ · May mắn +{match.bonus ?? 0}$</p>}</div>
         </div> : <div className="scam-lobby">
           <div className="scam-lobby__cast" aria-hidden="true"><span>🍖</span><span>🕶️</span><span>⚡</span></div>
           <h2>Gặp người quen. Kể chuyện mới.</h2>
           <p>Nhân vật ngẫu nhiên, tính cách riêng. Bắt chuyện và thử xem bạn có thể đi xa đến đâu.</p>
         </div>}
-        <p>Kịch bản ngẫu nhiên: ngân hàng, giấy tờ hư cấu hoặc khôi phục mạng xã hội hư cấu. Mỗi ván gồm 2–3 bước, tối đa 600$ cơ bản. Thắng ván nhận thêm 30–150$ may mắn, tổng tối đa 750$. $ là tiền giả lập, không quy đổi.</p>
+        <p>Kịch bản ngẫu nhiên: ngân hàng, giấy tờ hư cấu hoặc khôi phục mạng xã hội hư cấu. Mỗi ván tối đa 15 phút, gồm 2–3 bước, tối đa 600$ cơ bản. Thắng ván nhận thêm 30–150$ may mắn, tổng tối đa 750$. $ là tiền giả lập, không quy đổi.</p>
         {match && <ol className="scam-howto" aria-label="Các bước nhận tiền giả lập">
           {scenario.steps.map((step, index) => <li key={step.id}><span className="scam-howto__number">{index + 1}</span><strong>{step.label}</strong><span>+{step.points}$</span></li>)}
         </ol>}
@@ -275,13 +308,14 @@ function ScamRoom({ userId, access }: { userId: string; access: number }) {
         <header className="scam-character"><span className="scam-character__avatar" aria-hidden="true">{match.character.emoji}</span><div className="scam-character__body"><h2><span className="visually-hidden">Đang trò chuyện với </span>{match.character.name}</h2><div className="scam-emotion" role="status" aria-live="polite" aria-atomic="true"><span className="scam-emotion__label">{active ? 'Cảm xúc:' : 'Cảm xúc cuối:'}</span><span aria-hidden="true">{emotionIcon}</span><span>{emotionText}</span></div></div>
           <details className="scam-character__details"><summary aria-label="Thông tin nhân vật" title="Thông tin nhân vật"><span aria-hidden="true">❕</span></summary><p>{match.character.description}</p></details>
         </header>
-        <div className="scam-summary"><Meter label="Tin tưởng" value={match.trust} /><div className="scam-stage"><strong>{active ? `${baseMoney(match)}$ / 600$` : `${match.score}$`}</strong><span>{match.turns} lượt{!active && ' · Ván đã kết thúc'}</span></div></div>
+        <div className="scam-summary"><Meter label="Tin tưởng" value={match.trust} /><div className="scam-stage"><strong>{active ? `${baseMoney(match)}$ / 600$` : `${match.score}$`}</strong><span>{match.turns} lượt{!active && ' · Ván đã kết thúc'}</span>{active && deadline !== null && <GameClock until={deadline} />}</div></div>
         <div className="scam-workspace"><div className="scam-conversation">
         <div ref={chat} className="scam-messages" role="log" aria-label="Tin nhắn" aria-live="polite" aria-relevant="additions text">
           {match.messages.map(message => <div key={message.id} className={`scam-bubble scam-bubble--${message.role}`}><span className="visually-hidden">{message.role === 'user' ? 'Bạn' : message.role === 'assistant' ? match.character.name : 'Hệ thống'}: </span>{bubbleText(message)}</div>)}
           {outgoing && outgoing.operation.matchId === match.id && <div className="scam-bubble scam-bubble--user scam-outgoing" data-status={outgoing.status}><span className="visually-hidden">Bạn: </span>{outgoing.text}<small role="status">{outgoing.status === 'failed' ? 'Chưa gửi được' : outgoing.message}</small></div>}
           {(outgoing?.status === 'sending' || state?.pending) && active && <p className="scam-typing" role="status">{match.character.name} đang trả lời…</p>}
         </div>
+        {active && expired && <p className="scam-pending" role="status">Hết thời gian — đang chờ đồng bộ. Tiền đã xác nhận vẫn được giữ.</p>}
         {active && state?.pending && <div className="scam-pending"><span>Đang chờ kết quả. Nếu chưa thấy trả lời, hãy đồng bộ; chỉ thử lại lượt cũ sau khi hết thời gian giữ.</span><button className="text-link" disabled={sending || stopping || syncing || now < state.pending.expiresAt || needsSync} onClick={() => {
           const pending = stateRef.current?.pending;
           if (pending) void run(op => scamApi.message(op, pending.text), { retry: { operationId: pending.operationId, expectedRevision: pending.expectedRevision, matchId: match.id }, sentText: pending.text });

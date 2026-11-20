@@ -5,7 +5,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 const ts = require('typescript');
 const root = path.resolve(__dirname, '../../src');
-const allowed = new Set(['services/scamGame/scenarios.ts', 'services/scamGame/rules.ts', 'services/scamGame/emotions.ts', 'services/scamGame/characters.ts', 'services/scamGame/ai.ts', 'services/scamGame.service.ts', 'repositories/scamGame.repository.ts', 'routes/scamGame.routes.ts', 'utils/errors.ts', 'integrations/ai/ChatProvider.ts', 'integrations/ai/BeeknoeeChatAdapter.ts']);
+const allowed = new Set(['services/scamGame/time.ts', 'services/scamGame/scenarios.ts', 'services/scamGame/rules.ts', 'services/scamGame/emotions.ts', 'services/scamGame/characters.ts', 'services/scamGame/ai.ts', 'services/scamGame.service.ts', 'repositories/scamGame.repository.ts', 'routes/scamGame.routes.ts', 'utils/errors.ts', 'integrations/ai/ChatProvider.ts', 'integrations/ai/BeeknoeeChatAdapter.ts']);
 function loader(overrides = {}, globals = {}) {
   const cache = new Map();
   return function load(relative) {

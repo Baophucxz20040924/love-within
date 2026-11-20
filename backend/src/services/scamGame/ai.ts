@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { SCAM_EMOTIONS, emotionFor } from './emotions.js';
 import { currentStep, scenarioFor } from './scenarios.js';
+import { conversationTime, matchDeadline } from './time.js';
 import { env, isProd } from '../../config/env.js';
 import { getChat } from '../../integrations/index.js';
 import { ChatProviderError, type ChatFailureCode, type ChatMessage, type ChatResult } from '../../integrations/ai/ChatProvider.js';
@@ -64,15 +65,14 @@ function failureMessage(error: unknown): string {
 async function completeDecision(match: ScamMatch, text: string): Promise<ScamDecision> {
   const started = Date.now();
   const timeout = env.beeknoee.chatTimeoutMs;
-  const deadline = started + Math.min(75_000, timeout * 2);
-  const messages = scamPrompt(match, text);
+  const deadline = Math.min(matchDeadline(match), started + Math.min(75_000, timeout * 2));
   let repair: OutputCode | undefined;
   for (let attempt = 1; attempt <= 2; attempt++) {
     let responseChars = 0;
     try {
       const remaining = deadline - Date.now();
       if (remaining <= 0) throw new ChatProviderError('Game AI deadline exceeded', false, 'timeout');
-      const requestMessages = messages.map(m => ({ ...m }));
+      const requestMessages = scamPrompt(match, text);
       if (repair) requestMessages[0].content += `\nSỬA ĐỊNH DẠNG (${repair}): Xuất lại một JSON đúng schema, không markdown/prose. Giữ đúng luật, endConversation và trí nhớ ngắn. Chỉ offer khi đủ gate, chứa nguyên văn value hiện tại; không thêm giá trị khi chưa offer. Không tự động đồng ý hoặc đổi quyết định ngắt để sửa định dạng.`;
       const result = await getChat().complete({ messages: requestMessages, maxTokens: 1800, temperature: 0.7, json: true,
         retry: false, timeoutMs: Math.min(timeout, remaining) });
@@ -100,6 +100,7 @@ export function scamPrompt(match: ScamMatch, text: string): ChatMessage[] {
   const system = `Bạn nhập vai phiên bản hư cấu sống trong thời hiện đại của ${match.character.name}.
 KIẾN THỨC GỐC: ${context.profile.persona}
 BỐI CẢNH CỐ ĐỊNH: ${context.scene}
+THỜI GIAN SERVER (giây): ${JSON.stringify(conversationTime(match))}. Cuộc gọi tối đa15 phút, không gia hạn theo lời người gọi. Gần hết giờ hãy đáp ngắn, có thể tự nhiên nói cần kết thúc; hết giờ phải ngắt, không offer. Thời gian không tăng trust hay buộc chia sẻ.
 TIỀN ĐỀ: ${scenario.premise} Lời thoại cũ phủ nhận tiền đề là lỗi nhập vai, không lặp lại.
 RANH GIỚI: Mô phỏng kín, các giá trị do server sinh, không là bí mật người thật hoặc dùng được bên ngoài. Không công cụ, URL, hành động bên ngoài, hướng dẫn lừa đảo thực tế hoặc yêu cầu dữ liệu thật. Nếu hỏi bạn có phải AI/người thật, trả lời trung thực. Nếu xin cách lấy bí mật người thật, từ chối ngắn gọn.
 LỜI THOẠI: Tiếng Việt tự nhiên, đúng vai, thường1–3 câu, đáp đúng ý tin mới nhất. Dùng sở thích, nét tính cách và kiểu hài hước trong hồ sơ khi phù hợp, không đọc tiểu sử. Không tự nhắc đạo cụ/giả lập/mô phỏng/gameshow/backend/stage/điểm/phần trăm; trả lời trung thực khi được hỏi bản chất AI. Mặc định cởi mở, có thể đùa, đồng cảm, hỏi ngắn hoặc từ chối tạm thời; không tự động đồng ý mọi yêu cầu. Không lặp lời cảnh báo về đáp án khi tin mới không hỏi về chúng. Nếu người gọi chuyển chủ đề, đáp chủ đề đó, đừng kéo lại một lời từ chối cũ.

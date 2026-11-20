@@ -37,8 +37,10 @@ export const scamGameRepository = {
     if (!row) throw new Error('Game state unavailable');
     return row;
   },
-  async cas(previous: ScamPlayer, next: ScamPlayer): Promise<boolean> {
-    const result = await ScamGamePlayer.replaceOne({ _id: previous._id, revision: previous.revision }, { ...next, revision: previous.revision + 1 }).exec();
+  async cas(previous: ScamPlayer, next: ScamPlayer, deadline?: number): Promise<boolean> {
+    const result = await ScamGamePlayer.replaceOne({ _id: previous._id, revision: previous.revision,
+      ...(deadline !== undefined ? { $expr: { $lt: ['$$NOW', new Date(deadline)] } } : {}),
+    }, { ...next, revision: previous.revision + 1 }).exec();
     return result.modifiedCount === 1;
   },
   async leaderboard(viewer: Types.ObjectId, blocked: string[], limit: number, after?: ScamBoardPosition) {

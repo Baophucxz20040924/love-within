@@ -9,6 +9,7 @@ import { env } from '../config/env.js';
 import { applyDecision, append, ensureContext, finishStats, newMatch, playerView } from './scamGame/rules.js';
 import { normalizeAnswer, scenarioFor } from './scamGame/scenarios.js';
 import { isScamMock, scamDecision } from './scamGame/ai.js';
+import { matchDeadline, matchExpired } from './scamGame/time.js';
 
 export interface ScamOperation { operationId: string; expectedRevision: number; matchId?: string }
 const fingerprint = (kind: string, op: ScamOperation, payload: unknown) => createHash('sha256').update(JSON.stringify([kind, op.expectedRevision, op.matchId ?? null, payload])).digest('hex');
@@ -30,16 +31,34 @@ function check(p: ScamPlayer, op: ScamOperation, active = true): void {
 function receipt(p: ScamPlayer, op: ScamOperation, hash: string): void {
   p.receipts = [...p.receipts, { operationId: op.operationId, fingerprint: hash }].slice(-16);
 }
+async function settled(userId: Types.ObjectId): Promise<ScamPlayer> {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const p = await scamGameRepository.get(userId);
+    if (!p.match || !matchExpired(p.match)) return p;
+    const next = copy(p), match = next.match!;
+    match.status = 'lost'; match.endReason = 'timeout';
+    match.endedAt = new Date(matchDeadline(match)).toISOString();
+    next.pending = null;
+    append(match, 'system', 'Hết 15 phút. Cuộc trò chuyện đã kết thúc. Tiền đã đạt được giữ lại.');
+    finishStats(next);
+    if (await scamGameRepository.cas(p, next)) { next.revision = p.revision + 1; return next; }
+  }
+  throw conflict();
+}
 async function commit(old: ScamPlayer, next: ScamPlayer) {
-  if (!(await scamGameRepository.cas(old, next))) throw conflict();
+  const deadline = old.match?.status === 'active' ? matchDeadline(old.match) : undefined;
+  if (!(await scamGameRepository.cas(old, next, deadline))) {
+    await settled(old._id);
+    throw conflict();
+  }
   next.revision = old.revision + 1;
   return view(next);
 }
 
 export const scamGameService = {
-  async state(userId: Types.ObjectId) { return view(await scamGameRepository.get(userId)); },
+  async state(userId: Types.ObjectId) { return view(await settled(userId)); },
   async start(userId: Types.ObjectId, op: ScamOperation) {
-    const p = await scamGameRepository.get(userId), hash = fingerprint('start', op, null);
+    const p = await settled(userId), hash = fingerprint('start', op, null);
     if (replay(p, op, hash)) return view(p);
     check(p, op, false);
     if (p.match?.status === 'active' || p.pending) throw conflict();
@@ -49,7 +68,7 @@ export const scamGameService = {
     return commit(p, next);
   },
   async message(userId: Types.ObjectId, op: ScamOperation, text: string) {
-    const p = await scamGameRepository.get(userId), hash = fingerprint('message', op, text);
+    const p = await settled(userId), hash = fingerprint('message', op, text);
     if (replay(p, op, hash)) return view(p);
     if (p.pending) {
       if (p.pending.operationId !== op.operationId) throw busy();
@@ -62,10 +81,15 @@ export const scamGameService = {
     // Adapter may retry once; lease outlasts both bounded calls. A stale result is always CAS-fenced.
     reserved.pending = { operationId: op.operationId, fingerprint: hash, token: randomUUID(), expectedRevision: op.expectedRevision,
       expiresAt: Date.now() + Math.max(120_000, env.beeknoee.chatTimeoutMs * 2 + 30_000), text };
-    if (!(await scamGameRepository.cas(p, reserved))) throw conflict();
+    if (!(await scamGameRepository.cas(p, reserved, matchDeadline(p.match!)))) {
+      await settled(userId);
+      throw conflict();
+    }
     reserved.revision = p.revision + 1;
     try {
+      if (matchExpired(reserved.match!)) { await settled(userId); throw conflict(); }
       const decision = await scamDecision(reserved.match!, text);
+      if (matchExpired(reserved.match!)) { await settled(userId); throw conflict(); }
       const next = copy(reserved);
       applyDecision(next.match!, text, decision, op.operationId);
       if (next.match!.status !== 'active') finishStats(next);
@@ -75,13 +99,14 @@ export const scamGameService = {
     } catch (error) {
       // Stop/replay may have replaced this reservation: never clear someone else's token or state.
       if (error instanceof AppError && error.code === 'SCAM_STATE_CHANGED') throw error;
+      if (matchExpired(reserved.match!)) { await settled(userId); throw conflict(); }
       const released = copy(reserved); released.pending = null;
-      await scamGameRepository.cas(reserved, released);
+      if (!(await scamGameRepository.cas(reserved, released, matchDeadline(reserved.match!)))) await settled(userId);
       throw error;
     }
   },
   async verify(userId: Types.ObjectId, op: ScamOperation, stage: ScamStage, value: string) {
-    const p = await scamGameRepository.get(userId), hash = fingerprint('verify', op, [stage, value]);
+    const p = await settled(userId), hash = fingerprint('verify', op, [stage, value]);
     if (replay(p, op, hash)) return view(p);
     check(p, op);
     if (p.pending) throw busy();
@@ -106,7 +131,7 @@ export const scamGameService = {
     return commit(p, next);
   },
   async stop(userId: Types.ObjectId, op: ScamOperation) {
-    const p = await scamGameRepository.get(userId), hash = fingerprint('stop', op, null);
+    const p = await settled(userId), hash = fingerprint('stop', op, null);
     if (replay(p, op, hash)) return view(p);
     check(p, op);
     const next = copy(p);

@@ -17,6 +17,7 @@ export interface ScamMatch {
   id: string;
   character: Pick<ScamCharacter, 'id' | 'name' | 'emoji' | 'description'> & Partial<Pick<ScamCharacter, 'persona' | 'opening'>>;
   status: ScamStatus;
+  endReason?: 'timeout';
   stage: ScamStage;
   score: number;
   bonus?: number; // Legacy terminal matches have no bonus.
