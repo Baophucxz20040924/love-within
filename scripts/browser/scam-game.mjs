@@ -11,8 +11,8 @@ const extraScenarios = [
     { id: 'identityCode', label: 'CCCD giả lập', points: 200, inputKind: 'text', format: 'Mã bắt đầu bằng SIM-ID-', value: 'SIM-ID-AB12' },
     { id: 'dob', label: 'Ngày sinh', points: 400, inputKind: 'date', format: 'YYYY-MM-DD hoặc DD/MM/YYYY', value: '1995-02-20' },
   ] },
-  { id: 'social', title: 'Khôi phục mạng xã hội hư cấu', goal: 'Xác nhận handle và hai câu trả lời hư cấu.', steps: [
-    { id: 'account', label: 'Handle', points: 100, inputKind: 'text', format: 'Nhập đúng giá trị', value: 'SIM-USER-AB12' },
+  { id: 'social', title: 'Khôi phục mạng xã hội hư cấu', goal: 'Xác nhận tài khoản và hai câu trả lời hư cấu.', steps: [
+    { id: 'account', label: 'Tài khoản', points: 100, inputKind: 'text', format: 'Nhập đúng giá trị', value: 'SIM-USER-AB12' },
     { id: 'recoveryQuestion1', label: 'Thú cưng của bạn tên gì?', points: 200, inputKind: 'text', format: 'Giữ dấu; không phân biệt hoa/thường và khoảng trắng', value: 'Mèo Mây A123' },
     { id: 'recoveryQuestion2', label: 'Biệt danh thời nhỏ của bạn là gì?', points: 300, inputKind: 'text', format: 'Giữ dấu; không phân biệt hoa/thường và khoảng trắng', value: 'Bé Nắng B456' },
   ] },
@@ -28,6 +28,17 @@ if (process.argv.includes('--validate')) {
   let browser, page, stage, closing = false;
   const until = async (fn, message) => { const start = Date.now(); while (!await fn()) { assert(Date.now() - start < 12000, message); await new Promise(r => setTimeout(r, 40)); } };
   const shot = async name => { await h.noOverflow(page); await h.screenshot(page, name, { fullPage: false }); inventory.push(`${name}.png`); };
+  const compact = async () => {
+    await page.evaluate(() => window.scrollTo(0, 0));
+    const nav = await page.locator('.bottom-nav').boundingBox();
+    for (const selector of ['.scam-character h2', '.scam-emotion', '.scam-summary', '.scam-objective', '.scam-messages', '.scam-composer', '.scam-secret']) {
+      const box = await page.locator(selector).boundingBox();
+      assert(box && box.y >= 0 && box.y + box.height <= nav.y + 1, `${selector} fits above navigation: ${JSON.stringify(box)} / ${nav.y}`);
+    }
+    assert(!/AI nhập vai|Handle/.test(await page.locator('.scam-page').innerText()));
+    const height = await page.evaluate(() => ({ document: document.documentElement.scrollHeight, viewport: innerHeight, page: document.querySelector('.scam-page').getBoundingClientRect().height, main: document.querySelector('.app-content').getBoundingClientRect().height }));
+    assert(height.document <= height.viewport + 1, `normal play needs no page scroll: ${JSON.stringify(height)}`);
+  };
   try {
     browser = await h.openBrowser();
     for (const [device, viewport] of [['mobile', { width: 360, height: 780 }], ['desktop', { width: 1280, height: 800 }]]) {
@@ -145,7 +156,7 @@ if (process.argv.includes('--validate')) {
       assert.match(await emotion.innerText(), /Cảm xúc:.*Bình thản/s);
       assert.equal(await page.locator('.scam-meter').count(), 1); assert.equal(await page.getByRole('progressbar', { name: 'Tin tưởng' }).count(), 1);
       assert.equal(await page.locator('.scam-warning').count(), 0); assert(!await page.locator('.scam-page').innerText().then(t => t.includes('Cảnh giác')));
-      await page.locator('.scam-character').scrollIntoViewIfNeeded(); await shot(`${device}-chat-header`); checks.push(stage);
+      await compact(); await shot(`${device}-chat-header`); checks.push(stage);
       const composer = page.getByRole('textbox', { name: 'Tin nhắn cho nhân vật', exact: true });
       const send = async text => { await composer.fill(text); await page.getByRole('button', { name: 'Gửi', exact: true }).click(); await until(async () => !await page.locator('.scam-outgoing').count() && await page.locator('.scam-stage').innerText().then(v => v.includes(`${s.match.turns} lượt`)), 'send completes'); };
       stage = `${device}:provider-error-draft-uncertain-reconcile`;
@@ -164,36 +175,37 @@ if (process.argv.includes('--validate')) {
       await page.reload(); await composer.waitFor(); assert.match(await emotion.innerText(), /Tức giận/, 'reload retains canonical emotion');
       await send('Mình xin lỗi, mình sẽ nghe bạn nói hết.'); assert.match(await emotion.innerText(), /Vui vẻ/);
       await page.locator('.scam-character').scrollIntoViewIfNeeded(); await shot(`${device}-emotion-recovered`); checks.push(stage);
-      stage = `${device}:accordion-scroll-keyboard-and-wrong-secret`;
-      const handle = page.locator('.scam-drawer__handle');
-      await handle.scrollIntoViewIfNeeded();
-      const box = await handle.boundingBox(); await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2); await page.mouse.down(); await page.mouse.move(box.x + box.width / 2, box.y - 55, { steps: 8 }); await page.mouse.up();
-      assert.equal(await handle.getAttribute('aria-expanded'), 'false', 'drag does not open confirmation');
-      await handle.click(); assert.equal(await handle.getAttribute('aria-expanded'), 'true');
-      const panelStyle = await page.locator('.scam-drawer__body').evaluate(el => ({ overflow: getComputedStyle(el).overflowY, maxHeight: getComputedStyle(el).maxHeight }));
-      assert.equal(panelStyle.overflow, 'visible'); assert.equal(panelStyle.maxHeight, 'none');
-      const composerTop = await composer.evaluate(el => el.getBoundingClientRect().top + scrollY);
-      assert(composerTop < await handle.evaluate(el => el.getBoundingClientRect().top + scrollY), 'panel expands below composer');
-      await page.locator('.scam-bubble--assistant').last().evaluate(el => { const range = document.createRange(); range.selectNodeContents(el); getSelection().removeAllRanges(); getSelection().addRange(range); });
-      assert.equal(await handle.getAttribute('aria-expanded'), 'true', 'selecting chat text does not toggle panel');
-      await page.mouse.wheel(0, 240); assert.equal(await handle.getAttribute('aria-expanded'), 'true', 'scrolling does not toggle panel');
+      stage = `${device}:compact-steps-keyboard-and-wrong-secret`;
+      const selectStep = id => page.locator(`.scam-progress button[data-stage="${id}"]`);
+      const verifyButton = page.getByRole('button', { name: 'Xác nhận', exact: true });
       const account = page.getByLabel('Tài khoản', { exact: true });
       await account.focus(); await page.keyboard.insertText(props.account);
-      assert.equal(await account.inputValue(), props.account); assert.equal(await handle.getAttribute('aria-expanded'), 'true', 'inserted text does not toggle panel');
-      await account.fill('sai'); await page.getByRole('button', { name: 'Xác nhận Tài khoản', exact: true }).click(); await page.locator('.scam-send-feedback').waitFor(); assert.equal(await account.inputValue(), 'sai');
-      await until(() => page.getByRole('button', { name: 'Xác nhận Tài khoản', exact: true }).isEnabled(), 'wrong verification reconciles');
-      await handle.focus(); await page.keyboard.press('Enter'); assert.equal(await handle.getAttribute('aria-expanded'), 'false'); await handle.press('Space'); assert.equal(await handle.getAttribute('aria-expanded'), 'true'); assert.equal(await account.inputValue(), 'sai');
-      await shot(`${device}-drawer-error`); checks.push(stage);
+      await selectStep('password').focus(); await page.keyboard.press('Enter');
+      const password = page.getByLabel('Password', { exact: true });
+      await password.fill('future draft'); assert(await verifyButton.isDisabled());
+      await selectStep('account').focus(); await page.keyboard.press('Space');
+      assert.equal(await account.inputValue(), props.account);
+      await selectStep('password').click(); assert.equal(await password.inputValue(), 'future draft');
+      await selectStep('account').click();
+      await page.locator('.scam-bubble--assistant').last().evaluate(el => { const range = document.createRange(); range.selectNodeContents(el); getSelection().removeAllRanges(); getSelection().addRange(range); });
+      assert.equal(await page.locator('.scam-secret').count(), 1, 'selection does not switch forms');
+      await account.fill('sai'); await verifyButton.click(); await page.locator('.scam-send-feedback').waitFor(); assert.equal(await account.inputValue(), 'sai');
+      await until(() => verifyButton.isEnabled(), 'wrong verification reconciles');
+      await selectStep('otp').click(); await selectStep('account').click(); assert.equal(await account.inputValue(), 'sai');
+      await shot(`${device}-confirmation-error`); checks.push(stage);
       assert.equal(operations.filter(o => o.device === device && o.action === 'board').length, 0, 'active play never fetched leaderboard');
       assert.equal(await page.getByRole('button', { name: 'Bảng xếp hạng', exact: true }).count(), 0);
       assert.equal(await page.locator('.scam-retention').count(), 0);
       stage = `${device}:three-stages-win600-board`;
+      await page.getByRole('button', { name: 'Đồng bộ ván', exact: true }).click();
+      await page.locator('.scam-send-feedback').waitFor({ state: 'hidden' });
       for (const [index, label] of ['Tài khoản', 'Password', 'OTP'].entries()) {
         if (index) await send(`chia sẻ đạo cụ ${label}`);
         await page.getByLabel(label, { exact: true }).fill(props[stages[index]]);
         if (index === 1) { await page.getByRole('checkbox', { name: 'Hiện password' }).check(); assert.equal(await page.getByLabel('Password', { exact: true }).getAttribute('type'), 'text'); assert.equal(await page.getByLabel('Password', { exact: true }).inputValue(), props.password, 'password toggle preserves draft'); }
         if (index === 2) assert.equal(await page.getByLabel('OTP', { exact: true }).inputValue(), '001234');
-        await page.getByRole('button', { name: `Xác nhận ${label}`, exact: true }).click();
+        await compact(); await shot(`${device}-bank-${stages[index]}`);
+        await page.getByRole('button', { name: 'Xác nhận', exact: true }).click();
         await until(() => page.locator('.scam-stage').innerText().then(v => v.startsWith(`${[100, 300, 600][index]}/600`)), 'stage points');
       }
       await page.getByText('Bạn đã thắng!', { exact: true }).waitFor(); await page.getByRole('button', { name: 'Bảng xếp hạng', exact: true }).click(); await page.locator('.scam-board__row').waitFor(); assert.match(await page.locator('.scam-board__row').innerText(), /600.*điểm/s); assert.match(await page.locator('.scam-board__row').innerText(), /1 ván thắng/); await shot(`${device}-leaderboard`); checks.push(stage);
@@ -201,8 +213,7 @@ if (process.argv.includes('--validate')) {
       stage = `${device}:ai-hangup-partial-score-loss`;
       await send('#continue-low-trust'); assert.equal(s.match.status, 'active'); assert.equal(s.match.trust, 0); assert(await composer.isVisible());
       await send('chia sẻ tài khoản'); await send('kể tiếp'); // Trust60, but no forced loss or auto-win.
-      await page.locator('.scam-drawer__handle').click();
-      await account.fill(props.account); await page.getByRole('button', { name: 'Xác nhận Tài khoản', exact: true }).click();
+      await account.fill(props.account); await page.getByRole('button', { name: 'Xác nhận', exact: true }).click();
       await until(() => page.locator('.scam-stage').innerText().then(v => v.startsWith('100/600')), 'partial stage points');
       await send('#hangup'); await page.getByText('Nhân vật đã ngắt liên lạc.', { exact: true }).waitFor();
       await page.getByText('Nhân vật đã ngắt liên lạc. Ván kết thúc.', { exact: false }).waitFor();
@@ -211,7 +222,7 @@ if (process.argv.includes('--validate')) {
       assert.equal(s.match.score, 100); assert.equal(s.bestScore, 600); assert.equal(s.wins, 1); assert.deepEqual(s.match.revealed, ['account']);
       assert(!s.match.messages.some(b => b.text.includes(props.password))); assert.match(await page.locator('.scam-result').innerText(), /100\/600.*1 ván thắng/s);
       assert.equal(await page.locator('.scam-progress .is-done').count(), 1);
-      assert.equal(await page.getByRole('button', { name: 'Xác nhận Password', exact: true }).isDisabled(), true);
+      assert.equal(await page.getByRole('button', { name: 'Xác nhận', exact: true }).isDisabled(), true);
       await page.locator('.scam-result').scrollIntoViewIfNeeded(); await shot(`${device}-loss`); checks.push(stage);
       stage = `${device}:reload-pending-stop-replay`;
       await page.getByRole('button', { name: 'Chơi lại · Nhân vật mới', exact: true }).click();
@@ -223,9 +234,8 @@ if (process.argv.includes('--validate')) {
       assert.equal(await composer.inputValue(), ''); assert.match(await page.locator('.scam-outgoing').innerText(), /#held/);
       assert.match(await emotion.innerText(), /Khó chịu/, 'pending turn keeps previous emotion');
       await composer.fill('nháp tiếp theo'); await page.locator('.scam-outgoing').scrollIntoViewIfNeeded(); await shot(`${device}-optimistic-pending`);
-      await page.locator('.scam-drawer__handle').click();
-      for (const label of ['Tài khoản', 'Password', 'OTP']) { const field = page.getByLabel(label, { exact: true }); assert.equal(await field.getAttribute('readonly'), null); await field.fill('prefill'); }
-      assert(await page.getByRole('button', { name: 'Xác nhận OTP', exact: true }).isDisabled());
+      for (const [i, label] of ['Tài khoản', 'Password', 'OTP'].entries()) { await selectStep(stages[i]).click(); const field = page.getByLabel(label, { exact: true }); assert.equal(await field.getAttribute('readonly'), null); await field.fill('prefill'); }
+      assert(await page.getByRole('button', { name: 'Xác nhận', exact: true }).isDisabled());
       await page.reload(); await page.getByText('Đang chờ kết quả.', { exact: false }).waitFor();
       assert.equal(await page.locator('.scam-outgoing[data-status="pending"]').count(), 1, 'reload reconstructs pending bubble');
       assert.match(await emotion.innerText(), /Khó chịu/);
@@ -243,19 +253,41 @@ if (process.argv.includes('--validate')) {
       assert(inputBox.width >= (device === 'mobile' ? 180 : 400), 'composer keeps usable width');
       assert(inputBox.y >= 0 && inputBox.y + inputBox.height <= navBox.y && stopBox.y + stopBox.height <= navBox.y, 'composer and stop remain reachable above navigation');
       await shot(`${device}-composer`); checks.push(stage);
+      stage = `${device}:small-viewport-large-text-drafts`;
+      await composer.fill('Giữ nháp khi đổi kích thước');
+      await account.fill('SIM-resize-draft');
+      for (const size of [{ width: 320, height: 780 }, { width: 360, height: 460 }]) {
+        await page.setViewportSize(size); await h.noOverflow(page);
+        await verifyButton.evaluate(el => el.scrollIntoView({ block: 'center', behavior: 'instant' }));
+        const answerBox = await verifyButton.boundingBox(), navigation = await page.locator('.bottom-nav').boundingBox();
+        assert(answerBox.y >= 0 && answerBox.y + answerBox.height <= navigation.y, 'verification reachable at small viewport');
+        assert.equal(await account.inputValue(), 'SIM-resize-draft');
+        assert.equal(await composer.inputValue(), 'Giữ nháp khi đổi kích thước');
+        await shot(`${device}-resize-${size.width}-${size.height}`);
+      }
+      await page.setViewportSize(viewport);
+      await page.locator('.scam-page').evaluate(el => { el.style.zoom = '2'; });
+      await h.noOverflow(page);
+      await verifyButton.evaluate(el => el.scrollIntoView({ block: 'center', behavior: 'instant' }));
+      const zoomBox = await verifyButton.boundingBox(), zoomNav = await page.locator('.bottom-nav').boundingBox();
+      assert(zoomBox.y >= 0 && zoomBox.y + zoomBox.height <= zoomNav.y, `zoomed verification reachable: ${JSON.stringify({ zoomBox, zoomNav, scroll: await page.evaluate(() => ({ y: scrollY, height: document.documentElement.scrollHeight })) })}`);
+      assert.equal(await account.inputValue(), 'SIM-resize-draft');
+      await shot(`${device}-zoom200`);
+      await page.locator('.scam-page').evaluate(el => { el.style.zoom = ''; });
+      await composer.fill(''); await account.fill(''); await compact(); checks.push(stage);
       for (const scenario of extraScenarios) {
         stage = `${device}:${scenario.id}-form-reload-wrong-win`;
         s.match = { ...s.match, id: randomUUID(), status: 'active', stage: scenario.steps[0].id, score: 0, revealed: [], messages: [], endedAt: null,
           scenario: { ...scenario, version: 1, maxScore: 600, steps: scenario.steps.map(({ value, ...step }) => step) } };
         s.revision++;
         await page.reload(); await composer.waitFor();
-        await page.locator('.scam-drawer__handle').click();
-        assert.equal(await page.locator('.scam-secret').count(), scenario.steps.length);
+          assert.equal(await page.locator('.scam-secret').count(), 1);
         assert.equal(await page.locator('.scam-progress li').count(), scenario.steps.length);
         let score = 0;
         for (const step of scenario.steps) {
           const field = page.getByLabel(step.label, { exact: true });
-          const verify = page.getByRole('button', { name: `Xác nhận ${step.label}`, exact: true });
+          await field.waitFor(); await compact(); await shot(`${device}-${scenario.id}-${step.id}-compact`);
+          const verify = page.getByRole('button', { name: 'Xác nhận', exact: true });
           await field.fill('sai'); await verify.click();
           await page.locator('.scam-send-feedback').waitFor(); await until(() => verify.isEnabled(), 'wrong answer recovery');
           assert.equal(await field.inputValue(), 'sai');
@@ -273,7 +305,7 @@ if (process.argv.includes('--validate')) {
     const budgets = new Map(); for (const f of faults) for (const type of ['http', 'console']) { const k = `${f.device}|${type}|${f.path}|${f.status}`; budgets.set(k, (budgets.get(k) ?? 0) + 1); }
     const unexpected = errors.filter(e => { const match = e.type === 'console' && /^Failed to load resource: the server responded with a status of (\d{3}) \([^)]*\)$/.exec(e.message); const k = `${e.device}|${e.type}|${e.path}|${e.status ?? (match ? Number(match[1]) : 0)}`; if ((budgets.get(k) ?? 0) > 0) { budgets.set(k, budgets.get(k) - 1); return false; } return true; });
     assert.deepEqual(unexpected, []); assert.deepEqual([...budgets].filter(([, n]) => n), []);
-    await h.writeResult({ ok: true, mockOnly: true, checks, errors, faults, blocked, inventory, operations, limitations: ['Synthetic intercepted UI only; no Mongo, real provider, native device or AI persona quality.', 'Accordion gestures/keyboard use Chromium automation at both viewports; not physical touchscreen or native clipboard evidence.'] });
+    await h.writeResult({ ok: true, mockOnly: true, checks, errors, faults, blocked, inventory, operations, limitations: ['Synthetic intercepted UI only; no Mongo, real provider, native device or AI persona quality.', 'Compact layout/keyboard use Chromium automation; viewport resizing is not native mobile keyboard or Safari evidence.'] });
     console.log(`PASS ${checks.length} scam UI checks; evidence: ${h.evidenceDir}`);
   } catch (e) {
     await h.screenshot(page, 'failure', { fullPage: false }).catch(() => {});
