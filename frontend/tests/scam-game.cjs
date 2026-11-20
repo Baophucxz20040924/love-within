@@ -19,6 +19,14 @@ function nodes(n) { return !n || typeof n !== 'object' ? [] : [n, ...[n.props?.c
 function text(n) { return !n || typeof n !== 'object' ? String(n ?? '') : [n.props?.children].flat(Infinity).map(text).join(''); }
 function reset() { effects.forEach(e => e.cleanup?.()); states = []; refs = []; effects = []; pendingEffects = []; }
 function render(fn, props) { si = ri = ei = 0; const tree = fn(props); pendingEffects.splice(0).forEach(fn => fn()); return tree; }
+let monotonic = 0, clockTick, clockCleared = 0;
+const { GameClock } = load('features/scam/GameClock.tsx', { react, 'react/jsx-runtime': { jsx, jsxs: jsx } }, {
+  performance: { now: () => monotonic }, window: { setInterval(fn) { clockTick = fn; return 1; }, clearInterval() { clockCleared++; } },
+});
+assert(text(render(GameClock, { until: 900000 })).includes('15:00'));
+monotonic = 899001; clockTick(); assert(text(render(GameClock, { until: 900000 })).includes('0:01'));
+monotonic = 910000; clockTick(); assert(text(render(GameClock, { until: 900000 })).includes('0:00'));
+reset(); assert.equal(clockCleared, 1);
 const calls = [];
 const wrappers = load('features/scam/api.ts', { '../../lib/apiClient': { apiRequest: (...args) => calls.push(args) } });
 const signal = new AbortController().signal, operation = { operationId: 'op', expectedRevision: 3, matchId: 'match' };
@@ -112,7 +120,7 @@ async function tests() {
   const page = load('features/scam/ScamGamePage.tsx', { '../realtime/verification': { subscribeVerification: () => () => {} }, '../appLock/store': { subscribeAppLock: () => () => {} }, react, 'react/jsx-runtime': { jsx, jsxs: jsx }, 'react-router-dom': { Link: 'Link' },
     '@tanstack/react-query': { useQueryClient: () => ({ invalidateQueries: async () => {} }) }, '../auth/AuthContext': { useAuth: () => ({ me: { user: { id: 'u' } } }) },
     '../../lib/apiClient': { ApiRequestError, currentAccessEpoch: () => epoch }, '../../lib/tokenStore': { tokenStore: { generation: () => generation } },
-    './GameEffect': { GameEffect: 'Effect' }, './presentation': presentation,
+    './GameEffect': { GameEffect: 'Effect' }, './GameClock': { GameClock: 'Clock' }, './presentation': presentation,
     './scenarios': scenarios, './emotions': emotions, './outgoing': outgoingHelpers, './api': { scamApi: api, scamKey: wrappers.scamKey }, './SecretDrawer': { SecretDrawer: 'Drawer', stageLabels: { account: 'Tài khoản', password: 'Password', otp: 'OTP' } }, './ScamLeaderboard': { ScamLeaderboard: 'Board' }, './scam.css': {},
   }, { document: { visibilityState: 'visible' }, window: { confirm: () => true, matchMedia: () => ({ matches: true }) } });
   const boundary = page.ScamGamePage(); const room = boundary.type, roomProps = boundary.props;

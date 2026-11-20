@@ -34,6 +34,16 @@ The game has compact44px sync/stop buttons and a native character-details ❕ di
 
 Stage success uses10 reused, locally drawn SVG notes and transform/opacity CSS; final success adds the canonical bonus label in the same burst. Confirmed AI hang-up uses6 smoke pieces and a crack; stop/network errors do not masquerade as loss. The overlay ignores pointer input, lasts at most1.8s, honors reduced motion with static feedback, and is hidden on tab/access/session/match changes. Reload/manual synchronization does not replay old rewards. No third-party animation runtime, audio or asset download is added. These bounds are implementation properties, not measured phone FPS/CPU/RAM guarantees.
 
+## Fifteen-minute conversation deadline
+
+Every active match expires15 minutes after its original `startedAt`, including existing active matches. Reload/disconnect does not reset it; terminal history is unchanged. Invalid timestamps fail closed. The server sends elapsed/remaining seconds in trusted AI context on each attempt and caps the provider timeout/retry budget by the match deadline. The model can end earlier, but cannot extend the deadline or award progress because time is running out.
+
+State/action requests settle expired matches through revision CAS: `lost` with `endReason: timeout`, partial money retained, no bonus/win, pending cleared and private context removed via `finishStats`. Stats update once. Writes that continue/finish an active match also require database `$$NOW` before its deadline; late AI replies/errors cannot revive the match. No per-match server timer or database sweep is installed: an abandoned match materializes its expired state on the next request, not necessarily at the exact wall-clock instant while all clients are closed. This predicate is offline/mock tested, not live-Mongo verified.
+
+Owner DTOs include `serverNow` and `match.expiresAt`. A small client countdown uses a monotonic clock between canonical snapshots, without second-by-second API polling. At zero it blocks new gameplay and synchronizes; offline state says it is awaiting synchronization rather than inventing a result. Visible/resume rechecks server state, and access/unmount fences clean timers. Expiry is labeled separately from an AI hang-up and does not trigger a reward effect.
+
+Prompt context increases the synthetic initial selected-profile cap from8500 to8800 characters; this is a bounded context addition, not a token-cost reduction. No real provider behavior or physical-device timing guarantee is implied.
+
 ## Local test
 
 Use the existing local development setup, with Mongo URI `mongodb://127.0.0.1:27017/lookwithin_dev`. Inspect ports4000/4001/5173 before starting; never stop a process you do not own. Do not use the legacy port-killing dev-server helper. This feature does not need a new dependency or infrastructure service.

@@ -44,7 +44,7 @@ if (process.argv.includes('--validate')) {
     for (const [device, viewport] of [['mobile', { width: 360, height: 780 }], ['desktop', { width: 1280, height: 800 }]]) {
       const f = fixtures(); let s = initial(), games = 0, fail = false, uncertain = false, held = null;
       const bubble = (role, text) => ({ id: randomUUID(), role, text });
-      const json = (route, data) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data }) });
+      const json = (route, data) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: data === s ? { ...s, serverNow: Date.now() } : data }) });
       const context = await browser.newContext({ viewport, locale: 'vi-VN', timezoneId: 'Asia/Ho_Chi_Minh', reducedMotion: 'reduce', serviceWorkers: 'block' });
       await context.addInitScript(() => { localStorage.setItem('lw.sessionGeneration', JSON.stringify({ id: 'synthetic-scam', tokens: { accessToken: 'synthetic', refreshToken: 'synthetic' } })); localStorage.setItem('lw.space', 'friends'); });
       await context.routeWebSocket('**/*', socket => socket.onMessage(() => {}));
@@ -67,7 +67,14 @@ if (process.argv.includes('--validate')) {
             // Hold the synthetic stream open. An immediately ended SSE body triggers repeated
             // access revalidation and interrupts unrelated form actions at arbitrary times.
             if (p === '/api/realtime') return;
-            if (p === '/api/friends/scam/state') { operations.push({ device, action: 'state', revision: s.revision }); return json(route, s); }
+            if (p === '/api/friends/scam/state') {
+              if (s.match?.status === 'active' && Date.now() >= s.match.expiresAt) {
+                s.match.status = 'lost'; s.match.endReason = 'timeout'; s.match.endedAt = new Date(s.match.expiresAt).toISOString();
+                s.pending = null; s.revision++; s.bestScore = Math.max(s.bestScore, s.match.score);
+                s.match.messages.push(bubble('system', 'Hết 15 phút. Cuộc trò chuyện đã kết thúc.'));
+              }
+              operations.push({ device, action: 'state', revision: s.revision }); return json(route, s);
+            }
             if (p === '/api/friends/scam/leaderboard') {
               assert(s.match && s.match.status !== 'active', 'no board fetch before terminal match');
               operations.push({ device, action: 'board', status: s.match.status });
@@ -80,7 +87,7 @@ if (process.argv.includes('--validate')) {
             const action = p.split('/').at(-1); operations.push({ device, action, revision: input.expectedRevision });
             if (action === 'start') {
               assert.equal(input.consent, true); games++;
-              s.match = { id: randomUUID(), character: { id: games % 2 ? 'alice' : 'holmes', name: games % 2 ? 'Alice' : 'Sherlock Holmes', emoji: games % 2 ? '🐇' : '🔎', description: 'Nhân vật hư cấu tò mò, biết hỏi lại.' }, status: 'active', stage: 'account', score: 0, trust: 30, emotion: 'neutral', turns: 0, revealed: [], messages: [bubble('assistant', 'Bạn tìm tôi vì chuyện gì?')], startedAt: fixedTime, endedAt: null };
+              s.match = { id: randomUUID(), character: { id: games % 2 ? 'alice' : 'holmes', name: games % 2 ? 'Alice' : 'Sherlock Holmes', emoji: games % 2 ? '🐇' : '🔎', description: 'Nhân vật hư cấu tò mò, biết hỏi lại.' }, status: 'active', stage: 'account', score: 0, trust: 30, emotion: 'neutral', turns: 0, revealed: [], messages: [bubble('assistant', 'Bạn tìm tôi vì chuyện gì?')], startedAt: new Date().toISOString(), expiresAt: Date.now() + 900000, endedAt: null };
             } else {
               assert.equal(input.matchId, s.match.id);
               if (action === 'message') {
@@ -302,6 +309,11 @@ if (process.argv.includes('--validate')) {
       await page.locator('.scam-page').evaluate(el => { el.style.zoom = '2'; });
       await h.noOverflow(page);
       await verifyButton.evaluate(el => el.scrollIntoView({ block: 'center', behavior: 'instant' }));
+      await until(async () => {
+        await verifyButton.evaluate(el => el.scrollIntoView({ block: 'center', behavior: 'instant' }));
+        const box = await verifyButton.boundingBox();
+        return box.y >= 0 && box.y + box.height <= page.viewportSize().height;
+      }, 'zoomed confirmation settles inside viewport');
       const zoomBox = await verifyButton.boundingBox(), zoomNav = ({ y: page.viewportSize().height });
       assert(zoomBox.y >= 0 && zoomBox.y + zoomBox.height <= zoomNav.y, `zoomed verification reachable: ${JSON.stringify({ zoomBox, zoomNav, scroll: await page.evaluate(() => ({ y: scrollY, height: document.documentElement.scrollHeight })) })}`);
       assert.equal(await account.inputValue(), 'SIM-resize-draft');
@@ -332,6 +344,25 @@ if (process.argv.includes('--validate')) {
         await page.getByText('Bạn đã thắng!', { exact: true }).waitFor();
         assert.equal(s.match.score, 690); assert.match(await page.locator('.scam-result').innerText(), /May mắn \+90\$/); checks.push(stage);
       }
+      stage = `${device}:deadline-idle-and-pending`;
+      for (const pending of [false, true]) {
+        const end = Date.now() + 4000;
+        s.match = { ...s.match, id: randomUUID(), status: 'active', endReason: undefined, score: 100, bonus: 0,
+          stage: 'password', scenario: undefined, revealed: ['account'], messages: [bubble('system', 'Đã xác nhận Tài khoản. +100$.')],
+          startedAt: new Date(end - 900000).toISOString(), expiresAt: end, endedAt: null };
+        s.revision++;
+        s.pending = pending ? { operationId: randomUUID(), expectedRevision: s.revision - 1, expiresAt: end + 120000, text: 'held at deadline' } : null;
+        await page.reload(); await page.locator('.scam-clock').waitFor();
+        assert.match(await page.locator('.scam-clock').innerText(), /Còn 0:0[0-4]/, 'reload preserves remaining time');
+        await shot(`${device}-deadline-${pending ? 'pending' : 'idle'}`);
+        await page.locator('.scam-result').getByText('Hết 15 phút. Cuộc trò chuyện đã kết thúc.', { exact: true }).waitFor();
+        assert.equal(await composer.count(), 0); assert.equal(s.match.score, 100); assert.equal(s.match.bonus, 0);
+        assert.equal(await page.locator('.scam-effect').count(), 0);
+        await shot(`${device}-timeout-${pending ? 'pending' : 'idle'}`);
+        await page.reload(); await page.locator('.scam-result--lost').waitFor();
+        assert.equal(await page.locator('.scam-effect').count(), 0);
+      }
+      checks.push(stage);
       closing = true; await context.close(); closing = false;
     }
     assert.deepEqual(blocked, []);

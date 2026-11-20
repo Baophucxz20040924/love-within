@@ -8,6 +8,7 @@ export interface ScamScenario {
 export interface ScamOperation { operationId: string; expectedRevision: number; matchId?: string }
 export interface ScamState {
   revision: number;
+  serverNow?: number;
   bestScore: number;
   wins: number;
   mock: boolean;
@@ -17,6 +18,8 @@ export interface ScamState {
     id: string;
     character: { id: string; name: string; emoji: string; description: string };
     status: 'active' | 'won' | 'lost' | 'stopped';
+    expiresAt?: number;
+    endReason?: 'timeout';
     stage: ScamStage;
     scenario?: ScamScenario;
     score: number;

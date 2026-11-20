@@ -43,7 +43,8 @@ async function tests() {
     sample.runtimeContext.profile = { id: c.id, name: c.name, persona: c.persona };
     sample.runtimeContext.scene = c.scene;
     const content = ai.scamPrompt(sample, 'hi')[0].content;
-    assert(content.length < 8500, `bounded selected profile: ${c.name}`);
+    assert(content.length < 8800, // Includes server time context; previous cap8500.
+ `bounded selected profile: ${c.name}`);
     for (const other of roster.filter(x => x.id !== c.id)) assert(!content.includes(other.persona));
   }
   const decision = { emotion: 'curious', reply: 'Tôi muốn nghe thêm.', trustDelta: 12, offerCurrentSecret: false, endConversation: false, contextUpdate: { summary: 'ngắn', facts: [], openThreads: [] } };
@@ -116,6 +117,8 @@ async function tests() {
     'utils/logger.ts': { logger: { warn() {} } },
   })('repositories/scamGame.repository.ts').scamGameRepository;
   await repo.cas({ _id: id(1), revision: 7 }, { revision: 100 }); assert.equal(filter.revision, 7); assert.equal(replacement.revision, 8);
+  await repo.cas({ _id: id(1), revision: 7 }, { revision: 100 }, 900000);
+  assert.equal(filter.$expr.$lt[0], '$$NOW'); assert.equal(filter.$expr.$lt[1].getTime(), 900000);
   await repo.leaderboard(id(1), [String(id(2))], 20, { score: 300, wins: 2, id: String(id(3)) });
   assert.equal(String(pipeline[0].$match._id.$nin[0]), String(id(2))); assert.equal(pipeline[0].$match.completed.$gt, 0);
   assert.equal(pipeline[3].$lookup.foreignField, 'pairKey');

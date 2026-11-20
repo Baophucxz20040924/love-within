@@ -2,6 +2,7 @@ import { randomInt, randomUUID } from 'node:crypto';
 import { answerPattern, currentStep, generateScenario, publicScenario, scenarioFor, type ScenarioId } from './scenarios.js';
 import type { ScamMatch, ScamMemory, ScamPlayer, ScamRuntimeContext, ScamStage } from '../../models/ScamGamePlayer.js';
 import { SCAM_CHARACTERS } from './characters.js';
+import { matchDeadline } from './time.js';
 import { emotionFor, isScamEmotion, type ScamEmotion } from './emotions.js';
 
 export const STAGES: readonly ScamStage[] = ['account', 'password', 'otp'];
@@ -107,10 +108,10 @@ export function finishStats(player: ScamPlayer): void {
 /** Explicit allowlist: never serialize raw player/match/pending data. */
 export function playerView(player: ScamPlayer, mock: boolean) {
   const m = player.match;
-  return { revision: player.revision, bestScore: player.bestScore, wins: player.wins, mock,
+  return { revision: player.revision, bestScore: player.bestScore, wins: player.wins, mock, serverNow: Date.now(),
     pending: player.pending ? { operationId: player.pending.operationId, expectedRevision: player.pending.expectedRevision, expiresAt: player.pending.expiresAt, text: player.pending.text } : null,
     recentOperations: player.receipts.map(r => r.operationId),
     match: m ? { id: m.id, character: { id: m.character.id, name: m.character.name, emoji: m.character.emoji, description: m.character.description },
-      status: m.status, stage: m.stage, scenario: publicScenario(m), score: m.score, bonus: m.bonus ?? 0, trust: m.trust, emotion: emotionFor(m),
+      status: m.status, ...(m.endReason === 'timeout' ? { endReason: m.endReason } : {}), expiresAt: matchDeadline(m), stage: m.stage, scenario: publicScenario(m), score: m.score, bonus: m.bonus ?? 0, trust: m.trust, emotion: emotionFor(m),
       turns: m.turns, revealed: m.revealed, messages: m.messages.map(({ id, role, text, operationId }) => ({ id, role, text, ...(role === 'user' && operationId ? { operationId } : {}) })), startedAt: m.startedAt, endedAt: m.endedAt } : null };
 }
